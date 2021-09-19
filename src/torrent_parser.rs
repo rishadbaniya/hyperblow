@@ -19,34 +19,34 @@ use std::fs;
 
 #[derive(Debug, Deserialize)]
 pub struct FileMeta {
-    announce: Option<String>,
+    pub announce: Option<String>,
     #[serde(rename = "announce-list")]
-    announce_list: Option<Vec<Vec<String>>>,
+    pub announce_list: Option<Vec<Vec<String>>>,
     #[serde(rename = "creation date")]
-    creation_data: Option<i64>,
-    encoding: Option<String>,
-    comment: Option<String>,
+    pub creation_data: Option<i64>,
+    pub encoding: Option<String>,
+    pub comment: Option<String>,
     #[serde(rename = "created by")]
-    created_by: Option<String>,
-    info: Info,
+    pub created_by: Option<String>,
+    pub info: Info,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Info {
-    name: String,
-    length: Option<i64>,
+    pub name: String,
+    pub length: Option<i64>,
     #[serde(rename = "piece length")]
-    piece_length: Option<i64>,
+    pub piece_length: Option<i64>,
     #[serde(with = "serde_bytes")]
-    pieces: Vec<u8>,
-    files: Option<Vec<File>>,
+    pub pieces: Vec<u8>,
+    pub files: Option<Vec<File>>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct File {
-    length: i64,
-    path: Vec<String>,
-    md5sum: Option<String>,
+    pub length: i64,
+    pub path: Vec<String>,
+    pub md5sum: Option<String>,
 }
 
 pub fn parse_file(filePath: &str) -> FileMeta {
