@@ -7,6 +7,8 @@ extern crate serde_derive;
 use std::env;
 use std::fs;
 
+// DataStructure that maps all the data inside of bencode
+// encoded .torrent file into something rust program can use
 #[derive(Debug, Deserialize)]
 struct FileMeta {
     announce: String,
