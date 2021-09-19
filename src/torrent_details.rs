@@ -30,5 +30,12 @@ pub fn spit_details(fileMeta: &FileMeta) {
         }
         println!("Total Files -> {}", totalFiles);
         println!("Total Folders -> {}", allFolders.len());
+    } else {
+        // If the above one doesn't work, it means there is just one file to download
+        // See : https://wiki.theory.org/index.php/BitTorrentSpecification | Info in Multiple File Mode
+        // The code above is for multiple files mode, if it doesnt work then it means
+        // there is just one file
+        println!("Total Files -> 1");
+        println!("Total Folders -> 0");
     }
 }
