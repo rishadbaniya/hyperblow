@@ -1,4 +1,7 @@
-use std::fs;
+use serde_bytes::ByteBuf;
+use sha1::{Digest, Sha1};
+use std::{convert::Infallible, fs};
+
 /// DataStructure that maps all the data inside of bencode
 /// encoded .torrent file into something rust program can use
 ///
@@ -31,7 +34,7 @@ pub struct FileMeta {
     pub info: Info,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Info {
     pub name: Option<String>,
     pub length: Option<i64>,
@@ -42,14 +45,14 @@ pub struct Info {
     pub files: Option<Vec<File>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct File {
     pub length: i64,
     pub path: Vec<String>,
     pub md5sum: Option<String>,
 }
 
-pub fn parse_file(filePath: &str) -> FileMeta {
+pub fn parse_file(filePath: &str) -> (FileMeta, Vec<u8>) {
     // Declared to store all bytes from torrent file
     let torrentFile: Vec<u8>;
 
@@ -64,5 +67,18 @@ pub fn parse_file(filePath: &str) -> FileMeta {
 
     // Decode the bencode format into Rust Custom DataStructure "FileMeta"
     let decoded: FileMeta = serde_bencode::de::from_bytes(&torrentFile).unwrap();
-    decoded
+
+    // Serialize the info section of FileMeta and get all bytes in info field of a torrent file
+    let infoByte = serde_bencode::ser::to_bytes(&decoded.info).unwrap();
+
+    // SHA1 hash of the infoByte i.e info_hash
+    let info_hash = generateInfoHash(&infoByte);
+
+    (decoded, info_hash)
+}
+
+fn generateInfoHash(infoByte: &Vec<u8>) -> Vec<u8> {
+    let mut hasher = Sha1::new();
+    hasher.update(infoByte);
+    hasher.finalize().into_iter().collect()
 }
