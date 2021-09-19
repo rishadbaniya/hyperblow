@@ -33,7 +33,7 @@ pub struct FileMeta {
 
 #[derive(Debug, Deserialize)]
 pub struct Info {
-    pub name: String,
+    pub name: Option<String>,
     pub length: Option<i64>,
     #[serde(rename = "piece length")]
     pub piece_length: Option<i64>,
