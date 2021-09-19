@@ -10,7 +10,6 @@ pub mod torrent_parser;
 
 use std::env;
 use torrent_details::spit_details;
-use torrent_parser::FileMeta;
 
 fn main() {
     // Get all arguments passed in the CLI
@@ -18,6 +17,9 @@ fn main() {
 
     // Get the argument at index 1 from the CLI command "rtourent xyz.torrent"
     // So that we can get the name of the file i.e xyz.torrent
-    let torrentParsed: FileMeta = torrent_parser::parse_file(&args[1]);
+    let (torrentParsed, info_hash) = torrent_parser::parse_file(&args[1]);
+
     spit_details(&torrentParsed);
+
+    println!("{:?}", info_hash);
 }
