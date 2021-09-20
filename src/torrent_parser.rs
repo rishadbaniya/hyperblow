@@ -1,6 +1,5 @@
-use serde_bytes::ByteBuf;
 use sha1::{Digest, Sha1};
-use std::{convert::Infallible, fs};
+use std::fs;
 
 /// DataStructure that maps all the data inside of bencode
 /// encoded .torrent file into something rust program can use
