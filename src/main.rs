@@ -41,6 +41,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let tracker_response: TrackerResponse = serde_bencode::de::from_bytes(&body)?;
     println!("{}", String::from_utf8_lossy(&body));
     println!("{:?}", tracker_response);
+
+    let mut allTrackers: Vec<String> = vec![torrentParsed.announce.clone()];
+
+    if let Some(announce_list) = torrentParsed.announce_list {
+        for tracker in announce_list {
+            allTrackers.push(tracker[0].clone());
+        }
+    }
+
+    println!("All trackers are {:?}", allTrackers);
+
     Ok(())
 }
 
