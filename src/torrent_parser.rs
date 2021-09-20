@@ -21,7 +21,7 @@ use std::fs;
 
 #[derive(Debug, Deserialize)]
 pub struct FileMeta {
-    pub announce: Option<String>,
+    pub announce: String,
     #[serde(rename = "announce-list")]
     pub announce_list: Option<Vec<Vec<String>>>,
     #[serde(rename = "creation date")]
