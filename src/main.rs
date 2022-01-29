@@ -1,5 +1,7 @@
 use std::env;
 
+pub mod ui;
+
 //#![allow(non_snake_case)]
 
 //
@@ -17,9 +19,12 @@ use std::env;
 //use tokio::io::AsyncWriteExt;
 //use torrent_details::spit_details;
 
+// Main thread to work on UI rendering
 fn main() {
+    use ui::ui;
     let _args: Vec<String> = env::args().skip(1).collect();
     println!("{:?}", _args);
+    ui::draw_ui();
 
     //    // Get the argument at index 1 from the CLI command "rtourent xyz.torrent"
     //    // So that we can get the name of the file i.e xyz.torrent
