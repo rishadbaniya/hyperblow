@@ -1,9 +1,0 @@
-total 68
--rw-r--r-- 1 rishadbaniya rishadbaniya   569 Jan 29 19:23 ARCHITECTURE.md
--rw-r--r-- 1 rishadbaniya rishadbaniya 33115 Jan 29 17:13 Cargo.lock
--rw-r--r-- 1 rishadbaniya rishadbaniya   462 Jan 29 17:13 Cargo.toml
--rw-r--r-- 1 rishadbaniya rishadbaniya 11357 Jan 29 17:07 LICENSE
--rw-r--r-- 1 rishadbaniya rishadbaniya   174 Jan 29 17:07 README.md
-drwxr-xr-x 3 rishadbaniya rishadbaniya  4096 Jan 29 18:58 src
-drwxr-xr-x 3 rishadbaniya rishadbaniya  4096 Jan 29 17:14 target
--rw-r--r-- 1 rishadbaniya rishadbaniya     0 Jan 29 19:45 xxxxx.txt
