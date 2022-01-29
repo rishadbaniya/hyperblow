@@ -50,8 +50,8 @@ where
 {
     terminal.draw(|frame| {});
 
-    // Sleeping the thread for 5 secs, so that i can see wtf is getting printed on the screen
-    // using termina.draw on the alternate screen
+    // Sleeping the thread for 5 secs, so that i can see wtf is getting printed
+    // using terminal.draw on the alternate screen
     if cfg!(debug_assertions) {
         std::thread::sleep(Duration::from_millis(5000));
     }
