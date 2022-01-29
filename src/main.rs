@@ -26,11 +26,12 @@ pub mod ui;
 /// implemented
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-fn main() {
+fn main() -> Result<()> {
     use ui::ui;
     let _args: Vec<String> = env::args().skip(1).collect();
     println!("{:?}", _args);
-    ui::draw_ui();
+    ui::draw_ui()?;
+    Ok(())
 
     //    // Get the argument at index 1 from the CLI command "rtourent xyz.torrent"
     //    // So that we can get the name of the file i.e xyz.torrent

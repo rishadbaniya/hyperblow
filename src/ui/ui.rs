@@ -10,17 +10,21 @@ use tui::terminal::Terminal;
 
 use crate::Result;
 
+/// Function that represents the start of the UI rendering of hyperblow
+
 pub fn draw_ui() -> Result<()> {
     // Enabling the raw mode and using alternate screen
+    // Note : Any try to invoke println! or any other method related to stdout "fd" won't work after enabling raw mode,
+    // TODO : Find a way to print something for debugging purposes or else maile "Terminal.draw"
+    // bhitrai😂 print hannu parxa haha
     enable_raw_mode()?;
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Call to start the app and draw the UI
-
-    start_and_draw(&mut terminal)?;
+    // Call to draw draw the UI
+    draw(&mut terminal)?;
 
     // Restoring the terminal
     disable_raw_mode()?;
@@ -34,15 +38,11 @@ pub fn draw_ui() -> Result<()> {
     Ok(())
 }
 
-pub fn start_and_draw<B>(terminal: &mut Terminal<B>) -> Result<()>
+pub fn draw<B>(terminal: &mut Terminal<B>) -> Result<()>
 where
     B: Backend,
 {
     //terminal.draw(|frame| {});
-
-    if cfg!(debug_assertions) {
-        println!("Yo! this is working");
-    }
 
     Ok(())
 }
