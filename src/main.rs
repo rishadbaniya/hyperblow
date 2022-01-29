@@ -20,6 +20,12 @@ pub mod ui;
 //use torrent_details::spit_details;
 
 // Main thread to work on UI rendering
+
+/// Result type that is alias for std::result::Result which wraps a generic
+/// type T with Ok(T) and and works on any "error" type where std::error::Error "trait" is
+/// implemented
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
 fn main() {
     use ui::ui;
     let _args: Vec<String> = env::args().skip(1).collect();
