@@ -1,4 +1,7 @@
+use std::env;
+
 //#![allow(non_snake_case)]
+
 //
 //extern crate serde;
 //extern crate serde_bencode;
@@ -10,13 +13,14 @@
 //pub mod torrent_parser;
 //
 //use hyper::{body::HttpBody, Client};
-//use std::env;
+
 //use tokio::io::AsyncWriteExt;
 //use torrent_details::spit_details;
 
 fn main() {
-    //    // Get all arguments passed in the CLI
-    //    let args: Vec<String> = env::args().collect();
+    let _args: Vec<String> = env::args().skip(1).collect();
+    println!("{:?}", _args);
+
     //    // Get the argument at index 1 from the CLI command "rtourent xyz.torrent"
     //    // So that we can get the name of the file i.e xyz.torrent
     //    let (torrentParsed, info_hashBytes) = torrent_parser::parse_file(&args[1]);
