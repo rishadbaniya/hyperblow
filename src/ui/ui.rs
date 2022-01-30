@@ -1,16 +1,13 @@
-use std::borrow::BorrowMut;
-use std::fmt::format;
 use std::io::stdout;
 use std::time::Duration;
 
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use titik::{Checkbox, FlexBox, Renderer, Widget};
 use tui::backend::{Backend, CrosstermBackend};
-use tui::layout::{Layout, Rect};
+use tui::layout::{Constraint, Layout, Rect};
 use tui::terminal::Terminal;
 use tui::widgets::{Block, Borders};
 
@@ -53,24 +50,34 @@ pub fn draw<B>(terminal: &mut Terminal<B>) -> Result<()>
 where
     B: Backend,
 {
+    use tui::layout::Direction;
+
     terminal.draw(|frame| {
+        // Divide the Rect of Frame vertically in 60% and 30% of the total height
+        let chunks = Layout::default()
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .direction(Direction::Vertical)
+            .split(frame.size());
+
         frame.render_widget(
             Block::default()
-                .title("Files")
+                .title(format!("{:?}", chunks.len()))
                 .borders(Borders::ALL)
                 .border_type(tui::widgets::BorderType::Rounded),
-            Rect::new(0, 0, 40, 20),
+            chunks[0],
         );
-
-        let size = frame.size();
-        let m = format!("({},{})", size.width, size.height);
-        frame.render_widget(Block::default().title(m), Rect::new(2, 2, 20, 4));
+        frame.render_widget(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(tui::widgets::BorderType::Rounded),
+            chunks[1],
+        );
     })?;
 
     // Sleeping the thread for 5 secs, so that i can see wtf is getting printed
     // using terminal.draw on the alternate screen
     if cfg!(debug_assertions) {
-        std::thread::sleep(Duration::from_millis(2000));
+        std::thread::sleep(Duration::from_millis(6000));
     }
 
     Ok(())
