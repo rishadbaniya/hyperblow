@@ -7,9 +7,10 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use tui::backend::{Backend, CrosstermBackend};
+use tui::buffer::Cell;
 use tui::layout::{Constraint, Layout, Rect};
 use tui::terminal::Terminal;
-use tui::widgets::{Block, Borders};
+use tui::widgets::{Block, Borders, Row, Table};
 
 use crate::Result;
 
@@ -53,12 +54,21 @@ where
     use tui::layout::Direction;
     loop {
         terminal.draw(|frame| {
+            // Make table to show files
+            let table = Table::new(vec![Row::new(vec!["Name", "Download", "Progress"])])
+                .widths(&[
+                    Constraint::Percentage(50),
+                    Constraint::Percentage(10),
+                    Constraint::Percentage(40),
+                ])
+                .style(tui::style::Style::default().fg(tui::style::Color::Red))
+                .block(Block::default().borders(Borders::ALL))
+                .column_spacing(1);
             // Divide the Rect of Frame vertically in 60% and 30% of the total height
             let chunks = Layout::default()
                 .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
                 .direction(Direction::Vertical)
                 .split(frame.size());
-
             frame.render_widget(
                 Block::default()
                     .title(format!("{:?}", chunks.len()))
@@ -66,12 +76,7 @@ where
                     .border_type(tui::widgets::BorderType::Rounded),
                 chunks[0],
             );
-            frame.render_widget(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(tui::widgets::BorderType::Rounded),
-                chunks[1],
-            );
+            frame.render_widget(table, chunks[1]);
         })?;
 
         if let Event::Key(key) = crossterm::event::read()? {
