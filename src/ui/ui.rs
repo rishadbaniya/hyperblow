@@ -1,7 +1,7 @@
 use std::io::stdout;
 use std::time::Duration;
 
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -51,34 +51,34 @@ where
     B: Backend,
 {
     use tui::layout::Direction;
+    loop {
+        terminal.draw(|frame| {
+            // Divide the Rect of Frame vertically in 60% and 30% of the total height
+            let chunks = Layout::default()
+                .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .direction(Direction::Vertical)
+                .split(frame.size());
 
-    terminal.draw(|frame| {
-        // Divide the Rect of Frame vertically in 60% and 30% of the total height
-        let chunks = Layout::default()
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .direction(Direction::Vertical)
-            .split(frame.size());
+            frame.render_widget(
+                Block::default()
+                    .title(format!("{:?}", chunks.len()))
+                    .borders(Borders::ALL)
+                    .border_type(tui::widgets::BorderType::Rounded),
+                chunks[0],
+            );
+            frame.render_widget(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(tui::widgets::BorderType::Rounded),
+                chunks[1],
+            );
+        })?;
 
-        frame.render_widget(
-            Block::default()
-                .title(format!("{:?}", chunks.len()))
-                .borders(Borders::ALL)
-                .border_type(tui::widgets::BorderType::Rounded),
-            chunks[0],
-        );
-        frame.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(tui::widgets::BorderType::Rounded),
-            chunks[1],
-        );
-    })?;
-
-    // Sleeping the thread for 5 secs, so that i can see wtf is getting printed
-    // using terminal.draw on the alternate screen
-    if cfg!(debug_assertions) {
-        std::thread::sleep(Duration::from_millis(6000));
+        if let Event::Key(key) = crossterm::event::read()? {
+            match key.code {
+                KeyCode::Char('q') => return Ok(()),
+                _ => {}
+            }
+        }
     }
-
-    Ok(())
 }
