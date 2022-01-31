@@ -107,6 +107,9 @@ pub fn draw_files<B: Backend>(
     }
 
     let createTableRow = |f: FileRow| -> Row {
+        let p: bool = ((scroll.rect.width as f32 * 0.68) as u16
+            ..=(scroll.rect.width as f32 * 0.76) as u16)
+            .contains(&130);
         Row::new(vec![
             Cell::from(f.name),
             Cell::from(f.file_type),
@@ -115,12 +118,7 @@ pub fn draw_files<B: Backend>(
             } else {
                 download_no.clone()
             },
-            Cell::from(format!(
-                "{} {} {} ",
-                (size.width as f32 * 0.68) as u32,
-                (size.width as f32 * 0.76) as u32,
-                (size.y + 2),
-            )),
+            Cell::from(format!("{:?} ", p)),
         ])
     };
 
