@@ -24,7 +24,7 @@ const DOWNLOAD_WIDTH_PERCENTAGE: u16 = 8;
 const PROGRESS: &str = "Progress";
 const PROGRESS_WIDTH_PERCENTAGE: u16 = 24;
 
-pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &super::ui::Scroll) {
+pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &super::ui::FilesState) {
     let download_yes = Cell::from("Yes").style(Style::default().bg(Color::Green).fg(Color::Black));
     let download_no = Cell::from("Yes").style(Style::default().bg(Color::Red).fg(Color::Black));
 
@@ -88,16 +88,26 @@ pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &super::
         row1.clone(),
         row1.clone(),
     ];
-    let indexOffset;
-    if scroll.getPrevious() > scroll.getCurrent() {
-        indexOffset = scroll.getPrevious() - 1;
-    } else {
-        indexOffset = scroll.getCurrent();
+
+    if scroll.get_top_index() == 0 && scroll.get_bottom_index() == 0 {
+        scroll.set_top_index(0);
+        scroll.set_bottom_index(6);
     }
-    let startIndex = 0 + indexOffset;
-    let endIndex = 10 + indexOffset;
-    let mut v = vec![header_row.clone(), header_row.clone()];
-    for i in startIndex..endIndex {
+
+    // Scrolling UP
+    if scroll.get_scroll_state_previous() > scroll.get_scroll_state_current() {
+        if scroll.get_top_index() > 0 {
+            scroll.set_top_index(scroll.get_top_index() - 1);
+            scroll.set_bottom_index(scroll.get_bottom_index() - 1);
+        }
+    } else if scroll.get_scroll_state_previous() < scroll.get_scroll_state_current() {
+        scroll.set_top_index(scroll.get_top_index() + 1);
+        scroll.set_bottom_index(scroll.get_bottom_index() + 1);
+    }
+    let startIndex = 0;
+    let endIndex = 4;
+    let mut v = vec![header_row.clone(), blank_row.clone()];
+    for i in scroll.get_top_index()..scroll.get_bottom_index() {
         v.push(allRows[i as usize].clone());
     }
 

@@ -86,44 +86,58 @@ impl MouseOffset {
     }
 }
 
-// Stores the previous scroll amount, its usually just increased or decreased by 1
-// The main use of this will be to know in which direction the scroll occured in contrast the the
-// scroll from previous draw
-// "prev" stores the scroll value from previous draw
-// "current" stores the scroll value when you are about to draw
-pub struct Scroll {
-    pub prev: std::cell::Cell<i32>,
-    pub current: std::cell::Cell<i32>,
+pub struct FilesState {
+    // Start and end index of the range of items that's being drawn
+    // Note : Used in scroll to draw the range of data to be drawn
+    top_index: std::cell::Cell<u16>,
+    bottom_index: std::cell::Cell<u16>,
+    // Total size of the files table
+    len: std::cell::Cell<u16>,
+
+    // Scroll state
+    // if current > previous then we can say user wanted to scroll down
+    // if previous < current then we can say user wanted to scroll up
+    // The difference is just 1 or -1
+    scroll_state_current: std::cell::Cell<i16>,
+    scroll_state_previous: std::cell::Cell<i16>,
 }
 
-impl Scroll {
-    // Create a default Scroll instance with no scrolling previously and currently
-    fn default() -> Self {
-        Scroll {
-            prev: std::cell::Cell::new(0),
-            current: std::cell::Cell::new(0),
+impl FilesState {
+    fn new() -> Self {
+        FilesState {
+            top_index: cell::Cell::new(0),
+            bottom_index: cell::Cell::new(0),
+            len: cell::Cell::new(0),
+            scroll_state_current: cell::Cell::new(0),
+            scroll_state_previous: cell::Cell::new(0),
         }
     }
-    // Gives the scroll value on the previous draw
-    pub fn getPrevious(&self) -> i32 {
-        self.prev.get()
+
+    pub fn set_top_index(&self, v: u16) {
+        self.top_index.set(v);
+    }
+    pub fn get_top_index(&self) -> u16 {
+        self.top_index.get()
     }
 
-    pub fn setPrevious(&self, v: i32) {
-        self.prev.set(v);
+    pub fn set_bottom_index(&self, v: u16) {
+        self.bottom_index.set(v);
+    }
+    pub fn get_bottom_index(&self) -> u16 {
+        self.bottom_index.get()
     }
 
-    // Gives the current scroll value so that you can draw
-    pub fn getCurrent(&self) -> i32 {
-        self.current.get()
+    pub fn set_scroll_state_current(&self, v: i16) {
+        self.scroll_state_current.set(v);
     }
-
-    pub fn setCurrent(&self, v: i32) {
-        self.current.set(v);
+    pub fn get_scroll_state_current(&self) -> i16 {
+        self.scroll_state_current.get()
     }
-
-    pub fn setPrevToCurrent(&self) {
-        self.prev.set(self.current.get());
+    pub fn set_scroll_state_previous(&self, v: i16) {
+        self.scroll_state_previous.set(v);
+    }
+    pub fn get_scroll_state_previous(&self) -> i16 {
+        self.scroll_state_previous.get()
     }
 }
 
@@ -132,10 +146,10 @@ where
     B: Backend,
 {
     use tui::layout::Direction;
-    use tui::style::Color::{Black, Green, Red};
 
     let mouseOffset = MouseOffset::default();
-    let files_scroll = Scroll::default();
+
+    let files_state = FilesState::new();
 
     loop {
         terminal.draw(|frame| {
@@ -149,20 +163,24 @@ where
             frame.render_widget(
                 Block::default()
                     .title(format!(
-                        "x : {}, y: {} , Scroll: {}",
+                        "x : {}, y: {} , Previous : {}, Current : {} | Bottom : {}, Top : {}",
                         mouseOffset.get_x(),
                         mouseOffset.get_y(),
-                        files_scroll.getCurrent()
+                        files_state.get_scroll_state_previous(),
+                        files_state.get_scroll_state_current(),
+                        files_state.get_bottom_index(),
+                        files_state.get_top_index()
                     ))
                     .borders(Borders::ALL)
                     .border_type(tui::widgets::BorderType::Rounded),
                 chunks[0],
             );
 
-            files::draw_files(frame, chunks[1], &files_scroll);
+            files::draw_files(frame, chunks[1], &files_state);
 
-            // Sets the previous state of the scroll to the current scroll state
-            files_scroll.setPrevToCurrent();
+            // Save the current draw scroll state and use it as previous draw scroll state in
+            // next draw
+            files_state.set_scroll_state_previous(files_state.get_scroll_state_current());
         })?;
 
         // Blocks the thread until some event is passed
@@ -173,24 +191,16 @@ where
                     _ => {}
                 },
                 Event::Mouse(mouse) => {
-                    let updateOffset = || {
-                        mouseOffset.set_y(mouse.column);
-                        mouseOffset.set_x(mouse.row);
-                    };
-
                     match mouse.kind {
-                        MouseEventKind::Down(btn) => {
-                            if btn == MouseButton::Left {
-                                updateOffset()
-                            }
-                        }
                         MouseEventKind::ScrollUp => {
-                            updateOffset();
-                            files_scroll.setCurrent(files_scroll.getCurrent() - 1);
+                            files_state.set_scroll_state_current(
+                                files_state.get_scroll_state_current() - 1,
+                            );
                         }
                         MouseEventKind::ScrollDown => {
-                            updateOffset();
-                            files_scroll.setCurrent(files_scroll.getCurrent() + 1);
+                            files_state.set_scroll_state_current(
+                                files_state.get_scroll_state_current() + 1,
+                            );
                         }
                         _ => {}
                     };
