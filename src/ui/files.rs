@@ -1,3 +1,5 @@
+//TODO : Add a way to toggle the state of the Download
+
 use tui::{
     backend::Backend,
     layout::{Constraint, Rect},
@@ -90,6 +92,10 @@ pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &super::
     ];
 
     // Run when it's the first draw of the files
+    // TODO : Way to set the initial bottom index of the row(i.e how many rows to show) according
+    // to the given size of the Files Tab
+    // TODO : Way to re evaluate the bottom index when the screen resizes and size of the Files Tab
+    // changes
     if scroll.get_top_index() == 0 && scroll.get_bottom_index() == 0 {
         scroll.set_top_index(0);
         scroll.set_bottom_index(10);
@@ -105,7 +111,7 @@ pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &super::
 
     // Scroll DOWN
     } else if scroll.get_scroll_state_previous() < scroll.get_scroll_state_current() {
-        // Scroll UP only when top index is greater than total availaible rows
+        // Scroll UP only when bottom index is greater than total availaible rows
         if scroll.get_bottom_index() < allRows.len() as u16 {
             scroll.set_top_index(scroll.get_top_index() + 1);
             scroll.set_bottom_index(scroll.get_bottom_index() + 1);
