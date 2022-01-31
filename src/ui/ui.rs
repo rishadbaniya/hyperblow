@@ -14,6 +14,7 @@ use tui::widgets::{Block, Borders};
 
 use crate::Result;
 
+// TODO : REFACTOR ALL CODES HERE SO THAT IT'S MANAGEABLE
 /// Function that represents the start of the UI rendering of hyperblow
 pub fn draw_ui() -> Result<()> {
     // Enabling the raw mode and using alternate screen
