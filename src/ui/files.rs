@@ -9,6 +9,8 @@ use tui::{
     Frame,
 };
 
+use crate::ui::ui::FileRow;
+
 // Name : Name of the root file or the folder
 // Type : Type of the file, if it's directory of a regular file
 // Download : Should download or not (Yes/No)
@@ -26,9 +28,13 @@ const DOWNLOAD_WIDTH_PERCENTAGE: u16 = 8;
 const PROGRESS: &str = "Progress";
 const PROGRESS_WIDTH_PERCENTAGE: u16 = 24;
 
-pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &super::ui::FilesState) {
+pub fn draw_files<B: Backend>(
+    frame: &mut Frame<B>,
+    size: Rect,
+    scroll: &mut super::ui::FilesState,
+) {
     let download_yes = Cell::from("Yes").style(Style::default().bg(Color::Green).fg(Color::Black));
-    let download_no = Cell::from("Yes").style(Style::default().bg(Color::Red).fg(Color::Black));
+    let download_no = Cell::from("No").style(Style::default().bg(Color::Red).fg(Color::Black));
 
     let header_row = Row::new([
         Cell::from(NAME),
@@ -39,57 +45,20 @@ pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &super::
 
     let blank_row = Row::new([""; 4]);
 
-    let row01 = Row::new(vec![
-        Cell::from("00 - Introduction to some of the files here"),
-        Cell::from("Folder"),
-        download_yes.clone(),
-        Cell::from("10.2 MB/ 200MB | 29.1%  "),
-    ]);
-    let row1 = Row::new(vec![
-        Cell::from("01 - WHat is going on here"),
-        Cell::from("Folder"),
-        download_no.clone(),
-        Cell::from("10.2 MB/ 200MB | 20.1%  "),
-    ]);
-
-    let allRows = vec![
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row01.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-        row1.clone(),
-    ];
+    let file = super::ui::FileRow {
+        name: String::from("0.0 - Introduction to some of the files here"),
+        file_type: String::from("Folder"),
+        should_download: false,
+        total_size: String::from("0.1Mb"),
+        total_downloaded: String::from("0.1Mb"),
+    };
+    let file1 = super::ui::FileRow {
+        name: String::from("0.0 - Introduction to some of the files here"),
+        file_type: String::from("Folder"),
+        should_download: true,
+        total_size: String::from("0.1Mb"),
+        total_downloaded: String::from("0.1Mb"),
+    };
 
     // Run when it's the first draw of the files
     // TODO : Way to set the initial bottom index of the row(i.e how many rows to show) according
@@ -99,6 +68,25 @@ pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &super::
     if scroll.get_top_index() == 0 && scroll.get_bottom_index() == 0 {
         scroll.set_top_index(0);
         scroll.set_bottom_index(10);
+        for i in 1..10 {
+            scroll.add_file(file.clone());
+        }
+        for i in 1..10 {
+            scroll.add_file(file1.clone());
+        }
+        for i in 1..10 {
+            scroll.add_file(file.clone());
+        }
+        for i in 1..10 {
+            scroll.add_file(file1.clone());
+        }
+        for i in 1..10 {
+            scroll.add_file(file.clone());
+        }
+        for i in 1..10 {
+            scroll.add_file(file1.clone());
+        }
+        scroll.rect = size;
     }
 
     // Scroll UP
@@ -112,22 +100,43 @@ pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &super::
     // Scroll DOWN
     } else if scroll.get_scroll_state_previous() < scroll.get_scroll_state_current() {
         // Scroll UP only when bottom index is greater than total availaible rows
-        if scroll.get_bottom_index() < allRows.len() as u16 {
+        if scroll.get_bottom_index() < scroll.files.len() as u16 {
             scroll.set_top_index(scroll.get_top_index() + 1);
             scroll.set_bottom_index(scroll.get_bottom_index() + 1);
         }
     }
 
+    let createTableRow = |f: FileRow| -> Row {
+        Row::new(vec![
+            Cell::from(f.name),
+            Cell::from(f.file_type),
+            if f.should_download {
+                download_yes.clone()
+            } else {
+                download_no.clone()
+            },
+            Cell::from(format!(
+                "{} {} {} ",
+                (size.width as f32 * 0.68) as u32,
+                (size.width as f32 * 0.76) as u32,
+                (size.y + 2),
+            )),
+        ])
+    };
+
     let mut v = vec![header_row.clone(), blank_row.clone()];
     for i in scroll.get_top_index()..scroll.get_bottom_index() {
-        v.push(allRows[i as usize].clone());
+        v.push(createTableRow(scroll.files[i as usize].clone()));
     }
 
+    // Create the table
     let table = Table::new(v).widths(&[
         Constraint::Percentage(NAME_WIDTH_PERCENTAGE),
         Constraint::Percentage(TYPE_WIDTH_PERCENTAGE),
         Constraint::Percentage(DOWNLOAD_WIDTH_PERCENTAGE),
         Constraint::Percentage(PROGRESS_WIDTH_PERCENTAGE),
     ]);
+
+    // Render
     frame.render_widget(table, size);
 }

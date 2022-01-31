@@ -1,7 +1,3 @@
-use std::rc::Rc;
-use std::slice::SliceIndex;
-use std::time::Duration;
-
 use super::files;
 use std::io::stdout;
 
@@ -13,14 +9,12 @@ use crossterm::terminal::{
 };
 use tui::backend::{Backend, CrosstermBackend};
 use tui::layout::{Constraint, Layout, Rect};
-use tui::style::{Modifier, Style};
 use tui::terminal::Terminal;
-use tui::widgets::{Block, Borders, Cell, Row, Table};
+use tui::widgets::{Block, Borders};
 
 use crate::Result;
 
 /// Function that represents the start of the UI rendering of hyperblow
-
 pub fn draw_ui() -> Result<()> {
     // Enabling the raw mode and using alternate screen
     // Note : Any try to invoke println! or any other method related to stdout "fd" won't work after enabling raw mode,
@@ -86,6 +80,7 @@ impl MouseOffset {
     }
 }
 
+// Stores all the necessary states required to render Files Tab
 pub struct FilesState {
     // Start and end index of the range of items that's being drawn
     // Note : Used in scroll to draw the range of data to be drawn
@@ -100,17 +95,34 @@ pub struct FilesState {
     // The difference is just 1 or -1
     scroll_state_current: std::cell::Cell<i16>,
     scroll_state_previous: std::cell::Cell<i16>,
+    pub files: Vec<FileRow>,
+    pub rect: Rect,
+}
+
+#[derive(Clone)]
+pub struct FileRow {
+    pub name: String,
+    pub file_type: String,
+    pub should_download: bool,
+    pub total_size: String,
+    pub total_downloaded: String,
 }
 
 impl FilesState {
     fn new() -> Self {
         FilesState {
+            rect: Rect::new(0, 0, 0, 0),
             top_index: cell::Cell::new(0),
             bottom_index: cell::Cell::new(0),
             len: cell::Cell::new(0),
             scroll_state_current: cell::Cell::new(0),
             scroll_state_previous: cell::Cell::new(0),
+            files: Vec::new(),
         }
+    }
+
+    pub fn add_file(&mut self, v: FileRow) {
+        self.files.push(v);
     }
 
     pub fn set_top_index(&self, v: u16) {
@@ -149,7 +161,7 @@ where
 
     let mouseOffset = MouseOffset::default();
 
-    let files_state = FilesState::new();
+    let mut files_state = FilesState::new();
 
     loop {
         terminal.draw(|frame| {
@@ -176,7 +188,7 @@ where
                 chunks[0],
             );
 
-            files::draw_files(frame, chunks[1], &files_state);
+            files::draw_files(frame, chunks[1], &mut files_state);
 
             // Save the current draw scroll state and use it as previous draw scroll state in
             // next draw
@@ -184,29 +196,38 @@ where
         })?;
 
         // Blocks the thread until some event is passed
-        if let Event = crossterm::event::read()? {
-            match Event {
-                Event::Key(key) => match key.code {
-                    KeyCode::Char('q') => return Ok(()),
-                    _ => {}
-                },
-                Event::Mouse(mouse) => {
-                    match mouse.kind {
-                        MouseEventKind::ScrollUp => {
-                            files_state.set_scroll_state_current(
-                                files_state.get_scroll_state_current() - 1,
-                            );
-                        }
-                        MouseEventKind::ScrollDown => {
-                            files_state.set_scroll_state_current(
-                                files_state.get_scroll_state_current() + 1,
-                            );
-                        }
-                        _ => {}
-                    };
-                }
+        match crossterm::event::read()? {
+            Event::Key(key) => match key.code {
+                KeyCode::Char('q') => return Ok(()),
                 _ => {}
-            };
-        }
+            },
+            Event::Mouse(mouse) => {
+                match mouse.kind {
+                    MouseEventKind::Down(btn) => {
+                        if btn == MouseButton::Left {
+                            let x = mouse.row;
+                            let y = mouse.column;
+                            mouseOffset.set_x(x);
+                            mouseOffset.set_y(y);
+                            let clickable_width = (files_state.rect.width as f32 * 0.68) as u16
+                                ..=(files_state.rect.width as f32 * 0.76) as u16;
+                            let has_clicked_on_download = clickable_width.contains(&x);
+                            files_state.files[0].should_download =
+                                !files_state.files[0].should_download;
+                        }
+                    }
+                    MouseEventKind::ScrollUp => {
+                        files_state
+                            .set_scroll_state_current(files_state.get_scroll_state_current() - 1);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        files_state
+                            .set_scroll_state_current(files_state.get_scroll_state_current() + 1);
+                    }
+                    _ => {}
+                };
+            }
+            _ => {}
+        };
     }
 }
