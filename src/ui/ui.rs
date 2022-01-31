@@ -205,15 +205,21 @@ where
                 match mouse.kind {
                     MouseEventKind::Down(btn) => {
                         if btn == MouseButton::Left {
-                            let x = mouse.row;
-                            let y = mouse.column;
+                            let x = mouse.column;
+                            let y = mouse.row;
                             mouseOffset.set_x(x);
                             mouseOffset.set_y(y);
                             let clickable_width = (files_state.rect.width as f32 * 0.68) as u16
                                 ..=(files_state.rect.width as f32 * 0.76) as u16;
                             let has_clicked_on_download = clickable_width.contains(&x);
-                            files_state.files[0].should_download =
-                                !files_state.files[0].should_download;
+
+                            if has_clicked_on_download {
+                                let indexOffset = (files_state.get_top_index()
+                                    + (y - (files_state.rect.y + 2)))
+                                    as usize;
+                                files_state.files[indexOffset].should_download =
+                                    !files_state.files[indexOffset].should_download;
+                            }
                         }
                     }
                     MouseEventKind::ScrollUp => {
