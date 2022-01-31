@@ -89,23 +89,29 @@ pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &super::
         row1.clone(),
     ];
 
+    // Run when it's the first draw of the files
     if scroll.get_top_index() == 0 && scroll.get_bottom_index() == 0 {
         scroll.set_top_index(0);
-        scroll.set_bottom_index(6);
+        scroll.set_bottom_index(10);
     }
 
-    // Scrolling UP
+    // Scroll UP
     if scroll.get_scroll_state_previous() > scroll.get_scroll_state_current() {
+        // Scroll UP only when top index is greater than 0
         if scroll.get_top_index() > 0 {
             scroll.set_top_index(scroll.get_top_index() - 1);
             scroll.set_bottom_index(scroll.get_bottom_index() - 1);
         }
+
+    // Scroll DOWN
     } else if scroll.get_scroll_state_previous() < scroll.get_scroll_state_current() {
-        scroll.set_top_index(scroll.get_top_index() + 1);
-        scroll.set_bottom_index(scroll.get_bottom_index() + 1);
+        // Scroll UP only when top index is greater than total availaible rows
+        if scroll.get_bottom_index() < allRows.len() as u16 {
+            scroll.set_top_index(scroll.get_top_index() + 1);
+            scroll.set_bottom_index(scroll.get_bottom_index() + 1);
+        }
     }
-    let startIndex = 0;
-    let endIndex = 4;
+
     let mut v = vec![header_row.clone(), blank_row.clone()];
     for i in scroll.get_top_index()..scroll.get_bottom_index() {
         v.push(allRows[i as usize].clone());
