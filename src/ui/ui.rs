@@ -112,16 +112,12 @@ where
                 chunks[0],
             );
 
-            files::draw_files(frame, chunks[1], filesState);
+            files::draw_files(frame, chunks[1], &mut filesState);
 
             // Save the current draw scroll state and use it as previous draw scroll state in
             // next draw
-        })?;
-
-        {
-            let filesState = filesState.lock().unwrap();
             filesState.set_scroll_state_previous(filesState.get_scroll_state_current());
-        }
+        })?;
 
         // Blocks the thread until some event is passed
         match crossterm::event::read()? {
