@@ -1,3 +1,5 @@
+use serde_derive::{Deserialize, Serialize};
+
 use sha1::{Digest, Sha1};
 use std::fs;
 
@@ -18,7 +20,6 @@ use std::fs;
 /// which means "hey, the value of the field that has name "your name" in the
 /// torrent file, map its value to the struct field below"
 ///
-
 #[derive(Debug, Deserialize)]
 pub struct FileMeta {
     pub announce: String,

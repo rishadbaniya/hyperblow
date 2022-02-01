@@ -3,6 +3,12 @@ use crate::torrent_parser::FileMeta;
 pub fn spit_details(fileMeta: &FileMeta) {
     println!("------------------------------- Torrent Details -------------------------------");
 
+    if let Some(x) = &fileMeta.info.files {
+        for y in x {
+            println!("{:?}", y.path);
+        }
+    }
+
     if let Some(name) = &fileMeta.info.name {
         println!("Name -> {}", name);
     }
