@@ -1,4 +1,9 @@
-use std::env;
+#![allow(non_snake_case)]
+
+use std::{
+    env,
+    sync::{Arc, Mutex},
+};
 
 pub mod ui;
 
@@ -26,11 +31,16 @@ pub mod ui;
 /// implemented
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+use ui::files::FilesState;
+
 fn main() -> Result<()> {
+    // Global State that is Shared Across Threads
+    let fileState = Arc::new(Mutex::new(FilesState::new()));
+
     use ui::ui;
     let _args: Vec<String> = env::args().skip(1).collect();
     println!("{:?}", _args);
-    ui::draw_ui()?;
+    ui::draw_ui(fileState.clone())?;
     Ok(())
 
     //    // Get the argument at index 1 from the CLI command "rtourent xyz.torrent"
