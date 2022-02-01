@@ -233,6 +233,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyperblow"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "hyper",
+ "percent-encoding",
+ "serde",
+ "serde_bencode",
+ "serde_bytes",
+ "serde_derive",
+ "sha-1",
+ "tokio",
+ "tui",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -414,22 +430,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8383f39639269cde97d255a32bdb68c047337295414940c68bdd30c2e13203ff"
 dependencies = [
  "bitflags",
-]
-
-[[package]]
-name = "rustourent"
-version = "0.1.0"
-dependencies = [
- "crossterm",
- "hyper",
- "percent-encoding",
- "serde",
- "serde_bencode",
- "serde_bytes",
- "serde_derive",
- "sha-1",
- "tokio",
- "tui",
 ]
 
 [[package]]

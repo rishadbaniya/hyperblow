@@ -1,61 +1,60 @@
 #![allow(non_snake_case)]
+extern crate serde;
+extern crate serde_bencode;
+extern crate serde_derive;
+
+mod torrent_details;
+mod torrent_parser;
+mod ui;
 
 use std::{
     env,
+    error::Error,
     sync::{Arc, Mutex},
     thread,
-    time::Duration,
 };
+use ui::files::FilesState;
 
-pub mod ui;
-
-//#![allow(non_snake_case)]
-
-//
-//extern crate serde;
-//extern crate serde_bencode;
-//#[macro_use]
-//extern crate serde_derive;
-//
 //mod percent_encoder;
-//mod torrent_details;
+
 //pub mod torrent_parser;
 //
 //use hyper::{body::HttpBody, Client};
 
 //use tokio::io::AsyncWriteExt;
-//use torrent_details::spit_details;
+use torrent_details::spit_details;
+
+pub mod work;
+
+use work::start::start as workStart;
+
+type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 // Main thread to work on UI rendering
-
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-
-use ui::files::FilesState;
-
-// Starting Point for the working thread
-fn workMain(fileState: Arc<Mutex<FilesState>>) {
-    thread::sleep(Duration::from_millis(5000));
-    fileState.lock().unwrap().files[0].should_download = true;
-}
-
 fn main() -> Result<()> {
-    // Global State that is Shared Across Threads
-    let fileState = Arc::new(Mutex::new(FilesState::new()));
-
-    let file_state_working_thread = fileState.clone();
-    thread::spawn(move || workMain(file_state_working_thread));
+    let args: Vec<String> = env::args().skip(1).collect();
 
     use ui::ui;
-    let _args: Vec<String> = env::args().skip(1).collect();
-    println!("{:?}", _args);
-    ui::draw_ui(fileState.clone())?;
+    // Global State that is Shared Across Threads
+    let file_state = Arc::new(Mutex::new(FilesState::new()));
+    let file_state_working_thread = file_state.clone();
+    thread::spawn(move || workStart(file_state_working_thread));
+
+    // Get the argument at index 1 from the CLI command "rtourent xyz.torrent"
+    // So that we can get the name of the file i.e xyz.torrentj
+    let (torrentParsed, info_hashBytes) = torrent_parser::parse_file(&args[0]);
+
+    if let Some(x) = &torrentParsed.info.files {
+        for y in x {
+            if let Some(x) = y.path.first() {
+                println!("{:?}", x);
+            }
+        }
+    }
+
+    ui::draw_ui(file_state)?;
     Ok(())
 
-    //    // Get the argument at index 1 from the CLI command "rtourent xyz.torrent"
-    //    // So that we can get the name of the file i.e xyz.torrent
-    //    let (torrentParsed, info_hashBytes) = torrent_parser::parse_file(&args[1]);
-    //
-    //    spit_details(&torrentParsed);
     //    let percentEncodedInfoHash = percent_encoder::encode(info_hashBytes);
     //    let client = Client::new();
     //    let uri = format!(

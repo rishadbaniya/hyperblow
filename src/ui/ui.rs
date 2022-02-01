@@ -2,8 +2,9 @@
 
 use super::files;
 use std::io::stdout;
+use std::time::Duration;
 
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
+use crossterm::event::{poll, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::event::{MouseButton, MouseEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -119,31 +120,33 @@ where
             filesState.set_scroll_state_previous(filesState.get_scroll_state_current());
         })?;
 
-        // Blocks the thread until some event is passed
-        match crossterm::event::read()? {
-            Event::Key(key) => match key.code {
-                KeyCode::Char('q') => return Ok(()),
-                _ => {}
-            },
-            Event::Mouse(mouse) => {
-                let mut filesState = filesState.lock().unwrap();
-                match mouse.kind {
-                    MouseEventKind::Down(btn) => {
-                        if btn == MouseButton::Left {
-                            mouse_offset.set_x(mouse.column);
-                            mouse_offset.set_y(mouse.row);
-
-                            // TODO : Write a code such that file_state.buttonClick is only invoked
-                            // when the button was clicked on one of the component of File Tab
-                            filesState.buttonClick(mouse_offset.get_x(), mouse_offset.get_y());
-                        }
-                    }
-                    MouseEventKind::ScrollUp => filesState.scrollGoingUp(),
-                    MouseEventKind::ScrollDown => filesState.scrollGoingDown(),
+        // Waits for at least 200ms for some event to occur before moving on
+        if poll(Duration::from_millis(200))? {
+            match crossterm::event::read()? {
+                Event::Key(key) => match key.code {
+                    KeyCode::Char('q') => return Ok(()),
                     _ => {}
-                };
-            }
-            _ => {}
-        };
+                },
+                Event::Mouse(mouse) => {
+                    let mut filesState = filesState.lock().unwrap();
+                    match mouse.kind {
+                        MouseEventKind::Down(btn) => {
+                            if btn == MouseButton::Left {
+                                mouse_offset.set_x(mouse.column);
+                                mouse_offset.set_y(mouse.row);
+
+                                // TODO : Write a code such that file_state.buttonClick is only invoked
+                                // when the button was clicked on one of the component of File Tab
+                                filesState.buttonClick(mouse_offset.get_x(), mouse_offset.get_y());
+                            }
+                        }
+                        MouseEventKind::ScrollUp => filesState.scrollGoingUp(),
+                        MouseEventKind::ScrollDown => filesState.scrollGoingDown(),
+                        _ => {}
+                    };
+                }
+                _ => {}
+            };
+        }
     }
 }
