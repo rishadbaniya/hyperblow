@@ -3,6 +3,8 @@
 use std::{
     env,
     sync::{Arc, Mutex},
+    thread,
+    time::Duration,
 };
 
 pub mod ui;
@@ -26,16 +28,22 @@ pub mod ui;
 
 // Main thread to work on UI rendering
 
-/// Result type that is alias for std::result::Result which wraps a generic
-/// type T with Ok(T) and and works on any "error" type where std::error::Error "trait" is
-/// implemented
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 use ui::files::FilesState;
 
+// Starting Point for the working thread
+fn workMain(fileState: Arc<Mutex<FilesState>>) {
+    thread::sleep(Duration::from_millis(5000));
+    fileState.lock().unwrap().files[0].should_download = true;
+}
+
 fn main() -> Result<()> {
     // Global State that is Shared Across Threads
     let fileState = Arc::new(Mutex::new(FilesState::new()));
+
+    let file_state_working_thread = fileState.clone();
+    thread::spawn(move || workMain(file_state_working_thread));
 
     use ui::ui;
     let _args: Vec<String> = env::args().skip(1).collect();

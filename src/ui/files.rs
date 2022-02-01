@@ -130,7 +130,7 @@ impl FilesState {
 pub fn draw_files<B: Backend>(
     frame: &mut Frame<B>,
     size: Rect,
-    mut scroll: MutexGuard<FilesState>,
+    scroll: &mut MutexGuard<FilesState>,
 ) {
     let download_yes = Cell::from("Yes").style(Style::default().bg(Color::Green).fg(Color::Black));
     let download_no = Cell::from("No").style(Style::default().bg(Color::Red).fg(Color::Black));
