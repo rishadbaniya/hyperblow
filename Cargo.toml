@@ -13,7 +13,7 @@ serde_bytes = "0.11.5"
 sha-1 = "0.9.8"
 percent-encoding = "2.1.0"
 hyper = {version = "0.14.13", features = ["full"]}
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.16.1", features = ["full"] }
 crossterm = "0.22.1"
 tui = "0.17.0"
 

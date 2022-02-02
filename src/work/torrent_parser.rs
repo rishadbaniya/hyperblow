@@ -72,12 +72,12 @@ pub fn parse_file(filePath: &str) -> (FileMeta, Vec<u8>) {
     let infoByte = serde_bencode::ser::to_bytes(&decoded.info).unwrap();
 
     // SHA1 hash of the infoByte i.e info_hash
-    let info_hash = generateInfoHash(&infoByte);
+    let info_hash = generateInfoHash(infoByte);
 
     (decoded, info_hash)
 }
 
-fn generateInfoHash(infoByte: &Vec<u8>) -> Vec<u8> {
+fn generateInfoHash(infoByte: Vec<u8>) -> Vec<u8> {
     let mut hasher = Sha1::new();
     hasher.update(infoByte);
     hasher.finalize().into_iter().collect()
