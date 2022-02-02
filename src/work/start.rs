@@ -58,7 +58,10 @@ impl File {
         index
     }
 
-    fn shouldDownload(&mut self, state: bool) {}
+    pub fn changeShouldDownload(&mut self) {
+        let currentDownloadState = self.should_download;
+        self.should_download = !currentDownloadState;
+    }
 }
 
 // Starting Point for the working thread

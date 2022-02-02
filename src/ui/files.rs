@@ -1,5 +1,8 @@
 //TODO : Add a way to toggle the state of the Download
 
+use crate::work::start::{File, FileType};
+use std::cell;
+use std::sync::{Arc, Mutex, MutexGuard};
 use tui::{
     backend::Backend,
     layout::{Constraint, Rect},
@@ -8,9 +11,6 @@ use tui::{
     widgets::{Cell, Row, Table},
     Frame,
 };
-
-use std::cell;
-use std::sync::{Arc, Mutex, MutexGuard};
 
 // Name : Name of the root file or the folder
 // Type : Type of the file, if it's directory of a regular file
@@ -28,17 +28,12 @@ const DOWNLOAD_WIDTH_PERCENTAGE: u16 = 8;
 const PROGRESS: &str = "Progress";
 const PROGRESS_WIDTH_PERCENTAGE: u16 = 24;
 
-use crate::work::start::{File, FileType};
-
 // Stores all the necessary states required to render Files Tab
 pub struct FilesState {
     // Start and end index of the range of items that's being drawn
     // Note : Used in scroll to draw the range of data to be drawn
     top_index: cell::Cell<u16>,
     bottom_index: cell::Cell<u16>,
-    // Total size of the files table
-    len: cell::Cell<u16>,
-
     // Scroll state
     // if current > previous then we can say user wanted to scroll down
     // if previous < current then we can say user wanted to scroll up
@@ -49,26 +44,16 @@ pub struct FilesState {
     pub file: Arc<Mutex<File>>,
 }
 
-#[derive(Clone)]
-pub struct FileRow {
-    pub name: String,
-    pub file_type: String,
-    pub should_download: bool,
-    pub total_size: String,
-    pub total_downloaded: String,
-}
-
 impl FilesState {
     pub fn new() -> Self {
         FilesState {
             rect: Rect::new(0, 0, 0, 0),
             top_index: cell::Cell::new(0),
             bottom_index: cell::Cell::new(0),
-            len: cell::Cell::new(0),
             scroll_state_current: cell::Cell::new(0),
             scroll_state_previous: cell::Cell::new(0),
             file: Arc::new(Mutex::new(File {
-                name: String::from("/"),
+                name: String::from("root"),
                 file_type: FileType::DIRECTORY,
                 inner_files: Some(Vec::new()),
                 size: 0,
@@ -120,26 +105,23 @@ impl FilesState {
     // To be called when a button is clicked on File Tab (left button of mouse)
     // offset_x , offset_y => Offset at which the button was clicked
     pub fn buttonClick(&mut self, offset_x: u16, offset_y: u16) {
+        // X offset range, where when clicked we will assume its going for button click:w
         let clickable_width =
             (self.rect.width as f32 * 0.68) as u16..=(self.rect.width as f32 * 0.76) as u16;
+
+        // Check if the clicked offset falls under the x offset of given range
         let has_clicked_on_download =
             clickable_width.contains(&offset_x) && { offset_y >= self.rect.y + 2 };
 
         if has_clicked_on_download {
+            // Index of the clicked item
             let indexOffset = (self.get_top_index() + (offset_y - (self.rect.y + 2))) as usize;
-            let currentValue = {
-                let mut p = false;
-                if let Some(files) = &self.file.lock().unwrap().inner_files {
-                    let file = files[indexOffset].clone();
-                    p = file.lock().unwrap().should_download;
-                }
-                p
-            };
 
-            if let Some(files) = &self.file.lock().unwrap().inner_files {
-                let file = files[indexOffset].clone();
-                file.lock().unwrap().should_download = !currentValue;
-            }
+            // Change the current should_download state of the File
+            self.file.lock().unwrap().inner_files.as_ref().unwrap()[indexOffset]
+                .lock()
+                .unwrap()
+                .changeShouldDownload();
         }
     }
 }
@@ -160,14 +142,6 @@ pub fn draw_files<B: Backend>(
     ]);
 
     let blank_row = Row::new([""; 4]);
-
-    let file1 = FileRow {
-        name: String::from("0.1 - Kernel data structure formats"),
-        file_type: String::from("Folder"),
-        should_download: true,
-        total_size: String::from("10Mb"),
-        total_downloaded: String::from("20Mb"),
-    };
 
     // Run when it's the first draw of the files
     // TODO : Way to set the initial bottom index of the row(i.e how many rows to show) according
@@ -200,10 +174,7 @@ pub fn draw_files<B: Backend>(
         };
     }
 
-    let createTableRow = |f: Arc<Mutex<crate::work::start::File>>| -> Row {
-        let p: bool = ((scroll.rect.width as f32 * 0.68) as u16
-            ..=(scroll.rect.width as f32 * 0.76) as u16)
-            .contains(&130);
+    let createTableRow = |f: Arc<Mutex<File>>| -> Row {
         let name = { f.lock().unwrap().name.clone() };
         let file_type = {
             match f.lock().unwrap().file_type {
@@ -211,7 +182,8 @@ pub fn draw_files<B: Backend>(
                 FileType::DIRECTORY => String::from("Folder"),
             }
         };
-        let should_download = { f.lock().unwrap().should_download };
+
+        let should_download = f.lock().unwrap().should_download;
 
         Row::new(vec![
             Cell::from(name),
@@ -225,16 +197,15 @@ pub fn draw_files<B: Backend>(
         ])
     };
 
-    let mut v = vec![header_row.clone(), blank_row.clone()];
+    // Create the table rows to render
+    let mut table_rows = vec![header_row.clone(), blank_row.clone()];
     for i in scroll.get_top_index()..scroll.get_bottom_index() {
-        let root_file = scroll.file.clone();
-        if let Some(files) = &root_file.lock().unwrap().inner_files {
-            v.push(createTableRow(files[i as usize].clone()));
-        };
+        let file = scroll.file.lock().unwrap().inner_files.as_ref().unwrap()[i as usize].clone();
+        table_rows.push(createTableRow(file));
     }
 
     // Create the table
-    let table = Table::new(v).widths(&[
+    let table = Table::new(table_rows).widths(&[
         Constraint::Percentage(NAME_WIDTH_PERCENTAGE),
         Constraint::Percentage(TYPE_WIDTH_PERCENTAGE),
         Constraint::Percentage(DOWNLOAD_WIDTH_PERCENTAGE),
