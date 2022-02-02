@@ -1,9 +1,9 @@
-use crate::ui::files::FilesState;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
-
 use super::torrent_parser;
+use crate::ui::files::FilesState;
+use std::borrow::{Borrow, BorrowMut};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 enum FileType {
@@ -15,7 +15,7 @@ enum FileType {
 struct File {
     name: String,
     file_type: FileType,
-    inner_files: Option<Vec<File>>,
+    inner_files: Option<Vec<Rc<RefCell<File>>>>,
 }
 
 impl File {
@@ -24,7 +24,7 @@ impl File {
         let mut doesExist = false;
         if let Some(files) = &self.inner_files {
             for (i, x) in files.iter().enumerate() {
-                if x.name == *fileName {
+                if (**x).borrow().name == *fileName {
                     index = Some(i);
                     doesExist = true;
                 }
@@ -36,7 +36,7 @@ impl File {
     fn add_file(&mut self, file: File) -> usize {
         let mut index = 0;
         if let Some(i) = &mut self.inner_files {
-            i.push(file);
+            i.push(Rc::new(RefCell::new(file)));
             index = i.len() - 1
         }
         index
@@ -49,20 +49,20 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
     // So that we can get the name of the file i.e xyz.torrentj
     let (torrentParsed, info_hashBytes) = torrent_parser::parse_file(&torrent_file_path);
 
-    let mut root_file = File {
+    let root_file = Rc::new(RefCell::new(File {
         name: String::from("yo"),
         file_type: FileType::DIRECTORY,
         inner_files: Some(Vec::new()),
-    };
-
-    let mut afile = &mut root_file;
+    }));
 
     if let Some(files) = &torrentParsed.info.files {
         for file in files {
+            let mut afile = root_file.clone();
             for x in 0..file.path.len() {
-                if !afile.contains(&file.path[x]).1 {
+                let (mut idx, doesContain) = (*afile).borrow().contains(&file.path[x]);
+                if !doesContain {
                     let last_path_index = file.path.len() - 1;
-                    let index = afile.add_file(File {
+                    idx = Some((*afile).borrow_mut().add_file(File {
                         name: String::from(&file.path[x]),
                         file_type: if x == last_path_index {
                             FileType::REGULAR
@@ -74,13 +74,12 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
                         } else {
                             Some(vec![])
                         },
-                    });
-                    if let Some(files) = &mut afile.inner_files {
-                        let afile = &mut (*files)[index];
-                    }
+                    }));
                 }
+                if let Some(f) = &(*afile.clone()).borrow().inner_files {
+                    afile = (*f)[idx.unwrap()].clone();
+                };
             }
-            afile = &mut root_file
         }
     }
 

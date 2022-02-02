@@ -23,9 +23,8 @@ fn main() -> Result<()> {
     let file_state_working_thread = file_state.clone();
 
     // Spawn worker thread
-    thread::spawn(move || workStart(file_state_working_thread, &args[0]));
-
-    thread::sleep_ms(1000);
+    let handle = thread::spawn(move || workStart(file_state_working_thread, &args[0]));
+    handle.join().unwrap();
 
     // Draw the UI
     //    ui::ui::draw_ui(file_state)?;
