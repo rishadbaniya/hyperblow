@@ -1,30 +1,45 @@
+// Note: When i say files, i mean it in Unix term. Folders are files as well, their type is
+// Directory
+
 use super::torrent_parser;
 use crate::ui::files::FilesState;
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
-enum FileType {
+pub enum FileType {
     REGULAR,
     DIRECTORY,
 }
 
 #[derive(Debug)]
-struct File {
-    name: String,
-    file_type: FileType,
-    inner_files: Option<Vec<Rc<RefCell<File>>>>,
+pub struct File {
+    // Name of the file
+    pub name: String,
+    // Type of File
+    pub file_type: FileType,
+    // Nested File Nodes if its a directory
+    pub inner_files: Option<Vec<Arc<Mutex<File>>>>,
+    // Size of file
+    pub size: i64,
 }
 
 impl File {
+    // Checks if the File Node contains file with given name, upto just 1 level depth
+    //
+    //    X     -> Root File Node on which the method is called
+    //  /   \
+    // Y     Z  -> Tree Level on which this method checks
+    //
+    // and returns the index of the file in that node and whether it exists or not
     fn contains(&self, fileName: &String) -> (Option<usize>, bool) {
         let mut index = None;
         let mut doesExist = false;
         if let Some(files) = &self.inner_files {
             for (i, x) in files.iter().enumerate() {
-                if (**x).borrow().name == *fileName {
+                if (**x).borrow().lock().unwrap().name == *fileName {
                     index = Some(i);
                     doesExist = true;
                 }
@@ -33,10 +48,12 @@ impl File {
         (index, doesExist)
     }
 
+    // Push the new Node inside of the Node that calls this method and returns the index of the
+    // pushed node
     fn add_file(&mut self, file: File) -> usize {
         let mut index = 0;
         if let Some(i) = &mut self.inner_files {
-            i.push(Rc::new(RefCell::new(file)));
+            i.push(Arc::new(Mutex::new(file)));
             index = i.len() - 1
         }
         index
@@ -49,20 +66,23 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
     // So that we can get the name of the file i.e xyz.torrentj
     let (torrentParsed, info_hashBytes) = torrent_parser::parse_file(&torrent_file_path);
 
-    let root_file = Rc::new(RefCell::new(File {
-        name: String::from("yo"),
+    let x = std::time::Instant::now();
+    // Root file to store all the files
+    let root_file = Arc::new(Mutex::new(File {
+        name: String::from("/"),
         file_type: FileType::DIRECTORY,
         inner_files: Some(Vec::new()),
+        size: 0,
     }));
 
     if let Some(files) = &torrentParsed.info.files {
         for file in files {
             let mut afile = root_file.clone();
             for x in 0..file.path.len() {
-                let (mut idx, doesContain) = (*afile).borrow().contains(&file.path[x]);
+                let (mut idx, doesContain) = (*afile).lock().unwrap().contains(&file.path[x]);
                 if !doesContain {
                     let last_path_index = file.path.len() - 1;
-                    idx = Some((*afile).borrow_mut().add_file(File {
+                    idx = Some((*afile).lock().unwrap().add_file(File {
                         name: String::from(&file.path[x]),
                         file_type: if x == last_path_index {
                             FileType::REGULAR
@@ -74,16 +94,28 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
                         } else {
                             Some(vec![])
                         },
+                        size: file.length,
                     }));
                 }
-                if let Some(f) = &(*afile.clone()).borrow().inner_files {
+                if let Some(f) = &(*afile.clone()).lock().unwrap().inner_files {
                     afile = (*f)[idx.unwrap()].clone();
                 };
             }
         }
     }
 
-    println!("{:?}", root_file);
+    {
+        if let Some(x) = &(*root_file.clone()).lock().unwrap().inner_files {
+            for xx in x {
+                println!("{:?}", xx);
+            }
+        }
+    }
+
+    println!(
+        "{}",
+        std::time::Instant::now().duration_since(x).as_micros()
+    )
 
     //   let percentEncodedInfoHash = percent_encoder::encode(info_hashBytes);
     //  println!("{:?}", percentEncodedInfoHash);

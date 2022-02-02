@@ -9,7 +9,7 @@ use tui::{
     Frame,
 };
 
-use std::{cell, sync::MutexGuard};
+use std::{cell, rc::Rc, sync::MutexGuard};
 
 // Name : Name of the root file or the folder
 // Type : Type of the file, if it's directory of a regular file
@@ -26,6 +26,8 @@ const DOWNLOAD_WIDTH_PERCENTAGE: u16 = 8;
 
 const PROGRESS: &str = "Progress";
 const PROGRESS_WIDTH_PERCENTAGE: u16 = 24;
+
+use crate::work::start::{File, FileType};
 
 // Stores all the necessary states required to render Files Tab
 pub struct FilesState {
@@ -55,6 +57,7 @@ pub struct FileRow {
     pub total_downloaded: String,
 }
 
+use cell::RefCell;
 impl FilesState {
     pub fn new() -> Self {
         FilesState {
