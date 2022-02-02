@@ -4,6 +4,7 @@ use super::files;
 use std::io::stdout;
 use std::time::Duration;
 
+use super::mouse::MouseOffset;
 use crossterm::event::{poll, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::event::{MouseButton, MouseEventKind};
 use crossterm::execute;
@@ -20,7 +21,6 @@ use std::sync::{Arc, Mutex};
 
 /// Function that represents the start of the UI rendering of hyperblow
 pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>) -> Result<()> {
-    // Enabling the raw mode and using alternate screen
     // Note : Any try to invoke println! or any other method related to stdout "fd" won't work after enabling raw mode
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -43,40 +43,6 @@ pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>) -> Result<()> {
     terminal.show_cursor()?;
 
     Ok(())
-}
-
-use std::cell;
-
-// Struct that stores the offset of mouse everytime we move the cursor
-// Note : Used to store the mouse offset as a global state
-struct MouseOffset {
-    // Offset in (x, y) format
-    offset: (cell::Cell<u16>, cell::Cell<u16>),
-}
-
-impl MouseOffset {
-    // Used to create MouseOffset instance initially
-    fn default() -> Self {
-        Self {
-            offset: (cell::Cell::new(0), cell::Cell::new(0)),
-        }
-    }
-
-    fn get_x(&self) -> u16 {
-        self.offset.0.get()
-    }
-
-    fn get_y(&self) -> u16 {
-        self.offset.1.get()
-    }
-
-    fn set_x(&self, x: u16) {
-        self.offset.0.set(x);
-    }
-
-    fn set_y(&self, y: u16) {
-        self.offset.1.set(y);
-    }
 }
 
 pub fn draw<B>(terminal: &mut Terminal<B>, filesState: Arc<Mutex<files::FilesState>>) -> Result<()>

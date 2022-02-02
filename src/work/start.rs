@@ -1,11 +1,7 @@
-// Note: When i say files, i mean it in Unix term. Folders are files as well, their type is
-// Directory
+// NOTE: When i say files, i mean it in Unix term. Folders are files as well, their type is Directory
 
 use super::torrent_parser;
 use crate::ui::files::FilesState;
-use std::borrow::Borrow;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
@@ -24,6 +20,9 @@ pub struct File {
     pub inner_files: Option<Vec<Arc<Mutex<File>>>>,
     // Size of file
     pub size: i64,
+    // Whether to download the file or not
+    // If it's a folder, then it automatically sets all the children nodes to false
+    pub should_download: bool,
 }
 
 impl File {
@@ -39,7 +38,7 @@ impl File {
         let mut doesExist = false;
         if let Some(files) = &self.inner_files {
             for (i, x) in files.iter().enumerate() {
-                if (**x).borrow().lock().unwrap().name == *fileName {
+                if (**x).lock().unwrap().name == *fileName {
                     index = Some(i);
                     doesExist = true;
                 }
@@ -58,6 +57,8 @@ impl File {
         }
         index
     }
+
+    fn shouldDownload(&mut self, state: bool) {}
 }
 
 // Starting Point for the working thread
@@ -68,16 +69,17 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
 
     let x = std::time::Instant::now();
     // Root file to store all the files
-    let root_file = Arc::new(Mutex::new(File {
+    fileState.lock().unwrap().file = Arc::new(Mutex::new(File {
         name: String::from("/"),
         file_type: FileType::DIRECTORY,
         inner_files: Some(Vec::new()),
         size: 0,
+        should_download: true,
     }));
 
     if let Some(files) = &torrentParsed.info.files {
         for file in files {
-            let mut afile = root_file.clone();
+            let mut afile = fileState.lock().unwrap().file.clone();
             for x in 0..file.path.len() {
                 let (mut idx, doesContain) = (*afile).lock().unwrap().contains(&file.path[x]);
                 if !doesContain {
@@ -95,6 +97,7 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
                             Some(vec![])
                         },
                         size: file.length,
+                        should_download: true,
                     }));
                 }
                 if let Some(f) = &(*afile.clone()).lock().unwrap().inner_files {
@@ -105,7 +108,11 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
     }
 
     {
-        if let Some(x) = &(*root_file.clone()).lock().unwrap().inner_files {
+        if let Some(x) = &(*fileState.lock().unwrap().file.clone())
+            .lock()
+            .unwrap()
+            .inner_files
+        {
             for xx in x {
                 println!("{:?}", xx);
             }

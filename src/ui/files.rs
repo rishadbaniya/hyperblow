@@ -9,7 +9,8 @@ use tui::{
     Frame,
 };
 
-use std::{cell, rc::Rc, sync::MutexGuard};
+use std::cell;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 // Name : Name of the root file or the folder
 // Type : Type of the file, if it's directory of a regular file
@@ -44,8 +45,8 @@ pub struct FilesState {
     // The difference is just 1 or -1
     scroll_state_current: std::cell::Cell<i16>,
     scroll_state_previous: std::cell::Cell<i16>,
-    pub files: Vec<FileRow>,
     pub rect: Rect,
+    pub file: Arc<Mutex<File>>,
 }
 
 #[derive(Clone)]
@@ -57,7 +58,6 @@ pub struct FileRow {
     pub total_downloaded: String,
 }
 
-use cell::RefCell;
 impl FilesState {
     pub fn new() -> Self {
         FilesState {
@@ -67,12 +67,14 @@ impl FilesState {
             len: cell::Cell::new(0),
             scroll_state_current: cell::Cell::new(0),
             scroll_state_previous: cell::Cell::new(0),
-            files: Vec::new(),
+            file: Arc::new(Mutex::new(File {
+                name: String::from("/"),
+                file_type: FileType::DIRECTORY,
+                inner_files: Some(Vec::new()),
+                size: 0,
+                should_download: true,
+            })),
         }
-    }
-
-    pub fn add_file(&mut self, v: FileRow) {
-        self.files.push(v);
     }
 
     pub fn set_top_index(&self, v: u16) {
@@ -125,7 +127,19 @@ impl FilesState {
 
         if has_clicked_on_download {
             let indexOffset = (self.get_top_index() + (offset_y - (self.rect.y + 2))) as usize;
-            self.files[indexOffset].should_download = !self.files[indexOffset].should_download;
+            let currentValue = {
+                let mut p = false;
+                if let Some(files) = &self.file.lock().unwrap().inner_files {
+                    let file = files[indexOffset].clone();
+                    p = file.lock().unwrap().should_download;
+                }
+                p
+            };
+
+            if let Some(files) = &self.file.lock().unwrap().inner_files {
+                let file = files[indexOffset].clone();
+                file.lock().unwrap().should_download = !currentValue;
+            }
         }
     }
 }
@@ -147,13 +161,6 @@ pub fn draw_files<B: Backend>(
 
     let blank_row = Row::new([""; 4]);
 
-    let file = FileRow {
-        name: String::from("0.0 - Introduction to some of the files here"),
-        file_type: String::from("Folder"),
-        should_download: false,
-        total_size: String::from("0.1Mb"),
-        total_downloaded: String::from("0.1Mb"),
-    };
     let file1 = FileRow {
         name: String::from("0.1 - Kernel data structure formats"),
         file_type: String::from("Folder"),
@@ -170,24 +177,6 @@ pub fn draw_files<B: Backend>(
     if scroll.get_top_index() == 0 && scroll.get_bottom_index() == 0 {
         scroll.set_top_index(0);
         scroll.set_bottom_index(10);
-        for i in 1..10 {
-            scroll.add_file(file.clone());
-        }
-        for i in 1..10 {
-            scroll.add_file(file1.clone());
-        }
-        for i in 1..10 {
-            scroll.add_file(file.clone());
-        }
-        for i in 1..10 {
-            scroll.add_file(file1.clone());
-        }
-        for i in 1..10 {
-            scroll.add_file(file.clone());
-        }
-        for i in 1..10 {
-            scroll.add_file(file1.clone());
-        }
         scroll.rect = size;
     }
 
@@ -202,31 +191,46 @@ pub fn draw_files<B: Backend>(
     // Scroll DOWN
     } else if scroll.get_scroll_state_previous() < scroll.get_scroll_state_current() {
         // Scroll UP only when bottom index is greater than total availaible rows
-        if scroll.get_bottom_index() < scroll.files.len() as u16 {
-            scroll.set_top_index(scroll.get_top_index() + 1);
-            scroll.set_bottom_index(scroll.get_bottom_index() + 1);
-        }
+        let root_file = scroll.file.clone();
+        if let Some(files) = &root_file.lock().unwrap().inner_files {
+            if scroll.get_bottom_index() < files.len() as u16 {
+                scroll.set_top_index(scroll.get_top_index() + 1);
+                scroll.set_bottom_index(scroll.get_bottom_index() + 1);
+            }
+        };
     }
 
-    let createTableRow = |f: FileRow| -> Row {
+    let createTableRow = |f: Arc<Mutex<crate::work::start::File>>| -> Row {
         let p: bool = ((scroll.rect.width as f32 * 0.68) as u16
             ..=(scroll.rect.width as f32 * 0.76) as u16)
             .contains(&130);
+        let name = { f.lock().unwrap().name.clone() };
+        let file_type = {
+            match f.lock().unwrap().file_type {
+                FileType::REGULAR => String::from("File"),
+                FileType::DIRECTORY => String::from("Folder"),
+            }
+        };
+        let should_download = { f.lock().unwrap().should_download };
+
         Row::new(vec![
-            Cell::from(f.name),
-            Cell::from(f.file_type),
-            if f.should_download {
+            Cell::from(name),
+            Cell::from(file_type),
+            if should_download {
                 download_yes.clone()
             } else {
                 download_no.clone()
             },
-            Cell::from(format!("{:?} ", p)),
+            Cell::from(format!("{} ", "NOTHING HERE")),
         ])
     };
 
     let mut v = vec![header_row.clone(), blank_row.clone()];
     for i in scroll.get_top_index()..scroll.get_bottom_index() {
-        v.push(createTableRow(scroll.files[i as usize].clone()));
+        let root_file = scroll.file.clone();
+        if let Some(files) = &root_file.lock().unwrap().inner_files {
+            v.push(createTableRow(files[i as usize].clone()));
+        };
     }
 
     // Create the table
