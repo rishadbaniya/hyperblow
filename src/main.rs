@@ -20,13 +20,12 @@ fn main() -> Result<()> {
     // Global State that is Shared Across Threads
     let file_state = Arc::new(Mutex::new(FilesState::new()));
 
+    // Spawn worker thread
     let file_state_working_thread = file_state.clone();
 
-    // Spawn worker thread
     let handle = thread::spawn(move || workStart(file_state_working_thread, &args[0]));
     handle.join().unwrap();
-
     // Draw the UI
-    //    ui::ui::draw_ui(file_state)?;
+    ui::ui::draw_ui(file_state)?;
     Ok(())
 }
