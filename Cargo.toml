@@ -16,5 +16,6 @@ hyper = {version = "0.14.13", features = ["full"]}
 tokio = { version = "1.16.1", features = ["full"] }
 crossterm = "0.22.1"
 tui = "0.17.0"
+reqwest = "0.11.9"
 
 
