@@ -1,14 +1,14 @@
 // This module handles everything required to do with a Tracker
 // The protocol is followed from : http://www.bittorrent.org/beps/bep_0015.html
 
-use super::torrent_parser::FileMeta;
+use bytes::{BufMut, BytesMut};
 use reqwest::Url;
 
 const TRACKER_ERROR: &str =
     "There is something wrong with the torrent file you provided \n Couldn't parse a tracker URL";
 
-// Struct to hold data for "Announce" of
-// and create a "98 byte" buffer to store the data
+// Struct to hold data for "Announce"
+// and create a "98 byte" buffer to make "Announce Request"
 // Reference : http://www.bittorrent.org/beps/bep_0015.html
 // IPv4 announce requst:
 // Offset  Size    Name    Value
@@ -27,19 +27,78 @@ const TRACKER_ERROR: &str =
 // 96      16-bit integer  port
 // 98
 pub struct Announce {
-    connection_id: i64,
-    action: i32,
-    transaction_id: i32,
-    info_hash: [u8; 20],
-    peer_id: [u8; 20],
-    downloaded: i64,
-    left: i64,
-    uploaded: i64,
-    event: i32,
-    ip_address: i32,
-    key: i32,
-    num_want: i32,
-    port: i16,
+    connection_id: Option<i64>,
+    action: Option<i32>,
+    transaction_id: Option<i32>,
+    info_hash: Option<[u8; 20]>,
+    peer_id: Option<[u8; 20]>,
+    downloaded: Option<i64>,
+    left: Option<i64>,
+    uploaded: Option<i64>,
+    event: Option<i32>,
+    ip_address: Option<i32>,
+    key: Option<i32>,
+    num_want: Option<i32>,
+    port: Option<i16>,
+}
+impl Announce {
+    // Creates an empty Announce instance
+    pub fn empty() -> Self {
+        Announce {
+            connection_id: None,
+            action: Some(1),
+            transaction_id: None,
+            info_hash: None,
+            peer_id: None,
+            downloaded: None,
+            left: None,
+            uploaded: None,
+            event: None,
+            ip_address: None,
+            key: None,
+            num_want: None,
+            port: None,
+        }
+    }
+
+    // Consumes the Announce and gives you a Buffer of 98 bytes
+    pub fn getBytesMut(&self) -> BytesMut {
+        let mut bytes = BytesMut::with_capacity(98);
+        bytes.put_i64(self.connection_id.unwrap());
+        bytes.put_i32(self.action.unwrap());
+        bytes.put_i32(self.transaction_id.unwrap());
+        bytes.put_slice(&self.info_hash.unwrap());
+        bytes.put_slice(&self.peer_id.unwrap());
+        bytes.put_i64(self.downloaded.unwrap());
+        bytes.put_i64(self.left.unwrap());
+        bytes.put_i64(self.uploaded.unwrap());
+        bytes.put_i32(self.event.unwrap());
+        bytes.put_i32(self.ip_address.unwrap());
+        bytes.put_i32(self.key.unwrap());
+        bytes.put_i32(self.num_want.unwrap());
+        bytes.put_i16(self.port.unwrap());
+        bytes
+    }
+
+    pub fn set_connection_id(&mut self, v: i64) {
+        self.connection_id = Some(v);
+    }
+
+    pub fn set_action(&mut self, v: i32) {
+        self.action = Some(v);
+    }
+
+    pub fn set_transaction_id(&mut self, v: i32) {
+        self.action = Some(v);
+    }
+
+    pub fn set_info_hash(&mut self, v: [u8; 20]) {
+        self.info_hash = Some(v);
+    }
+
+    pub fn set_peer_id(&mut self, v: [u8; 20]) {
+        self.peer_id = Some(v);
+    }
 }
 
 //Type of protocol used to connect to the tracker
