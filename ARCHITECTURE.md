@@ -9,3 +9,5 @@
 For concurrency, i'm planning on using shared state concurrency to exchange data between threads. There are problems like handling the checkbox event and other stuff, so i might use message passing as well. For now, i'm not sure what i'm gonna use. 
 
 
+## For the UDP related Tracker information : 
+http://bittorrent.org/beps/bep_0041.html
