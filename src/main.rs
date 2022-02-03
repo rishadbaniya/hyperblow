@@ -22,7 +22,6 @@ fn main() -> Result<()> {
 
     // Spawn worker thread
     let appStateWorkingThread = appState.clone();
-
     let handle = thread::spawn(move || workStart(appStateWorkingThread, &args[0]));
     handle.join().unwrap();
     // Draw the UI
