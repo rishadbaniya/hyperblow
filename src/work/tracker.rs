@@ -7,8 +7,25 @@ use reqwest::Url;
 const TRACKER_ERROR: &str =
     "There is something wrong with the torrent file you provided \n Couldn't parse a tracker URL";
 
-// Struct to hold data for "Announce" of http://www.bittorrent.org/beps/bep_0015.html
+// Struct to hold data for "Announce" of
 // and create a "98 byte" buffer to store the data
+// Reference : http://www.bittorrent.org/beps/bep_0015.html
+// IPv4 announce requst:
+// Offset  Size    Name    Value
+// 0       64-bit integer  connection_id
+// 8       32-bit integer  action          1 // announce
+// 12      32-bit integer  transaction_id
+// 16      20-byte string  info_hash
+// 36      20-byte string  peer_id
+// 56      64-bit integer  downloaded
+// 64      64-bit integer  left
+// 72      64-bit integer  uploaded
+// 80      32-bit integer  event           0 // 0: none; 1: completed; 2: started; 3: stopped
+// 84      32-bit integer  IP address      0 // default
+// 88      32-bit integer  key
+// 92      32-bit integer  num_want        -1 // default
+// 96      16-bit integer  port
+// 98
 pub struct Announce {
     connection_id: i64,
     action: i32,
@@ -26,6 +43,7 @@ pub struct Announce {
 }
 
 //Type of protocol used to connect to the tracker
+#[derive(PartialEq)]
 pub enum TrackerProtocol {
     UDP,
     HTTP,
