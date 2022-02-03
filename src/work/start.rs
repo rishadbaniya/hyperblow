@@ -73,7 +73,6 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
         fileState.lock().unwrap().name = torrentParsed.info.name.unwrap();
     }
 
-    let x = std::time::Instant::now();
     // Root file to store all the files
     fileState.lock().unwrap().file = Arc::new(Mutex::new(File {
         name: String::from("/"),
@@ -117,8 +116,18 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
     }
     println!("{} MB", (totalSize / 1024) / 1024);
 
-    //   let percentEncodedInfoHash = percent_encoder::encode(info_hashBytes);
-    //  println!("{:?}", percentEncodedInfoHash);
+    let percentEncodedInfoHash = super::percent_encoder::encode(info_hashBytes);
+    println!("{:?}", percentEncodedInfoHash);
+    println!("{:?}", torrentParsed.announce_list.unwrap());
+    println!("{:?}", torrentParsed.announce);
+
+    let async_block = async {
+        println!("YOOOOOOOOOOOOOOo");
+    };
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async_block);
+
     //
     //    let client = Client::new();
     //    let uri = format!(

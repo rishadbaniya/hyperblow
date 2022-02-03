@@ -16,7 +16,6 @@ use tui::backend::{Backend, CrosstermBackend};
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::style::Style;
 use tui::terminal::Terminal;
-use tui::widgets::canvas::{Canvas, Rectangle};
 use tui::widgets::{Block, Borders, Gauge};
 
 use crate::Result;
@@ -80,18 +79,24 @@ where
                 Rect::new(1, 2, frame.size().width - 2, 1),
             );
 
+            let downloadProgressBar = (
+                Gauge::default()
+                    .block(Block::default().title(format!("Downloading : 10.5 Mb/ 2500 Mb || Down Speed : {} Mb/s || Up Speed : {} Mb/s",3.1,2.1)))
+                    .gauge_style(Style::default().fg(tui::style::Color::Green))
+                    .percent(0),
+                Rect::new(1, 6, frame.size().width - 2, 2),
+            );
+
+            let piecesInformation = (
+                Block::default().title(format!("Total Pieces : {}  ||  Downloaded Pieces : {}  ||  Remaining Pieces : {}  ||  Piece Size : {} Kb", 2030, 30,2000,4098)),
+                Rect::new(1, 4, frame.size().width - 2, 1),
+            );
+
             frame.render_widget(details_section.0, details_section.1);
             frame.render_widget(torrent_name.0, torrent_name.1);
-
-            frame.render_widget(
-                Gauge::default()
-                    .block(Block::default().title(format!("Downloading : 10.5 Mb/ 2500 Mb")))
-                    .gauge_style(Style::default().fg(tui::style::Color::Green))
-                    .percent(1),
-                Rect::new(1, 4, frame.size().width - 2, 2),
-            );
+            frame.render_widget(downloadProgressBar.0, downloadProgressBar.1);
+            frame.render_widget(piecesInformation.0, piecesInformation.1);
             files::draw_files(frame, chunks[1], &mut filesState);
-
             // Save the current draw scroll state and use it as previous draw scroll state in
             // next draw
             filesState.set_scroll_state_previous(filesState.get_scroll_state_current());
