@@ -7,6 +7,7 @@ use std::{
     error::Error,
     sync::{Arc, Mutex},
     thread,
+    time::Duration,
 };
 use ui::files::FilesState;
 use work::start::start as workStart;
@@ -23,8 +24,10 @@ fn main() -> Result<()> {
     // Spawn worker thread
     let appStateWorkingThread = appState.clone();
     let handle = thread::spawn(move || workStart(appStateWorkingThread, &args[0]));
-    handle.join().unwrap();
+    handle.join();
+    //    handle.join().unwrap();
     // Draw the UI
+
     ui::ui::draw_ui(appState)?;
     Ok(())
 }

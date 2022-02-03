@@ -1,6 +1,6 @@
 //TODO : Add a way to toggle the state of the Download
 
-use crate::work::start::{File, FileType};
+use crate::work::file::{File, FileType};
 use std::cell;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tui::text;

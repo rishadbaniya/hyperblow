@@ -1,68 +1,12 @@
-// NOTE: When i say files, i mean it in Unix term. Folders are files as well, their type is Directory
+use bytes::BufMut;
+use crossterm::style::Stylize;
+use std::{net::SocketAddr, time::Duration};
+use tokio::{net::UdpSocket, time::timeout};
 
-use super::torrent_parser;
+// NOTE: When i say files, i mean it in Unix term. Folders are files as well, their type is Directory
+use super::{file, torrent_parser};
 use crate::ui::files::FilesState;
 use std::sync::{Arc, Mutex};
-
-#[derive(Debug)]
-pub enum FileType {
-    REGULAR,
-    DIRECTORY,
-}
-
-#[derive(Debug)]
-pub struct File {
-    // Name of the file
-    pub name: String,
-    // Type of File
-    pub file_type: FileType,
-    // Nested File Nodes if its a directory
-    pub inner_files: Option<Vec<Arc<Mutex<File>>>>,
-    // Size of file
-    pub size: i64,
-    // Whether to download the file or not
-    // If it's a folder, then it automatically sets all the children nodes to false
-    pub should_download: bool,
-}
-
-impl File {
-    // Checks if the File Node contains file with given name, upto just 1 level depth
-    //
-    //    X     -> Root File Node on which the method is called
-    //  /   \
-    // Y     Z  -> Tree Level on which this method checks
-    //
-    // and returns the index of the file in that node and whether it exists or not
-    fn contains(&self, fileName: &String) -> (Option<usize>, bool) {
-        let mut index = None;
-        let mut doesExist = false;
-        if let Some(files) = &self.inner_files {
-            for (i, x) in files.iter().enumerate() {
-                if (**x).lock().unwrap().name == *fileName {
-                    index = Some(i);
-                    doesExist = true;
-                }
-            }
-        }
-        (index, doesExist)
-    }
-
-    // Push the new Node inside of the Node that calls this method and returns the index of the
-    // pushed node
-    fn add_file(&mut self, file: File) -> usize {
-        let mut index = 0;
-        if let Some(i) = &mut self.inner_files {
-            i.push(Arc::new(Mutex::new(file)));
-            index = i.len() - 1
-        }
-        index
-    }
-
-    pub fn changeShouldDownload(&mut self) {
-        let currentDownloadState = self.should_download;
-        self.should_download = !currentDownloadState;
-    }
-}
 
 // Starting Point for the working thread
 pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
@@ -74,9 +18,9 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
     }
 
     // Root file to store all the files
-    fileState.lock().unwrap().file = Arc::new(Mutex::new(File {
+    fileState.lock().unwrap().file = Arc::new(Mutex::new(file::File {
         name: String::from("/"),
-        file_type: FileType::DIRECTORY,
+        file_type: file::FileType::DIRECTORY,
         inner_files: Some(Vec::new()),
         size: 0,
         should_download: true,
@@ -92,12 +36,12 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
                 if !doesContain {
                     let last_path_index = file.path.len() - 1;
                     totalSize += file.length;
-                    idx = Some((*afile).lock().unwrap().add_file(File {
+                    idx = Some((*afile).lock().unwrap().add_file(file::File {
                         name: String::from(&file.path[x]),
                         file_type: if x == last_path_index {
-                            FileType::REGULAR
+                            file::FileType::REGULAR
                         } else {
-                            FileType::DIRECTORY
+                            file::FileType::DIRECTORY
                         },
                         inner_files: if x == last_path_index {
                             None
@@ -114,15 +58,48 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
             }
         }
     }
-    println!("{} MB", (totalSize / 1024) / 1024);
 
     let percentEncodedInfoHash = super::percent_encoder::encode(info_hashBytes);
+    println!("{} MB", (totalSize / 1024) / 1024);
     println!("{:?}", percentEncodedInfoHash);
-    println!("{:?}", torrentParsed.announce_list.unwrap());
+    println!("{:?}", torrentParsed.announce_list.as_ref().unwrap());
     println!("{:?}", torrentParsed.announce);
 
-    let async_block = async {
-        println!("YOOOOOOOOOOOOOOo");
+    use super::tracker::Tracker;
+
+    let announce_list = torrentParsed.announce_list.as_ref().unwrap();
+    let trackers: Vec<Tracker> = Tracker::getTrackers(&torrentParsed.announce, announce_list);
+
+    let async_block = async move {
+        let localAddr: SocketAddr = "[::]:0".parse().unwrap();
+        let socket = UdpSocket::bind(localAddr).await.unwrap();
+        for tracker in trackers {
+            const PROTOCOL_ID: i64 = 0x41727101980;
+            const ACTION: i32 = 0;
+            let mut bytes_to_send = bytes::BytesMut::with_capacity(16);
+
+            //
+            // Offset  Size            Name            Value
+            // 0       32-bit integer  action          0 // connect
+            // 4       32-bit integer  transaction_id
+            // 8       64-bit integer  connection_id
+            // 16
+            //
+            bytes_to_send.put_i64(PROTOCOL_ID);
+            bytes_to_send.put_i32(ACTION);
+            bytes_to_send.put_i32(10 as i32);
+            match tracker.url.socket_addrs(|| None) {
+                Ok(addrs) => match socket.send_to(&bytes_to_send, addrs[0]).await {
+                    Ok(k) => {
+                        let mut x = [0u8; 16];
+                        timeout(Duration::from_secs(10), socket.recv_from(&mut x)).await;
+                        println!("{:?}", &x)
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
     };
     tokio::runtime::Runtime::new()
         .unwrap()
