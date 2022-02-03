@@ -1,12 +1,29 @@
 // This module handles everything required to do with a Tracker
-// TODO : Write a small note about Trackers
-//
+// The protocol is followed from : http://www.bittorrent.org/beps/bep_0015.html
 
 use super::torrent_parser::FileMeta;
 use reqwest::Url;
 
 const TRACKER_ERROR: &str =
     "There is something wrong with the torrent file you provided \n Couldn't parse a tracker URL";
+
+// Struct to hold data for "Announce" of http://www.bittorrent.org/beps/bep_0015.html
+// and create a "98 byte" buffer to store the data
+pub struct Announce {
+    connection_id: i64,
+    action: i32,
+    transaction_id: i32,
+    info_hash: [u8; 20],
+    peer_id: [u8; 20],
+    downloaded: i64,
+    left: i64,
+    uploaded: i64,
+    event: i32,
+    ip_address: i32,
+    key: i32,
+    num_want: i32,
+    port: i16,
+}
 
 //Type of protocol used to connect to the tracker
 pub enum TrackerProtocol {
