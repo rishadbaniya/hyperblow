@@ -69,6 +69,9 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
     // Get the argument at index 1 from the CLI command "rtourent xyz.torrent"
     // So that we can get the name of the file i.e xyz.torrentj
     let (torrentParsed, info_hashBytes) = torrent_parser::parse_file(&torrent_file_path);
+    {
+        fileState.lock().unwrap().name = torrentParsed.info.name.unwrap();
+    }
 
     let x = std::time::Instant::now();
     // Root file to store all the files
@@ -80,6 +83,8 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
         should_download: true,
     }));
 
+    // Total Torrent Size in Bytes
+    let mut totalSize: i64 = 0;
     if let Some(files) = &torrentParsed.info.files {
         for file in files {
             let mut afile = fileState.lock().unwrap().file.clone();
@@ -87,6 +92,7 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
                 let (mut idx, doesContain) = (*afile).lock().unwrap().contains(&file.path[x]);
                 if !doesContain {
                     let last_path_index = file.path.len() - 1;
+                    totalSize += file.length;
                     idx = Some((*afile).lock().unwrap().add_file(File {
                         name: String::from(&file.path[x]),
                         file_type: if x == last_path_index {
@@ -109,23 +115,7 @@ pub fn start(fileState: Arc<Mutex<FilesState>>, torrent_file_path: &String) {
             }
         }
     }
-
-    {
-        if let Some(x) = &(*fileState.lock().unwrap().file.clone())
-            .lock()
-            .unwrap()
-            .inner_files
-        {
-            for xx in x {
-                println!("{:?}", xx);
-            }
-        }
-    }
-
-    println!(
-        "{}",
-        std::time::Instant::now().duration_since(x).as_micros()
-    )
+    println!("{} MB", (totalSize / 1024) / 1024);
 
     //   let percentEncodedInfoHash = percent_encoder::encode(info_hashBytes);
     //  println!("{:?}", percentEncodedInfoHash);

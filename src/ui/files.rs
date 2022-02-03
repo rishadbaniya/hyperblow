@@ -3,12 +3,15 @@
 use crate::work::start::{File, FileType};
 use std::cell;
 use std::sync::{Arc, Mutex, MutexGuard};
+use tui::text;
+use tui::widgets::{Block, Borders};
 use tui::{
     backend::Backend,
+    layout::Alignment,
     layout::{Constraint, Rect},
     style::Color,
     style::Style,
-    widgets::{Cell, Row, Table},
+    widgets::{BorderType, Cell, Row, Table},
     Frame,
 };
 
@@ -38,10 +41,12 @@ pub struct FilesState {
     // if current > previous then we can say user wanted to scroll down
     // if previous < current then we can say user wanted to scroll up
     // The difference is just 1 or -1
-    scroll_state_current: std::cell::Cell<i16>,
-    scroll_state_previous: std::cell::Cell<i16>,
+    scroll_state_current: cell::Cell<i16>,
+    scroll_state_previous: cell::Cell<i16>,
     pub rect: Rect,
     pub file: Arc<Mutex<File>>,
+    // Name of the torrent
+    pub name: String,
 }
 
 impl FilesState {
@@ -59,6 +64,7 @@ impl FilesState {
                 size: 0,
                 should_download: true,
             })),
+            name: String::from(""),
         }
     }
 
@@ -106,19 +112,24 @@ impl FilesState {
     // offset_x , offset_y => Offset at which the button was clicked
     pub fn buttonClick(&mut self, offset_x: u16, offset_y: u16) {
         // X offset range, where when clicked we will assume its going for button click:w
-        let clickable_width =
-            (self.rect.width as f32 * 0.68) as u16..=(self.rect.width as f32 * 0.76) as u16;
+        let clickableWidth = ((self.rect.width as f32 * 0.68) + 1f32) as u16
+            ..=((self.rect.width as f32 * 0.76) - 1f32) as u16;
 
-        // Check if the clicked offset falls under the x offset of given range
-        let has_clicked_on_download =
-            clickable_width.contains(&offset_x) && { offset_y >= self.rect.y + 2 };
+        // Check if the clicked offset falls under the x offset of given range and the click has
+        // happened within the files
+        // + 3 => Skips the border of the top, one header row and blank row
+        // - 2 => Skips the border and one spacing of the bottom
+        let hasClickedOnDownload = clickableWidth.contains(&offset_x)
+            && { offset_y >= self.rect.y + 3 }
+            && { offset_y <= (self.rect.y + self.rect.height) - 2 };
 
-        if has_clicked_on_download {
+        if hasClickedOnDownload {
             // Index of the clicked item
-            let indexOffset = (self.get_top_index() + (offset_y - (self.rect.y + 2))) as usize;
+            // + 3 => Skips the border of the top, one header row and blank row
+            let index = (self.get_top_index() + (offset_y - (self.rect.y + 3))) as usize;
 
             // Change the current should_download state of the File
-            self.file.lock().unwrap().inner_files.as_ref().unwrap()[indexOffset]
+            self.file.lock().unwrap().inner_files.as_ref().unwrap()[index]
                 .lock()
                 .unwrap()
                 .changeShouldDownload();
@@ -149,8 +160,21 @@ pub fn draw_files<B: Backend>(
     // TODO : Way to re evaluate the bottom index when the screen resizes and size of the Files Tab
     // changes
     if scroll.get_top_index() == 0 && scroll.get_bottom_index() == 0 {
+        let maxIndexOfRootFiles = scroll
+            .file
+            .lock()
+            .unwrap()
+            .inner_files
+            .as_ref()
+            .unwrap()
+            .len() as u16;
+        let index = if maxIndexOfRootFiles < size.height - 4 {
+            maxIndexOfRootFiles
+        } else {
+            size.height - 4
+        };
         scroll.set_top_index(0);
-        scroll.set_bottom_index(10);
+        scroll.set_bottom_index(index);
         scroll.rect = size;
     }
 
@@ -205,12 +229,23 @@ pub fn draw_files<B: Backend>(
     }
 
     // Create the table
-    let table = Table::new(table_rows).widths(&[
-        Constraint::Percentage(NAME_WIDTH_PERCENTAGE),
-        Constraint::Percentage(TYPE_WIDTH_PERCENTAGE),
-        Constraint::Percentage(DOWNLOAD_WIDTH_PERCENTAGE),
-        Constraint::Percentage(PROGRESS_WIDTH_PERCENTAGE),
-    ]);
+    let table = Table::new(table_rows)
+        .widths(&[
+            Constraint::Percentage(NAME_WIDTH_PERCENTAGE),
+            Constraint::Percentage(TYPE_WIDTH_PERCENTAGE),
+            Constraint::Percentage(DOWNLOAD_WIDTH_PERCENTAGE),
+            Constraint::Percentage(PROGRESS_WIDTH_PERCENTAGE),
+        ])
+        .block(
+            Block::default()
+                .border_type(BorderType::Thick)
+                .borders(Borders::ALL)
+                .title(text::Span::styled(
+                    " File ",
+                    Style::default().fg(Color::Yellow),
+                ))
+                .title_alignment(Alignment::Center),
+        );
 
     // Render
     frame.render_widget(table, size);

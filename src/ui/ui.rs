@@ -5,21 +5,24 @@ use std::io::stdout;
 use std::time::Duration;
 
 use super::mouse::MouseOffset;
-use crossterm::event::{poll, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
-use crossterm::event::{MouseButton, MouseEventKind};
+use crossterm::event::{
+    poll, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseButton, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use tui::backend::{Backend, CrosstermBackend};
-use tui::layout::{Constraint, Layout};
+use tui::layout::{Constraint, Direction, Layout, Rect};
+use tui::style::Style;
 use tui::terminal::Terminal;
-use tui::widgets::{Block, Borders};
+use tui::widgets::canvas::{Canvas, Rectangle};
+use tui::widgets::{Block, Borders, Gauge};
 
 use crate::Result;
 use std::sync::{Arc, Mutex};
 
-/// Function that represents the start of the UI rendering of hyperblow
+// Function that represents the start of the UI rendering of hyperblow
 pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>) -> Result<()> {
     // Note : Any try to invoke println! or any other method related to stdout "fd" won't work after enabling raw mode
     enable_raw_mode()?;
@@ -49,36 +52,44 @@ pub fn draw<B>(terminal: &mut Terminal<B>, filesState: Arc<Mutex<files::FilesSta
 where
     B: Backend,
 {
-    use tui::layout::Direction;
-
     let mouse_offset = MouseOffset::default();
 
     loop {
         terminal.draw(|frame| {
             let mut filesState = filesState.lock().unwrap();
+
             // Divide the Rect of Frame vertically in 60% and 30% of the total height
             let chunks = Layout::default()
                 .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
                 .direction(Direction::Vertical)
                 .split(frame.size());
 
-            //Bottom Section
-            frame.render_widget(
+            //Top Section
+            let details_section = (
                 Block::default()
-                    .title(format!(
-                        "x : {}, y: {} , Previous : {}, Current : {} | Bottom : {}, Top : {}",
-                        mouse_offset.get_x(),
-                        mouse_offset.get_y(),
-                        filesState.get_scroll_state_previous(),
-                        filesState.get_scroll_state_current(),
-                        filesState.get_bottom_index(),
-                        filesState.get_top_index()
-                    ))
+                    .title(" Details ")
+                    .title_alignment(tui::layout::Alignment::Center)
                     .borders(Borders::ALL)
                     .border_type(tui::widgets::BorderType::Rounded),
                 chunks[0],
             );
 
+            //Torrent name inside of Top Section
+            let torrent_name = (
+                Block::default().title(format!("Name : {}", filesState.name)),
+                Rect::new(1, 2, frame.size().width - 2, 1),
+            );
+
+            frame.render_widget(details_section.0, details_section.1);
+            frame.render_widget(torrent_name.0, torrent_name.1);
+
+            frame.render_widget(
+                Gauge::default()
+                    .block(Block::default().title(format!("Downloading : 10.5 Mb/ 2500 Mb")))
+                    .gauge_style(Style::default().fg(tui::style::Color::Green))
+                    .percent(1),
+                Rect::new(1, 4, frame.size().width - 2, 2),
+            );
             files::draw_files(frame, chunks[1], &mut filesState);
 
             // Save the current draw scroll state and use it as previous draw scroll state in

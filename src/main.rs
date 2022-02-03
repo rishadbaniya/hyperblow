@@ -17,15 +17,15 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
 
-    // Global State that is Shared Across Threads
-    let file_state = Arc::new(Mutex::new(FilesState::new()));
+    // Global State Of the App that is Shared Across Threads
+    let appState = Arc::new(Mutex::new(FilesState::new()));
 
     // Spawn worker thread
-    let file_state_working_thread = file_state.clone();
+    let appStateWorkingThread = appState.clone();
 
-    let handle = thread::spawn(move || workStart(file_state_working_thread, &args[0]));
+    let handle = thread::spawn(move || workStart(appStateWorkingThread, &args[0]));
     handle.join().unwrap();
     // Draw the UI
-    ui::ui::draw_ui(file_state)?;
+    ui::ui::draw_ui(appState)?;
     Ok(())
 }
