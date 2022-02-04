@@ -1,6 +1,7 @@
 // This module handles everything required to do with a Tracker :
 // The UDP Tracker Protocol is followed from : http://www.bittorrent.org/beps/bep_0015.html
 use super::torrent_parser::FileMeta;
+use crate::Result;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use reqwest::Url;
@@ -148,7 +149,6 @@ impl AnnounceRequest {
 
     // Consumes the Announce instance and gives you a Buffer of 98 bytes that you
     // can use to make Announce Request in UDP
-    // TODO : Return a Result<BytesMut> to handle error propagated by ".unwrap()"
     pub fn getBytesMut(&self) -> BytesMut {
         let mut bytes = BytesMut::with_capacity(98);
         bytes.put_i64(self.connection_id.unwrap());
@@ -247,21 +247,24 @@ impl AnnounceResponse {
     }
 }
 
-//Type of protocol used to connect to the tracker
-#[derive(PartialEq)]
+///Type of protocol used to connect to the tracker
+#[derive(PartialEq, Debug, Clone)]
 pub enum TrackerProtocol {
     UDP,
     HTTP,
 }
 
-// Holds information about the tracker
+/// Holds information about the tracker
+#[derive(Debug, Clone)]
 pub struct Tracker {
-    pub url: Url,
-    pub protocol: TrackerProtocol,
-    pub socket_adr: Option<SocketAddr>,
+    pub url: Url,                       // Url of the Tracker
+    pub protocol: TrackerProtocol,      // Protocol Used by the tracker
+    pub socket_adr: Option<SocketAddr>, // Socket Address of the remote URL
+    pub didItResolve: bool,             // If the tracker communicated as desired or not
 }
 
 impl Tracker {
+    /// Create a new Tracker from given Url String
     pub fn new(url: &String) -> Self {
         let url = Url::parse(url).expect(TRACKER_ERROR);
         let protocol = {
@@ -275,6 +278,7 @@ impl Tracker {
             url,
             protocol,
             socket_adr: None,
+            didItResolve: false,
         }
     }
 
@@ -285,20 +289,14 @@ impl Tracker {
 
         trackers.push(Tracker::new(announce));
 
-        for trackerUrl in announce_list {
-            trackers.push(Tracker::new(&trackerUrl[0]));
+        for tracker_url in announce_list {
+            trackers.push(Tracker::new(&tracker_url[0]));
         }
         trackers
     }
 }
 
-pub fn generateTrackerList(fileMeta: &FileMeta) -> Vec<Tracker> {
-    let announce_list = fileMeta.announce_list.as_ref().unwrap();
-    let trackers: Vec<Tracker> = Tracker::getTrackers(&fileMeta.announce, announce_list);
-    trackers
-}
-
-use crate::Result;
+/// To be called at the first step of communicating with the UDP Tracker Server
 pub async fn connect_request(
     transaction_id: i32,
     socket: &UdpSocket,
@@ -314,6 +312,8 @@ pub async fn connect_request(
     Ok(connect_response)
 }
 
+/// To be called after having an instance of "ConnectResponse" which can be obtained
+/// after making a call to "connect_request"
 pub async fn annnounce_request(
     connection_response: ConnectResponse,
     socket: &UdpSocket,
@@ -332,7 +332,7 @@ pub async fn annnounce_request(
     announce_request.set_port(8001);
     announce_request.set_key(20);
     let _ = socket.send_to(&announce_request.getBytesMut(), to).await?;
-    let _ = timeout(Duration::from_secs(3), socket.recv_from(&mut response)).await?;
+    let _ = timeout(Duration::from_secs(1), socket.recv_from(&mut response)).await?;
     let announce_response = AnnounceResponse::new(&response);
     Ok(announce_response)
 }
