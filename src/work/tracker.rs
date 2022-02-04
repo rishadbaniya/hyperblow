@@ -23,22 +23,30 @@ const TRACKER_ERROR: &str =
 //
 //
 pub struct ConnectRequest {
-    protocol_id: Option<i64>,
-    action: Option<i32>,
-    transaction_id: Option<i32>,
+    pub protocol_id: i64,
+    pub action: i32,
+    pub transaction_id: Option<i32>,
 }
 
 impl ConnectRequest {
     pub fn empty() -> Self {
         Self {
-            protocol_id: Some(0x41727101980),
-            action: Some(0),
+            protocol_id: 0x41727101980,
+            action: 0,
             transaction_id: None,
         }
     }
 
     pub fn set_transaction_id(&mut self, v: i32) {
         self.transaction_id = Some(v);
+    }
+
+    pub fn getBytesMut(&self) -> BytesMut {
+        let mut bytes = BytesMut::with_capacity(16);
+        bytes.put_i64(self.protocol_id);
+        bytes.put_i32(self.action);
+        bytes.put_i32(self.transaction_id.unwrap());
+        bytes
     }
 }
 
