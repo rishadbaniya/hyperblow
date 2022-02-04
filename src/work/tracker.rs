@@ -1,15 +1,16 @@
-// This module handles everything required to do with a Tracker
+// This module handles everything required to do with a Tracker :
 // The protocol is followed from : http://www.bittorrent.org/beps/bep_0015.html
 
+use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use reqwest::Url;
 use std::net::SocketAddr;
 
 const TRACKER_ERROR: &str =
-    "There is something wrong with the torrent file you provided \n Couldn't parse a tracker URL";
+    "There is something wrong with the torrent file you provided \n Couldn't parse one of the tracker URL";
 
-// Struct to hold data for "Announce"
-// and create a "98 byte" buffer to make "Announce Request"
+// Struct to handle "Announce" request
+// Used to create a "98 byte" buffer to make "Announce Request"
 // Reference : http://www.bittorrent.org/beps/bep_0015.html
 // IPv4 announce request:
 // Offset  Size    Name    Value
@@ -27,7 +28,7 @@ const TRACKER_ERROR: &str =
 // 92      32-bit integer  num_want        The maximum number of peers you want in the reply. Use -1 for default.
 // 96      16-bit integer  port            The port you're listening on.
 // 98
-pub struct Announce {
+pub struct AnnounceRequest {
     connection_id: Option<i64>,
     action: Option<i32>,
     transaction_id: Option<i32>,
@@ -43,7 +44,7 @@ pub struct Announce {
     port: Option<i16>,
 }
 
-impl Announce {
+impl AnnounceRequest {
     // Creates an empty Announce instance
     pub fn empty() -> Self {
         let peer_id_slice = b"-BOWxxx-yyyyyyyyyyyy";
@@ -51,7 +52,7 @@ impl Announce {
         for (index, value) in peer_id_slice.iter().enumerate() {
             peer_id[index] = *value;
         }
-        Announce {
+        AnnounceRequest {
             connection_id: None,
             action: Some(1),
             transaction_id: None,
@@ -60,7 +61,7 @@ impl Announce {
             downloaded: None,
             left: None,
             uploaded: None,
-            event: Some(0),
+            event: Some(1),
             ip_address: Some(0),
             key: None,
             num_want: Some(-1),
@@ -119,6 +120,55 @@ impl Announce {
 
     pub fn set_key(&mut self, v: i32) {
         self.key = Some(v);
+    }
+}
+
+// IPv4 announce response:
+//
+// Offet      Size            Name            Value
+// 0           32-bit integer  action          1 // announce
+// 4           32-bit integer  transaction_id
+// 8           32-bit integer  interval
+// 12          32-bit integer  leechers
+// 16          32-bit integer  seeders
+// 20 + 6 * n  32-bit integer  IP address
+// 24 + 6 * n  16-bit integer  TCP port
+// 20 + 6 * Ns
+//
+// Struct to handle the response received by sending "Announce" request
+#[derive(Debug)]
+pub struct AnnounceResponse {
+    action: i32,
+    transaction_id: i32,
+    interval: i32,
+    leechers: i32,
+    seeders: i32,
+    ipAddresses: i32,
+    port: i16,
+}
+
+impl AnnounceResponse {
+    pub fn new(v: &Vec<u8>) -> Self {
+        let mut action_bytes = &v[0..=3];
+        let mut transaction_id_bytes = &v[4..=7];
+        let mut interval_bytes = &v[8..=15];
+        let mut leechers_bytes = &v[8..=15];
+        let mut seeder_bytes = &v[8..=15];
+        let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
+        let transaction_id =
+            ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes).unwrap();
+        let interval = ReadBytesExt::read_i32::<BigEndian>(&mut interval_bytes).unwrap();
+        let leechers = ReadBytesExt::read_i32::<BigEndian>(&mut leechers_bytes).unwrap();
+        let seeders = ReadBytesExt::read_i32::<BigEndian>(&mut seeder_bytes).unwrap();
+        AnnounceResponse {
+            action,
+            transaction_id,
+            interval,
+            leechers,
+            seeders,
+            ipAddresses: 0,
+            port: 0,
+        }
     }
 }
 
