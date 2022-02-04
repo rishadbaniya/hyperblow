@@ -1,5 +1,5 @@
 // This module handles everything required to do with a Tracker :
-// The protocol is followed from : http://www.bittorrent.org/beps/bep_0015.html
+// The UDP Tracker Protocol is followed from : http://www.bittorrent.org/beps/bep_0015.html
 
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
@@ -9,10 +9,56 @@ use std::net::SocketAddr;
 const TRACKER_ERROR: &str =
     "There is something wrong with the torrent file you provided \n Couldn't parse one of the tracker URL";
 
-// Struct to handle "Announce" request
+//
+// Struct to handle "Connect" request message and
+// used to create a "16 byte" buffer to make "Connect Request"
+//
+// Connect Request Bytes Structure:
+//
+// Offset  Size            Name            Value
+// 0       64-bit integer  protocol_id     0x41727101980 // magic constant
+// 8       32-bit integer  action          0 // connect
+// 12      32-bit integer  transaction_id
+// 16
+//
+//
+pub struct ConnectRequest {
+    protocol_id: Option<i64>,
+    action: Option<i32>,
+    transaction_id: Option<i32>,
+}
+
+impl ConnectRequest {
+    pub fn empty() -> Self {
+        Self {
+            protocol_id: Some(0x41727101980),
+            action: Some(0),
+            transaction_id: None,
+        }
+    }
+
+    pub fn set_transaction_id(&mut self, v: i32) {
+        self.transaction_id = Some(v);
+    }
+}
+
+// Struct to handle response from "Connect" request to the UDP Tracker
+// Used to create a an instance of AnnounceRequest
+// Connect Response Bytes Structure from the UDP Tracker Protocol :
+//
+// Offset  Size            Name            Value
+// 0       32-bit integer  action          0 // connect
+// 4       32-bit integer  transaction_id
+// 8       64-bit integer  connection_id
+// 16
+//
+pub struct ConnectResponse {}
+
+// Struct to handle "Announce" request message
 // Used to create a "98 byte" buffer to make "Announce Request"
 // Reference : http://www.bittorrent.org/beps/bep_0015.html
-// IPv4 announce request:
+//
+// IPv4 announce request Bytes Structure:
 // Offset  Size    Name    Value
 // 0       64-bit integer  connection_id   The connection id acquired from establishing the connection.
 // 8       32-bit integer  action          Action. in this case, 1 for announce. See : https://www.rasterbar.com/products/libtorrent/udp_tracker_protocol.html#actions
@@ -143,11 +189,11 @@ pub struct AnnounceResponse {
     interval: i32,
     leechers: i32,
     seeders: i32,
-    ipAddresses: i32,
-    port: i16,
+    //RemoteSocketAddresses: Vec<SocketAddr>,
 }
 
 impl AnnounceResponse {
+    // Consumes response buffer of UDP AnnounceRequest
     pub fn new(v: &Vec<u8>) -> Self {
         let mut action_bytes = &v[0..=3];
         let mut transaction_id_bytes = &v[4..=7];
@@ -166,8 +212,6 @@ impl AnnounceResponse {
             interval,
             leechers,
             seeders,
-            ipAddresses: 0,
-            port: 0,
         }
     }
 }
