@@ -93,12 +93,18 @@ impl File {
         }
     }
 
+    // Gets the total size of the File, if it's a file then it gives the total size of all the Files within that File tree
+    // Note : Its recursive
     pub fn size(&self) -> i64 {
-        let mut p = 0;
-        for x in self.inner_files.as_ref().unwrap() {
-            println!("{:?}", x);
-            println!("-----------------------------------------------------------------------------------------")
+        let mut size = 0;
+        if let Some(files) = &self.inner_files {
+            size += self.size;
+            for file in files {
+                size += file.lock().unwrap().size();
+            }
+        } else {
+            size += self.size;
         }
-        p
+        size
     }
 }
