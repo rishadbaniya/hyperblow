@@ -1,10 +1,12 @@
 // This module handles everything required to do with a Tracker :
 // The UDP Tracker Protocol is followed from : http://www.bittorrent.org/beps/bep_0015.html
-
+use super::torrent_parser::FileMeta;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use reqwest::Url;
 use std::net::SocketAddr;
+use std::time::Duration;
+use tokio::{net::UdpSocket, time::timeout};
 
 const TRACKER_ERROR: &str =
     "There is something wrong with the torrent file you provided \n Couldn't parse one of the tracker URL";
@@ -21,7 +23,7 @@ const TRACKER_ERROR: &str =
 // 12      32-bit integer  transaction_id
 // 16
 //
-//
+#[derive(Debug, Clone)]
 pub struct ConnectRequest {
     pub protocol_id: i64,
     pub action: i32,
@@ -59,8 +61,29 @@ impl ConnectRequest {
 // 4       32-bit integer  transaction_id
 // 8       64-bit integer  connection_id
 // 16
-//
-pub struct ConnectResponse {}
+#[derive(Debug, Clone)]
+pub struct ConnectResponse {
+    pub action: i32,
+    pub transaction_id: i32,
+    pub connection_id: i64,
+}
+
+impl ConnectResponse {
+    pub fn from_array_buffer(v: [u8; 20]) -> Self {
+        let mut action_bytes = &v[0..=3];
+        let mut transaction_id_bytes = &v[4..=7];
+        let mut connection_id_bytes = &v[8..=15];
+        let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
+        let transaction_id =
+            ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes).unwrap();
+        let connection_id = ReadBytesExt::read_i64::<BigEndian>(&mut connection_id_bytes).unwrap();
+        Self {
+            action,
+            transaction_id,
+            connection_id,
+        }
+    }
+}
 
 // Struct to handle "Announce" request message
 // Used to create a "98 byte" buffer to make "Announce Request"
@@ -267,4 +290,49 @@ impl Tracker {
         }
         trackers
     }
+}
+
+pub fn generateTrackerList(fileMeta: &FileMeta) -> Vec<Tracker> {
+    let announce_list = fileMeta.announce_list.as_ref().unwrap();
+    let trackers: Vec<Tracker> = Tracker::getTrackers(&fileMeta.announce, announce_list);
+    trackers
+}
+
+use crate::Result;
+pub async fn connect_request(
+    transaction_id: i32,
+    socket: &UdpSocket,
+    to: &SocketAddr,
+) -> Result<ConnectResponse> {
+    // Creates a buffer to receive response
+    let mut response = [0u8; 20];
+    let mut connect_request = ConnectRequest::empty();
+    connect_request.set_transaction_id(transaction_id);
+    let _ = socket.send_to(&connect_request.getBytesMut(), to).await?;
+    let _ = timeout(Duration::from_secs(1), socket.recv_from(&mut response)).await?;
+    let connect_response = ConnectResponse::from_array_buffer(response);
+    Ok(connect_response)
+}
+
+pub async fn annnounce_request(
+    connection_response: ConnectResponse,
+    socket: &UdpSocket,
+    to: &SocketAddr,
+    info_hash: Vec<u8>,
+) -> Result<AnnounceResponse> {
+    let mut response = vec![0; 1024];
+    let mut announce_request = AnnounceRequest::empty();
+    announce_request.set_connection_id(connection_response.connection_id);
+    announce_request.set_transaction_id(connection_response.transaction_id);
+    announce_request.set_info_hash(info_hash.try_into().unwrap());
+    announce_request.set_downloaded(0);
+    announce_request.set_uploaded(0);
+    announce_request.set_uploaded(0);
+    announce_request.set_left(100);
+    announce_request.set_port(8001);
+    announce_request.set_key(20);
+    let _ = socket.send_to(&announce_request.getBytesMut(), to).await?;
+    let _ = timeout(Duration::from_secs(3), socket.recv_from(&mut response)).await?;
+    let announce_response = AnnounceResponse::new(&response);
+    Ok(announce_response)
 }
