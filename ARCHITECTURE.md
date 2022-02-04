@@ -13,3 +13,7 @@ Reference for the UDP Tracker Protocol :
 http://xbtt.sourceforge.net/udp_tracker_protocol.html
 
 http://www.bittorrent.org/beps/bep_0015.html
+
+Reference for the Peer ID field used in "Announce" :
+
+https://www.bittorrent.org/beps/bep_0020.html
