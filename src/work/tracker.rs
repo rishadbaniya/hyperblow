@@ -70,6 +70,7 @@ impl Announce {
 
     // Consumes the Announce instance and gives you a Buffer of 98 bytes that you
     // can use to make Announce Request in UDP
+    // TODO : Return a Result<BytesMut> to handle error propagated by ".unwrap()"
     pub fn getBytesMut(&self) -> BytesMut {
         let mut bytes = BytesMut::with_capacity(98);
         bytes.put_i64(self.connection_id.unwrap());
