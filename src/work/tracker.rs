@@ -325,19 +325,25 @@ pub async fn connect_request(
     socket: &UdpSocket,
     to: &SocketAddr,
     tracker: &RefCell<Tracker>,
-) -> Result<ConnectResponse> {
+) -> Result<()> {
     let mut tracker_borrow_mut = tracker.borrow_mut();
 
     // Creates a buffer to receive response
-    let mut response = [0u8; 20];
     let mut connect_request = ConnectRequest::empty();
     connect_request.set_transaction_id(transaction_id);
     tracker_borrow_mut.connect_request = Some(connect_request.clone());
-    let _ = socket.send_to(&connect_request.getBytesMut(), to).await?;
-    let (_, _) =
-        tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut response)).await??;
-    let connect_response = ConnectResponse::from_array_buffer(response);
-    Ok(connect_response)
+    let buf = connect_request.getBytesMut();
+    let _ = socket.send_to(&buf, to).await?;
+
+    let mut buf = [0u8; 16];
+
+    socket.recv_from(&mut buf).await?;
+    println!("{:?}", buf);
+    //let _ = socket.send_to(&connect_request.getBytesMut(), to).await?;
+    Ok(())
+    //   let (_, _) =
+    //        tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut response)).await??;
+    //    let connect_response = ConnectResponse::from_array_buffer(response);
 }
 
 /// To be called after having an instance of "ConnectResponse" which can be obtained
