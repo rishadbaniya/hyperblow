@@ -12,20 +12,20 @@ pub fn parsing_thread_main(
     torrent_file_path: String,
     trackers: Arc<Mutex<Vec<RefCell<Tracker>>>>,
 ) {
+    let t = Instant::now();
     let mut file_state_lock = file_state.lock().unwrap();
     let mut trackers_lock = trackers.lock().unwrap();
-    let t = Instant::now();
+
     // Gets the metadata from the torrent file and info_hash of the torrent
     let (file_meta, info_hash) = torrent_parser::parse_file(&torrent_file_path);
-
     println!(
         "Parsed torrent file : \"{}\"             [{:?}]",
         &torrent_file_path,
         Instant::now().duration_since(t)
     );
 
-    let t = Instant::now();
     // Sets the name of the torrent file for the UI
+    let t = Instant::now();
     file_state_lock.name = file_meta.info.name.as_ref().unwrap().clone();
 
     // Root of the File Tree
@@ -57,10 +57,10 @@ pub fn parsing_thread_main(
         Instant::now().duration_since(t)
     );
 
-    let t = Instant::now();
     println!("Getting all the trackers socket address........");
 
     // Gets the socket address of all the Trackers
+    let t = Instant::now();
     let announce_list: &Vec<Vec<String>> = file_meta.announce_list.as_ref().unwrap();
     *trackers_lock = Tracker::getTrackers(&file_meta.announce, announce_list);
     for tracker in &(*trackers_lock) {
