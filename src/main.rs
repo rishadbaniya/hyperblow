@@ -46,7 +46,7 @@ fn main() -> Result<()> {
     let file_state = Arc::new(Mutex::new(FilesState::new()));
     let trackers = Arc::new(Mutex::new(trackers));
 
-    // Runs the parsing thread to completion in order to
+    // Spawn and run the parsing thread to "completion", blocking the "main thread" in order to
     // 1. Parse the torrent file
     // 2. Create the file tree
     // 3. Get the socket address of all the trackers
@@ -65,8 +65,18 @@ fn main() -> Result<()> {
     parsing_thread.join().unwrap();
 
     // Spawn worker thread
+    let working_thread_trackers = trackers.clone();
+    let working_thread_details = details.clone();
     let working_thread_params = (file_state.clone(), args[0].clone());
-    thread::spawn(move || workStart(working_thread_params));
+    let working_thread = thread::spawn(move || {
+        workStart(
+            working_thread_params,
+            working_thread_trackers,
+            working_thread_details,
+        )
+    });
+
+    working_thread.join();
 
     // Draw the UI
     ui::ui::draw_ui(file_state)?;

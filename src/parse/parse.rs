@@ -15,20 +15,24 @@ pub fn parsing_thread_main(
     details: Arc<Mutex<Details>>,
 ) {
     let t = Instant::now();
+    // Gets the lock of all the Mutex
     let mut file_state_lock = file_state.lock().unwrap();
     let mut trackers_lock = trackers.lock().unwrap();
+    let mut details_lock = details.lock().unwrap();
 
     // Gets the metadata from the torrent file and info_hash of the torrent
     let (file_meta, info_hash) = torrent_parser::parse_file(&torrent_file_path);
+    details_lock.info_hash = Some(info_hash);
+
     println!(
-        "Parsed torrent file : \"{}\"             [{:?}]",
+        "Parsed torrent file : \"{}\" ----- [{:?}]",
         &torrent_file_path,
         Instant::now().duration_since(t)
     );
 
-    // Sets the name of the torrent file for the UI
     let t = Instant::now();
-    file_state_lock.name = file_meta.info.name.as_ref().unwrap().clone();
+    // Sets the name of the torrent file for the UI
+    details_lock.name = Some(file_meta.info.name.as_ref().unwrap().clone());
 
     // Root of the File Tree
     file_state_lock.file = Arc::new(Mutex::new(File {
@@ -53,16 +57,14 @@ pub fn parsing_thread_main(
             should_download: true,
         }))])
     }
-
     println!(
-        "Generated File Tree                               [{:?}]",
+        "Generated File Tree ----- [{:?}]",
         Instant::now().duration_since(t)
     );
-
     println!("Getting all the trackers socket address........");
 
-    // Gets the socket address of all the Trackers
     let t = Instant::now();
+    // Gets the socket address of all the Trackers
     let announce_list: &Vec<Vec<String>> = file_meta.announce_list.as_ref().unwrap();
     *trackers_lock = Tracker::getTrackers(&file_meta.announce, announce_list);
     for tracker in &(*trackers_lock) {
@@ -72,7 +74,7 @@ pub fn parsing_thread_main(
         }
     }
     println!(
-        "Got all the socket address                      [{:?}]",
+        "Got all the socket address ----- [{:?}] ",
         Instant::now().duration_since(t)
     );
 }
