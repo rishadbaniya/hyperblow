@@ -1,6 +1,6 @@
-// This module handles everything required to do with a Tracker :
+// This module handles everything related with a Tracker :
 // The UDP Tracker Protocol is followed from : http://www.bittorrent.org/beps/bep_0015.html
-use super::torrent_parser::FileMeta;
+
 use crate::Result;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
@@ -11,10 +11,9 @@ use tokio::{net::UdpSocket, time::timeout};
 
 const TRACKER_ERROR: &str =
     "There is something wrong with the torrent file you provided \n Couldn't parse one of the tracker URL";
-
 //
-// Struct to handle "Connect" request message and
-// used to create a "16 byte" buffer to make "Connect Request"
+// Struct to handle the message to be sent to "Connect" on the UDP Tracker
+// Used to create a "16 byte" buffer to make "Connect Request"
 //
 // Connect Request Bytes Structure:
 //
@@ -53,8 +52,8 @@ impl ConnectRequest {
     }
 }
 
-// Struct to handle response from "Connect" request to the UDP Tracker
-// Used to create a an instance of AnnounceRequest
+// Struct to handle response message from "Connect" request to the UDP Tracker
+// Used to create an instance of AnnounceRequest
 // Connect Response Bytes Structure from the UDP Tracker Protocol :
 //
 // Offset  Size            Name            Value
@@ -108,7 +107,7 @@ impl ConnectResponse {
 // 98
 pub struct AnnounceRequest {
     connection_id: Option<i64>,
-    action: Option<i32>,
+    action: i32,
     transaction_id: Option<i32>,
     info_hash: Option<[u8; 20]>,
     peer_id: Option<[u8; 20]>,
@@ -118,7 +117,7 @@ pub struct AnnounceRequest {
     event: Option<i32>,
     ip_address: Option<i32>,
     key: Option<i32>,
-    num_want: Option<i32>,
+    num_want: i32,
     port: Option<i16>,
 }
 
@@ -132,7 +131,7 @@ impl AnnounceRequest {
         }
         AnnounceRequest {
             connection_id: None,
-            action: Some(1),
+            action: 1,
             transaction_id: None,
             info_hash: None,
             peer_id: Some(peer_id),
@@ -142,7 +141,7 @@ impl AnnounceRequest {
             event: Some(1),
             ip_address: Some(0),
             key: None,
-            num_want: Some(-1),
+            num_want: -1,
             port: None,
         }
     }
@@ -152,7 +151,7 @@ impl AnnounceRequest {
     pub fn getBytesMut(&self) -> BytesMut {
         let mut bytes = BytesMut::with_capacity(98);
         bytes.put_i64(self.connection_id.unwrap());
-        bytes.put_i32(self.action.unwrap());
+        bytes.put_i32(self.action);
         bytes.put_i32(self.transaction_id.unwrap());
         bytes.put_slice(&self.info_hash.unwrap());
         bytes.put_slice(&self.peer_id.unwrap());
@@ -162,7 +161,7 @@ impl AnnounceRequest {
         bytes.put_i32(self.event.unwrap());
         bytes.put_i32(self.ip_address.unwrap());
         bytes.put_i32(self.key.unwrap());
-        bytes.put_i32(self.num_want.unwrap());
+        bytes.put_i32(self.num_want);
         bytes.put_i16(self.port.unwrap());
         bytes
     }
@@ -220,29 +219,40 @@ pub struct AnnounceResponse {
     interval: i32,
     leechers: i32,
     seeders: i32,
-    //RemoteSocketAddresses: Vec<SocketAddr>,
+    peersAddresses: Vec<SocketAddr>,
 }
 
+use std::net::{IpAddr, Ipv4Addr};
 impl AnnounceResponse {
     // Consumes response buffer of UDP AnnounceRequest
     pub fn new(v: &Vec<u8>) -> Self {
         let mut action_bytes = &v[0..=3];
         let mut transaction_id_bytes = &v[4..=7];
-        let mut interval_bytes = &v[8..=15];
-        let mut leechers_bytes = &v[8..=15];
-        let mut seeder_bytes = &v[8..=15];
+        let mut interval_bytes = &v[8..=11];
+        let mut leechers_bytes = &v[12..=15];
+        let mut seeder_bytes = &v[16..=19];
+        let mut port_bytes = &v[24..=25];
         let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
         let transaction_id =
             ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes).unwrap();
         let interval = ReadBytesExt::read_i32::<BigEndian>(&mut interval_bytes).unwrap();
         let leechers = ReadBytesExt::read_i32::<BigEndian>(&mut leechers_bytes).unwrap();
         let seeders = ReadBytesExt::read_i32::<BigEndian>(&mut seeder_bytes).unwrap();
+        let port = ReadBytesExt::read_i16::<BigEndian>(&mut port_bytes).unwrap();
+        let socket_adr = SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(v[20], v[21], v[22], v[23])),
+            port as u16,
+        );
+        let x = 20..v.len();
+        let peersAddresses = vec![socket_adr];
+
         AnnounceResponse {
             action,
             transaction_id,
             interval,
             leechers,
             seeders,
+            peersAddresses,
         }
     }
 }
