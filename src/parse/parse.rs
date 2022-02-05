@@ -2,6 +2,7 @@ use crate::ui::files::FilesState;
 use crate::work::file::{File, FileType};
 use crate::work::torrent_parser;
 use crate::work::tracker::Tracker;
+use crate::Details;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -11,6 +12,7 @@ pub fn parsing_thread_main(
     file_state: Arc<Mutex<FilesState>>,
     torrent_file_path: String,
     trackers: Arc<Mutex<Vec<RefCell<Tracker>>>>,
+    details: Arc<Mutex<Details>>,
 ) {
     let t = Instant::now();
     let mut file_state_lock = file_state.lock().unwrap();
