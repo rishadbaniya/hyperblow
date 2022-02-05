@@ -334,9 +334,8 @@ pub async fn connect_request(
     connect_request.set_transaction_id(transaction_id);
     tracker_borrow_mut.connect_request = Some(connect_request.clone());
     let _ = socket.send_to(&connect_request.getBytesMut(), to).await?;
-    let (size, socket) =
+    let (_, _) =
         tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut response)).await??;
-    println!("{:?}", socket);
     let connect_response = ConnectResponse::from_array_buffer(response);
     Ok(connect_response)
 }
@@ -364,8 +363,7 @@ pub async fn annnounce_request(
     announce_request.set_port(8001);
     announce_request.set_key(20);
     let _ = socket.send_to(&announce_request.getBytesMut(), to).await?;
-    let (size, socket_adr) =
-        timeout(Duration::from_secs(4), socket.recv_from(&mut response)).await??;
+    let (_, _) = timeout(Duration::from_secs(4), socket.recv_from(&mut response)).await??;
 
     let announce_response = AnnounceResponse::new(&response);
     Ok(announce_response)
