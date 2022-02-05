@@ -5,8 +5,9 @@ use crate::Result;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use reqwest::Url;
-use std::net::SocketAddr;
+use std::cell::RefCell;
 use std::time::Duration;
+use std::{net::SocketAddr, time::Instant};
 use tokio::{net::UdpSocket, time::timeout};
 
 const TRACKER_ERROR: &str =
@@ -105,6 +106,7 @@ impl ConnectResponse {
 // 92      32-bit integer  num_want        The maximum number of peers you want in the reply. Use -1 for default.
 // 96      16-bit integer  port            The port you're listening on.
 // 98
+#[derive(Debug, Clone)]
 pub struct AnnounceRequest {
     connection_id: Option<i64>,
     action: i32,
@@ -212,7 +214,7 @@ impl AnnounceRequest {
 // 20 + 6 * Ns
 //
 // Struct to handle the response received by sending "Announce" request
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AnnounceResponse {
     action: i32,
     transaction_id: i32,
@@ -267,10 +269,14 @@ pub enum TrackerProtocol {
 /// Holds information about the tracker
 #[derive(Debug, Clone)]
 pub struct Tracker {
-    pub url: Url,                       // Url of the Tracker
-    pub protocol: TrackerProtocol,      // Protocol Used by the tracker
-    pub socket_adr: Option<SocketAddr>, // Socket Address of the remote URL
-    pub didItResolve: bool,             // If the tracker communicated as desired or not
+    pub url: Url,                                    // Url of the Tracker
+    pub protocol: TrackerProtocol,                   // Protocol Used by the tracker
+    pub socket_adr: Option<SocketAddr>,              // Socket Address of the remote URL
+    pub didItResolve: bool, // If the tracker communicated as desired or not
+    pub connect_request: Option<ConnectRequest>, // Data to make connect request
+    pub connect_response: Option<ConnectResponse>, // Data received from connect request as response
+    pub announce_request: Option<AnnounceRequest>, // Data to make announce request
+    pub announce_response: Option<AnnounceResponse>, // Data received from announce request as response
 }
 
 impl Tracker {
@@ -289,18 +295,25 @@ impl Tracker {
             protocol,
             socket_adr: None,
             didItResolve: false,
+            connect_request: None,
+            connect_response: None,
+            announce_request: None,
+            announce_response: None,
         }
     }
 
     /// Create list of "Tracker" from data in the
     /// announce and announce_list field of "FileMeta"
-    pub fn getTrackers(announce: &String, announce_list: &Vec<Vec<String>>) -> Vec<Tracker> {
+    pub fn getTrackers(
+        announce: &String,
+        announce_list: &Vec<Vec<String>>,
+    ) -> Vec<std::cell::RefCell<Tracker>> {
         let mut trackers: Vec<_> = Vec::new();
 
-        trackers.push(Tracker::new(announce));
+        trackers.push(std::cell::RefCell::new(Tracker::new(announce)));
 
         for tracker_url in announce_list {
-            trackers.push(Tracker::new(&tracker_url[0]));
+            trackers.push(std::cell::RefCell::new(Tracker::new(&tracker_url[0])));
         }
         trackers
     }
@@ -311,13 +324,19 @@ pub async fn connect_request(
     transaction_id: i32,
     socket: &UdpSocket,
     to: &SocketAddr,
+    tracker: &RefCell<Tracker>,
 ) -> Result<ConnectResponse> {
+    let mut tracker_borrow_mut = tracker.borrow_mut();
+
     // Creates a buffer to receive response
     let mut response = [0u8; 20];
     let mut connect_request = ConnectRequest::empty();
     connect_request.set_transaction_id(transaction_id);
+    tracker_borrow_mut.connect_request = Some(connect_request.clone());
     let _ = socket.send_to(&connect_request.getBytesMut(), to).await?;
-    let _ = timeout(Duration::from_secs(1), socket.recv_from(&mut response)).await?;
+    let (size, socket) =
+        tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut response)).await??;
+    println!("{:?}", socket);
     let connect_response = ConnectResponse::from_array_buffer(response);
     Ok(connect_response)
 }
@@ -330,6 +349,9 @@ pub async fn annnounce_request(
     to: &SocketAddr,
     info_hash: Vec<u8>,
 ) -> Result<AnnounceResponse> {
+    // Note : The message sent from announce_request is kinda dynamic in a sense that
+    // it has unknown amount of peers ip addresses and ports
+    // Buffer to store the response
     let mut response = vec![0; 1024];
     let mut announce_request = AnnounceRequest::empty();
     announce_request.set_connection_id(connection_response.connection_id);
@@ -342,7 +364,9 @@ pub async fn annnounce_request(
     announce_request.set_port(8001);
     announce_request.set_key(20);
     let _ = socket.send_to(&announce_request.getBytesMut(), to).await?;
-    let _ = timeout(Duration::from_secs(1), socket.recv_from(&mut response)).await?;
+    let (size, socket_adr) =
+        timeout(Duration::from_secs(4), socket.recv_from(&mut response)).await??;
+
     let announce_response = AnnounceResponse::new(&response);
     Ok(announce_response)
 }
