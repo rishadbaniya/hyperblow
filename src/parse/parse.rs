@@ -11,7 +11,7 @@ use std::time::Instant;
 pub fn parsing_thread_main(
     file_state: Arc<Mutex<FilesState>>,
     torrent_file_path: String,
-    trackers: Arc<Mutex<Vec<RefCell<Tracker>>>>,
+    trackers: Arc<Mutex<Vec<Arc<Mutex<RefCell<Tracker>>>>>>,
     details: Arc<Mutex<Details>>,
 ) {
     let t = Instant::now();
@@ -68,7 +68,8 @@ pub fn parsing_thread_main(
     let announce_list: &Vec<Vec<String>> = file_meta.announce_list.as_ref().unwrap();
     *trackers_lock = Tracker::getTrackers(&file_meta.announce, announce_list);
     for tracker in &(*trackers_lock) {
-        let mut tracker_borrow_mut = tracker.borrow_mut();
+        let tracker_lock = tracker.lock().unwrap();
+        let mut tracker_borrow_mut = tracker_lock.borrow_mut();
         if let Ok(addrs) = tracker_borrow_mut.url.socket_addrs(|| None) {
             tracker_borrow_mut.socket_adr = Some(addrs[0]);
         }
