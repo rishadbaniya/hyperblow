@@ -42,27 +42,15 @@ fn main() -> Result<()> {
     let parsing_thread_file_state = file_state.clone();
     let parsing_thread_torrent_file_path = args[0].clone();
     let parsing_thread_trackers = trackers.clone();
-    let parsing_thread = thread::spawn(move || {
-        parse::parsing_thread_main(
-            parsing_thread_file_state,
-            parsing_thread_torrent_file_path,
-            parsing_thread_trackers,
-            parsing_thread_details,
-        )
-    });
+    let parsing_thread =
+        thread::spawn(move || parse::parsing_thread_main(parsing_thread_file_state, parsing_thread_torrent_file_path, parsing_thread_trackers, parsing_thread_details));
     parsing_thread.join().unwrap();
 
     // Spawn worker thread
     let working_thread_trackers = trackers.clone();
     let working_thread_details = details.clone();
     let working_thread_file_state = file_state.clone();
-    let working_thread = thread::spawn(move || {
-        workStart(
-            working_thread_file_state,
-            working_thread_trackers,
-            working_thread_details,
-        )
-    });
+    let working_thread = thread::spawn(move || workStart(working_thread_file_state, working_thread_trackers, working_thread_details));
 
     working_thread.join().unwrap();
 
