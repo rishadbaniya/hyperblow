@@ -66,22 +66,13 @@ impl File {
         for file in files {
             let mut working_file = root_file.clone();
             for x in 0..file.path.len() {
-                let (mut idx, doesContain) =
-                    (*working_file).lock().unwrap().contains(&file.path[x]);
+                let (mut idx, doesContain) = (*working_file).lock().unwrap().contains(&file.path[x]);
                 if !doesContain {
                     let last_path_index = file.path.len() - 1;
                     idx = Some((*working_file).lock().unwrap().add_file(File {
                         name: String::from(&file.path[x]),
-                        file_type: if x == last_path_index {
-                            FileType::REGULAR
-                        } else {
-                            FileType::DIRECTORY
-                        },
-                        inner_files: if x == last_path_index {
-                            None
-                        } else {
-                            Some(vec![])
-                        },
+                        file_type: if x == last_path_index { FileType::REGULAR } else { FileType::DIRECTORY },
+                        inner_files: if x == last_path_index { None } else { Some(vec![]) },
                         size: file.length,
                         should_download: true,
                     }));

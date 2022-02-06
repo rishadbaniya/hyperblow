@@ -14,8 +14,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::net::UdpSocket;
 
-const TRACKER_ERROR: &str =
-    "There is something wrong with the torrent file you provided \n Couldn't parse one of the tracker URL";
+const TRACKER_ERROR: &str = "There is something wrong with the torrent file you provided \n Couldn't parse one of the tracker URL";
 //
 // Struct to handle the message to be sent to "Connect" on the UDP Tracker
 // Used to create a "16 byte" buffer to make "Connect Request"
@@ -79,8 +78,7 @@ impl ConnectResponse {
         let mut transaction_id_bytes = &v[4..=7];
         let mut connection_id_bytes = &v[8..=15];
         let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
-        let transaction_id =
-            ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes).unwrap();
+        let transaction_id = ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes).unwrap();
         let connection_id = ReadBytesExt::read_i64::<BigEndian>(&mut connection_id_bytes).unwrap();
         Self {
             action,
@@ -239,16 +237,12 @@ impl AnnounceResponse {
         let mut seeder_bytes = &v[16..=19];
         let mut port_bytes = &v[24..=25];
         let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
-        let transaction_id =
-            ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes).unwrap();
+        let transaction_id = ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes).unwrap();
         let interval = ReadBytesExt::read_i32::<BigEndian>(&mut interval_bytes).unwrap();
         let leechers = ReadBytesExt::read_i32::<BigEndian>(&mut leechers_bytes).unwrap();
         let seeders = ReadBytesExt::read_i32::<BigEndian>(&mut seeder_bytes).unwrap();
         let port = ReadBytesExt::read_i16::<BigEndian>(&mut port_bytes).unwrap();
-        let socket_adr = SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(v[20], v[21], v[22], v[23])),
-            port as u16,
-        );
+        let socket_adr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(v[20], v[21], v[22], v[23])), port as u16);
         let x = 20..v.len();
         let peersAddresses = vec![socket_adr];
 
@@ -340,10 +334,10 @@ pub struct Tracker {
     pub url: Url,                                    // Url of the Tracker
     pub protocol: TrackerProtocol,                   // Protocol Used by the tracker
     pub socket_adr: Option<SocketAddr>,              // Socket Address of the remote URL
-    pub didItResolve: bool, // If the tracker communicated as desired or not
-    pub connect_request: Option<ConnectRequest>, // Data to make connect request
-    pub connect_response: Option<ConnectResponse>, // Data received from connect request as response
-    pub announce_request: Option<AnnounceRequest>, // Data to make announce request
+    pub didItResolve: bool,                          // If the tracker communicated as desired or not
+    pub connect_request: Option<ConnectRequest>,     // Data to make connect request
+    pub connect_response: Option<ConnectResponse>,   // Data received from connect request as response
+    pub announce_request: Option<AnnounceRequest>,   // Data to make announce request
     pub announce_response: Option<AnnounceResponse>, // Data received from announce request as response
 }
 
@@ -372,30 +366,20 @@ impl Tracker {
 
     /// Create list of "Tracker" from data in the
     /// announce and announce_list field of "FileMeta"
-    pub fn getTrackers(
-        announce: &String,
-        announce_list: &Vec<Vec<String>>,
-    ) -> Vec<Arc<Mutex<RefCell<Tracker>>>> {
+    pub fn getTrackers(announce: &String, announce_list: &Vec<Vec<String>>) -> Vec<Arc<Mutex<RefCell<Tracker>>>> {
         let mut trackers: Vec<_> = Vec::new();
 
         trackers.push(Arc::new(Mutex::new(RefCell::new(Tracker::new(announce)))));
 
         for tracker_url in announce_list {
-            trackers.push(Arc::new(Mutex::new(RefCell::new(Tracker::new(
-                &tracker_url[0],
-            )))));
+            trackers.push(Arc::new(Mutex::new(RefCell::new(Tracker::new(&tracker_url[0])))));
         }
         trackers
     }
 }
 
 // To be called at the first step of communicating with the UDP Tracker Server
-pub async fn connect_request(
-    transaction_id: i32,
-    socket: &UdpSocket,
-    to: &SocketAddr,
-    tracker: Arc<Mutex<RefCell<Tracker>>>,
-) -> Result<()> {
+pub async fn connect_request(transaction_id: i32, socket: &UdpSocket, to: &SocketAddr, tracker: Arc<Mutex<RefCell<Tracker>>>) -> Result<()> {
     let tracker_lock = tracker.lock().unwrap();
     let mut tracker_borrow_mut = tracker_lock.borrow_mut();
     let mut connect_request = ConnectRequest::empty();
@@ -446,6 +430,9 @@ pub async fn scrape_request(
     info_hash: Vec<u8>,
     tracker: Arc<Mutex<RefCell<Tracker>>>,
 ) -> Result<()> {
+
+
+
     // TODO : Put ScrapeRequest instance inside of Tracker Instance
     //let tracker_lock = tracker.lock().unwrap();
     //let mut tracker_borrow_mut = tracker_lock.borrow_mut();
