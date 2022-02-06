@@ -6,6 +6,7 @@ use super::tracker::TrackerProtocol;
 use crate::details::Details;
 use crate::ui::files::FilesState;
 use crate::work::tracker::annnounce_request;
+use crate::work::tracker::scrape_request;
 use crate::work::tracker::AnnounceResponse;
 use crate::work::tracker::ConnectResponse;
 use futures::future;
@@ -21,12 +22,40 @@ pub fn start(
     trackers: Arc<Mutex<Vec<Arc<Mutex<RefCell<Tracker>>>>>>,
     details: Arc<Mutex<Details>>,
 ) {
+    const CONNECT_REQUEST_UDP_SOCKET_PORT: i16 = 8001;
+    const SCRAPE_REQUEST_UDP_SOCKET_PORT: i16 = 8002;
+    const ANNOUNCE_REQUEST_UDP_SOCKET_PORT: i16 = 8003;
+
     let info_hash = details.lock().unwrap().info_hash.clone().unwrap();
     let trackers_lock = trackers.lock().unwrap();
     let async_block = async move {
-        const PORT: i16 = 8001;
-        let socket_address: SocketAddr = format!("[::]:{}", PORT).parse().unwrap();
-        let socket = UdpSocket::bind(socket_address).await.unwrap();
+        // UDP Socket to send Connect Request and receive Connect Response
+        let connect_request_udp_socket_address: SocketAddr =
+            format!("[::]:{}", CONNECT_REQUEST_UDP_SOCKET_PORT)
+                .parse()
+                .unwrap();
+        let connect_request_udp_socket = UdpSocket::bind(connect_request_udp_socket_address)
+            .await
+            .unwrap();
+
+        // UDP Socket to send Announce Request and receive Announce Response
+        let scrape_request_udp_socket_address: SocketAddr =
+            format!("[::]:{}", SCRAPE_REQUEST_UDP_SOCKET_PORT)
+                .parse()
+                .unwrap();
+        let scrape_request_udp_socket = UdpSocket::bind(scrape_request_udp_socket_address)
+            .await
+            .unwrap();
+
+        // UDP Socket to send Scrape Request and receive Scrape Response
+        let scrape_request_udp_socket_address: SocketAddr =
+            format!("[::]:{}", ANNOUNCE_REQUEST_UDP_SOCKET_PORT)
+                .parse()
+                .unwrap();
+        let scrape_request_udp_socket = UdpSocket::bind(scrape_request_udp_socket_address)
+            .await
+            .unwrap();
+
         let mut v: Vec<_> = vec![];
 
         for tracker in &(*trackers_lock) {
@@ -34,14 +63,22 @@ pub fn start(
             let tracker_borrow = tracker_lock.borrow();
             if tracker_borrow.protocol == TrackerProtocol::UDP && tracker_borrow.socket_adr != None
             {
-                v.push(tracker_request(tracker.clone(), &socket, info_hash.clone()));
+                v.push(tracker_request(
+                    tracker.clone(),
+                    &connect_request_udp_socket,
+                    &scrape_request_udp_socket,
+                    info_hash.clone(),
+                ));
             }
         }
         drop(trackers_lock);
         join!(future::join_all(v));
     };
 
-    tokio::runtime::Runtime::new()
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(1)
+        .build()
         .unwrap()
         .block_on(async_block);
 }
@@ -52,7 +89,8 @@ use tokio::time::timeout;
 // Makes UDP request to a tracker in certain interval
 async fn tracker_request(
     tracker: Arc<Mutex<RefCell<Tracker>>>,
-    socket: &UdpSocket,
+    connect_request_udp_socket: &UdpSocket,
+    scrape_request_udp_socket: &UdpSocket,
     info_hash: Vec<u8>,
 ) {
     const TRANS_ID: i32 = 10;
@@ -64,16 +102,28 @@ async fn tracker_request(
         drop(tracker_borrow);
         drop(tracker_lock);
         // Make Connect Request to the tracker
-        if let Ok(_) = connect_request(TRANS_ID, &socket, socket_adr, tracker.clone()).await {
+        if let Ok(_) = connect_request(
+            TRANS_ID,
+            &connect_request_udp_socket,
+            socket_adr,
+            tracker.clone(),
+        )
+        .await
+        {
             // If the request was sent successfully
             let mut buf = vec![0; 16];
             // Wait for 4 secs to receive something after sending Connect Request
-            match timeout(Duration::from_secs(4), socket.recv_from(&mut buf)).await {
+            match timeout(
+                Duration::from_secs(4),
+                connect_request_udp_socket.recv_from(&mut buf),
+            )
+            .await
+            {
                 Ok(_) => {
                     let connect_response = ConnectResponse::from_array_buffer(buf);
-                    match annnounce_request(
+                    match scrape_request(
                         connect_response,
-                        socket,
+                        scrape_request_udp_socket,
                         socket_adr,
                         info_hash.clone(),
                         tracker.clone(),
@@ -82,19 +132,23 @@ async fn tracker_request(
                     {
                         Ok(_) => {
                             let mut response = vec![0; 1024];
-                            match timeout(Duration::from_secs(4), socket.recv_from(&mut response))
-                                .await
+                            match timeout(
+                                Duration::from_secs(4),
+                                scrape_request_udp_socket.recv_from(&mut response),
+                            )
+                            .await
                             {
                                 Ok(x) => {
                                     let v = x.unwrap().0;
-                                    let response = response.drain(0..v).collect();
-                                    if v >= 20 {
-                                        let annnounce_response = AnnounceResponse::new(&response);
-                                        tokio::time::sleep(Duration::from_secs(
-                                            (annnounce_response.interval - 10) as u64,
-                                        ))
-                                        .await;
-                                    }
+                                    response = response.drain(0..v).collect();
+                                    println!("Scrape Size : {}, {:?}", v, response);
+                                    //if v >= 20 {
+                                    //   let annnounce_response = AnnounceResponse::new(&response);
+                                    //  tokio::time::sleep(Duration::from_secs(
+                                    //     (annnounce_response.interval - 10) as u64,
+                                    //))
+                                    // .await;
+                                    //}
                                 }
                                 _ => {}
                             }
@@ -110,6 +164,6 @@ async fn tracker_request(
         };
 
         // Makes request to the tracker in every 5 sec
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_secs(6)).await;
     }
 }

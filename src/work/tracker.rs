@@ -313,6 +313,20 @@ impl ScrapeRequest {
     }
 }
 
+// Offset     Size            Name            Value
+// 0           32-bit integer  action          2 // scrape
+// 4           32-bit integer  transaction_id
+// 8 + 12 * n  32-bit integer  seeders
+// 12 + 12 * n 32-bit integer  completed
+// 16 + 12 * n 32-bit integer  leechers
+// 8 + 12 * N
+
+struct ScrapeReponse {
+    action: i32,
+    transaction_id: i32,
+    seeders: i32,
+}
+
 ///Type of protocol used to connect to the tracker
 #[derive(PartialEq, Debug, Clone)]
 pub enum TrackerProtocol {
