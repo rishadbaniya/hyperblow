@@ -5,9 +5,9 @@ use super::tracker::Tracker;
 use super::tracker::TrackerProtocol;
 use crate::details::Details;
 use crate::ui::files::FilesState;
-use crate::work::tracker::annnounce_request;
+//use crate::work::tracker::annnounce_request;
 use crate::work::tracker::scrape_request;
-use crate::work::tracker::AnnounceResponse;
+//use crate::work::tracker::AnnounceResponse;
 use crate::work::tracker::ConnectResponse;
 use futures::future;
 use std::cell::RefCell;
@@ -29,32 +29,18 @@ pub fn start(
     let info_hash = details.lock().unwrap().info_hash.clone().unwrap();
     let trackers_lock = trackers.lock().unwrap();
     let async_block = async move {
+
         // UDP Socket to send Connect Request and receive Connect Response
-        let connect_request_udp_socket_address: SocketAddr =
-            format!("[::]:{}", CONNECT_REQUEST_UDP_SOCKET_PORT)
-                .parse()
-                .unwrap();
-        let connect_request_udp_socket = UdpSocket::bind(connect_request_udp_socket_address)
-            .await
-            .unwrap();
+        let connect_request_udp_socket_address: SocketAddr = format!("[::]:{}", CONNECT_REQUEST_UDP_SOCKET_PORT).parse().unwrap();
+        let connect_request_udp_socket = UdpSocket::bind(connect_request_udp_socket_address).await.unwrap();
 
         // UDP Socket to send Announce Request and receive Announce Response
-        let scrape_request_udp_socket_address: SocketAddr =
-            format!("[::]:{}", SCRAPE_REQUEST_UDP_SOCKET_PORT)
-                .parse()
-                .unwrap();
-        let scrape_request_udp_socket = UdpSocket::bind(scrape_request_udp_socket_address)
-            .await
-            .unwrap();
+        let scrape_request_udp_socket_address: SocketAddr = format!("[::]:{}", SCRAPE_REQUEST_UDP_SOCKET_PORT).parse().unwrap();
+        let scrape_request_udp_socket = UdpSocket::bind(scrape_request_udp_socket_address).await.unwrap();
 
         // UDP Socket to send Scrape Request and receive Scrape Response
-        let scrape_request_udp_socket_address: SocketAddr =
-            format!("[::]:{}", ANNOUNCE_REQUEST_UDP_SOCKET_PORT)
-                .parse()
-                .unwrap();
-        let scrape_request_udp_socket = UdpSocket::bind(scrape_request_udp_socket_address)
-            .await
-            .unwrap();
+        let scrape_request_udp_socket_address: SocketAddr = format!("[::]:{}", ANNOUNCE_REQUEST_UDP_SOCKET_PORT).parse().unwrap();
+        let scrape_request_udp_socket = UdpSocket::bind(scrape_request_udp_socket_address).await.unwrap();
 
         let mut v: Vec<_> = vec![];
 
@@ -164,6 +150,6 @@ async fn tracker_request(
         };
 
         // Makes request to the tracker in every 5 sec
-        tokio::time::sleep(Duration::from_secs(6)).await;
+        tokio::time::sleep(Duration::from_secs(10)).await;
     }
 }
