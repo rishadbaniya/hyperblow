@@ -229,31 +229,42 @@ pub struct AnnounceResponse {
 use std::net::{IpAddr, Ipv4Addr};
 impl AnnounceResponse {
     // Consumes response buffer of UDP AnnounceRequest
-    pub fn new(v: &Vec<u8>) -> Self {
+    pub fn new(v: &Vec<u8>) -> Result<Self> {
         let mut action_bytes = &v[0..=3];
         let mut transaction_id_bytes = &v[4..=7];
         let mut interval_bytes = &v[8..=11];
         let mut leechers_bytes = &v[12..=15];
         let mut seeder_bytes = &v[16..=19];
-        let mut port_bytes = &v[24..=25];
-        let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
-        let transaction_id = ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes).unwrap();
-        let interval = ReadBytesExt::read_i32::<BigEndian>(&mut interval_bytes).unwrap();
-        let leechers = ReadBytesExt::read_i32::<BigEndian>(&mut leechers_bytes).unwrap();
-        let seeders = ReadBytesExt::read_i32::<BigEndian>(&mut seeder_bytes).unwrap();
-        let port = ReadBytesExt::read_i16::<BigEndian>(&mut port_bytes).unwrap();
-        let socket_adr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(v[20], v[21], v[22], v[23])), port as u16);
-        let x = 20..v.len();
-        let peersAddresses = vec![socket_adr];
+        let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes)?;
+        let transaction_id = ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes)?;
+        let interval = ReadBytesExt::read_i32::<BigEndian>(&mut interval_bytes)?;
+        let leechers = ReadBytesExt::read_i32::<BigEndian>(&mut leechers_bytes)?;
+        let seeders = ReadBytesExt::read_i32::<BigEndian>(&mut seeder_bytes)?;
 
-        AnnounceResponse {
+        // Range where all the IP addresses and Ports are situated
+        let x = 20..v.len();
+
+        if action == 3 || (x.len() % 6) != 0 {
+            return Err("Server returned error".into());
+        }
+
+        let mut peersAddresses = vec![];
+        for i in x.step_by(6) {
+            let port_bytes = vec![v[i + 4], v[i + 5]];
+            let mut port_bytes = &port_bytes[..];
+            let port = ReadBytesExt::read_i16::<BigEndian>(&mut port_bytes)?;
+            let socket_adr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(v[i], v[i + 1], v[i + 2], v[i + 3])), port as u16);
+            peersAddresses.push(socket_adr);
+        }
+
+        Ok(AnnounceResponse {
             action,
             transaction_id,
             interval,
             leechers,
             seeders,
             peersAddresses,
-        }
+        })
     }
 }
 // Offset          Size            Name            Value
@@ -430,9 +441,6 @@ pub async fn scrape_request(
     info_hash: Vec<u8>,
     tracker: Arc<Mutex<RefCell<Tracker>>>,
 ) -> Result<()> {
-
-
-
     // TODO : Put ScrapeRequest instance inside of Tracker Instance
     //let tracker_lock = tracker.lock().unwrap();
     //let mut tracker_borrow_mut = tracker_lock.borrow_mut();
