@@ -262,6 +262,42 @@ impl AnnounceResponse {
         }
     }
 }
+// Offset          Size            Name            Value
+// 0               64-bit integer  connection_id
+// 8               32-bit integer  action          2 // scrape
+// 12              32-bit integer  transaction_id
+// 16 + 20 * n     20-byte string  info_hash
+// 16 + 20 * N
+//
+struct ScrapeRequest {
+    connection_id: Option<i64>,
+    action: i32,
+    transaction_id: Option<i32>,
+    info_hash: Option<Vec<u8>>,
+}
+
+impl Default for ScrapeRequest {
+    fn default() -> Self {
+        Self {
+            connection_id: None,
+            action: 2,
+            transaction_id: None,
+            info_hash: None,
+        }
+    }
+}
+
+impl ScrapeRequest {
+    // Generates a BytesMut by consuming field of ScrapeRequest
+    fn getBytesMut(&self) -> BytesMut {
+        let mut bytes = BytesMut::with_capacity(36);
+        bytes.put_i64(self.connection_id.unwrap());
+        bytes.put_i32(self.action);
+        bytes.put_i32(self.transaction_id.unwrap());
+        bytes.put_slice(self.info_hash.as_ref().unwrap().as_slice());
+        bytes
+    }
+}
 
 ///Type of protocol used to connect to the tracker
 #[derive(PartialEq, Debug, Clone)]
