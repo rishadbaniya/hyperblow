@@ -75,7 +75,7 @@ pub fn start(
         join!(future::join_all(v));
     };
 
-    tokio::runtime::Builder::new_multi_thread()
+    tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .worker_threads(1)
         .build()
