@@ -41,7 +41,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
 
     // Global States that are shared across threads
-    let trackers: Vec<RefCell<Tracker>> = Vec::new();
+    let trackers: Vec<Arc<Mutex<RefCell<Tracker>>>> = Vec::new();
     let details = Arc::new(Mutex::new(Details::default()));
     let file_state = Arc::new(Mutex::new(FilesState::new()));
     let trackers = Arc::new(Mutex::new(trackers));
