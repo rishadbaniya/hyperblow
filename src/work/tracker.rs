@@ -1,15 +1,18 @@
 // This module handles everything related with a Tracker :
 // The UDP Tracker Protocol is followed from : http://www.bittorrent.org/beps/bep_0015.html
+// TODO : {
+//    1 : Add Scrape Request
+//    2 : Add TCP Tracker request
+// }
 
 use crate::Result;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use reqwest::Url;
 use std::cell::RefCell;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::{net::SocketAddr, time::Instant};
-use tokio::{net::UdpSocket, time::timeout};
+use tokio::net::UdpSocket;
 
 const TRACKER_ERROR: &str =
     "There is something wrong with the torrent file you provided \n Couldn't parse one of the tracker URL";

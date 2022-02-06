@@ -18,11 +18,15 @@ use tui::style::Style;
 use tui::terminal::Terminal;
 use tui::widgets::{Block, Borders, Gauge};
 
-use crate::Result;
+use crate::details::Details;
+use crate::{details, Result};
 use std::sync::{Arc, Mutex};
 
 // Function that represents the start of the UI rendering of hyperblow
-pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>) -> Result<()> {
+pub fn draw_ui(
+    fileState: Arc<Mutex<files::FilesState>>,
+    details: Arc<Mutex<Details>>,
+) -> Result<()> {
     // Note : Any try to invoke println! or any other method related to stdout "fd" won't work after enabling raw mode
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -33,7 +37,7 @@ pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Call to draw draw the UI
-    draw(&mut terminal, fileState)?;
+    draw(&mut terminal, fileState, details)?;
 
     // Restoring the terminal
     disable_raw_mode()?;
@@ -47,7 +51,11 @@ pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>) -> Result<()> {
     Ok(())
 }
 
-pub fn draw<B>(terminal: &mut Terminal<B>, filesState: Arc<Mutex<files::FilesState>>) -> Result<()>
+pub fn draw<B>(
+    terminal: &mut Terminal<B>,
+    filesState: Arc<Mutex<files::FilesState>>,
+    details: Arc<Mutex<Details>>,
+) -> Result<()>
 where
     B: Backend,
 {
@@ -87,16 +95,12 @@ where
                 Rect::new(1, 6, frame.size().width - 2, 2),
             );
 
-            let piecesInformation = (
-                Block::default().title(format!("Total Pieces : {}  ||  Downloaded Pieces : {}  ||  Remaining Pieces : {}  ||  Piece Size : {} Kb", 2030, 30,2000,4098)),
-                Rect::new(1, 4, frame.size().width - 2, 1),
-            );
 
             frame.render_widget(details_section.0, details_section.1);
             frame.render_widget(torrent_name.0, torrent_name.1);
             frame.render_widget(downloadProgressBar.0, downloadProgressBar.1);
-            frame.render_widget(piecesInformation.0, piecesInformation.1);
             files::draw_files(frame, chunks[1], &mut filesState);
+            draw_details(frame,chunks[0], details.clone());
             // Save the current draw scroll state and use it as previous draw scroll state in
             // next draw
             filesState.set_scroll_state_previous(filesState.get_scroll_state_current());
@@ -131,4 +135,26 @@ where
             };
         }
     }
+}
+
+use tui::terminal::Frame;
+
+// Draws Details section
+pub fn draw_details<B: Backend>(frame: &mut Frame<B>, size: Rect, details: Arc<Mutex<Details>>) {
+    let details_lock = details.lock().unwrap();
+    let info_hash = details_lock.info_hash.as_ref().unwrap();
+    let name = details_lock.name.as_ref().unwrap();
+
+    let name = (
+        Block::default().title(format!("Name : {}", name)),
+        Rect::new(1, 2, frame.size().width - 2, 1),
+    );
+
+    let info_hash = (
+        Block::default().title(format!("Info Hash : {:?}", info_hash)),
+        Rect::new(1, 4, frame.size().width - 2, 1),
+    );
+
+    frame.render_widget(name.0, name.1);
+    frame.render_widget(info_hash.0, info_hash.1);
 }
