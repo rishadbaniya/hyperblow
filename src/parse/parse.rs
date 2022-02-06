@@ -57,10 +57,7 @@ pub fn parsing_thread_main(
             should_download: true,
         }))])
     }
-    println!(
-        "Generated File Tree ----- [{:?}]",
-        Instant::now().duration_since(t)
-    );
+    println!("Generated File Tree ----- [{:?}]", Instant::now().duration_since(t));
     println!("Getting all the trackers socket address........");
 
     let t = Instant::now();
@@ -74,8 +71,5 @@ pub fn parsing_thread_main(
             tracker_borrow_mut.socket_adr = Some(addrs[0]);
         }
     }
-    println!(
-        "Got all the socket address ----- [{:?}] ",
-        Instant::now().duration_since(t)
-    );
+    println!("Got all the socket address ----- [{:?}] ", Instant::now().duration_since(t));
 }

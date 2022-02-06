@@ -7,9 +7,6 @@ pub struct Details {
 
 impl Default for Details {
     fn default() -> Self {
-        Self {
-            name: None,
-            info_hash: None,
-        }
+        Self { name: None, info_hash: None }
     }
 }

@@ -112,16 +112,14 @@ impl FilesState {
     // offset_x , offset_y => Offset at which the button was clicked
     pub fn buttonClick(&mut self, offset_x: u16, offset_y: u16) {
         // X offset range, where when clicked we will assume its going for button click:w
-        let clickableWidth = ((self.rect.width as f32 * 0.68) + 1f32) as u16
-            ..=((self.rect.width as f32 * 0.76) - 1f32) as u16;
+        let clickableWidth = ((self.rect.width as f32 * 0.68) + 1f32) as u16..=((self.rect.width as f32 * 0.76) - 1f32) as u16;
 
         // Check if the clicked offset falls under the x offset of given range and the click has
         // happened within the files
         // + 3 => Skips the border of the top, one header row and blank row
         // - 2 => Skips the border and one spacing of the bottom
-        let hasClickedOnDownload = clickableWidth.contains(&offset_x)
-            && { offset_y >= self.rect.y + 3 }
-            && { offset_y <= (self.rect.y + self.rect.height) - 2 };
+        let hasClickedOnDownload =
+            clickableWidth.contains(&offset_x) && { offset_y >= self.rect.y + 3 } && { offset_y <= (self.rect.y + self.rect.height) - 2 };
 
         if hasClickedOnDownload {
             // Index of the clicked item
@@ -137,20 +135,11 @@ impl FilesState {
     }
 }
 
-pub fn draw_files<B: Backend>(
-    frame: &mut Frame<B>,
-    size: Rect,
-    scroll: &mut MutexGuard<FilesState>,
-) {
+pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &mut MutexGuard<FilesState>) {
     let download_yes = Cell::from("Yes").style(Style::default().bg(Color::Green).fg(Color::Black));
     let download_no = Cell::from("No").style(Style::default().bg(Color::Red).fg(Color::Black));
 
-    let header_row = Row::new([
-        Cell::from(NAME),
-        Cell::from(TYPE),
-        Cell::from(DOWNLOAD),
-        Cell::from(PROGRESS),
-    ]);
+    let header_row = Row::new([Cell::from(NAME), Cell::from(TYPE), Cell::from(DOWNLOAD), Cell::from(PROGRESS)]);
 
     let blank_row = Row::new([""; 4]);
 
@@ -160,14 +149,7 @@ pub fn draw_files<B: Backend>(
     // TODO : Way to re evaluate the bottom index when the screen resizes and size of the Files Tab
     // changes
     if scroll.get_top_index() == 0 && scroll.get_bottom_index() == 0 {
-        let maxIndexOfRootFiles = scroll
-            .file
-            .lock()
-            .unwrap()
-            .inner_files
-            .as_ref()
-            .unwrap()
-            .len() as u16;
+        let maxIndexOfRootFiles = scroll.file.lock().unwrap().inner_files.as_ref().unwrap().len() as u16;
         let index = if maxIndexOfRootFiles < size.height - 4 {
             maxIndexOfRootFiles
         } else {
@@ -212,11 +194,7 @@ pub fn draw_files<B: Backend>(
         Row::new(vec![
             Cell::from(name),
             Cell::from(file_type),
-            if should_download {
-                download_yes.clone()
-            } else {
-                download_no.clone()
-            },
+            if should_download { download_yes.clone() } else { download_no.clone() },
             Cell::from(format!("{} ", "NOTHING HERE")),
         ])
     };
@@ -240,10 +218,7 @@ pub fn draw_files<B: Backend>(
             Block::default()
                 .border_type(BorderType::Thick)
                 .borders(Borders::ALL)
-                .title(text::Span::styled(
-                    " File ",
-                    Style::default().fg(Color::Yellow),
-                ))
+                .title(text::Span::styled(" File ", Style::default().fg(Color::Yellow)))
                 .title_alignment(Alignment::Center),
         );
 
