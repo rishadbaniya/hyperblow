@@ -3,11 +3,11 @@
 use super::tracker::connect_request;
 use super::tracker::Tracker;
 use super::tracker::TrackerProtocol;
+use crate::details::Details;
 use crate::ui::files::FilesState;
 use crate::work::tracker::annnounce_request;
 use crate::work::tracker::AnnounceResponse;
 use crate::work::tracker::ConnectResponse;
-use crate::Details;
 use futures::future;
 use std::cell::RefCell;
 use std::net::SocketAddr;
@@ -17,7 +17,7 @@ use tokio::net::UdpSocket;
 
 // Starting Point for the working thread
 pub fn start(
-    (_, _): (Arc<Mutex<FilesState>>, String),
+    file_state: Arc<Mutex<FilesState>>,
     trackers: Arc<Mutex<Vec<Arc<Mutex<RefCell<Tracker>>>>>>,
     details: Arc<Mutex<Details>>,
 ) {
@@ -38,7 +38,6 @@ pub fn start(
             }
         }
         drop(trackers_lock);
-        println!("HERE");
         join!(future::join_all(v));
     };
 
@@ -56,7 +55,6 @@ async fn tracker_request(
     socket: &UdpSocket,
     info_hash: Vec<u8>,
 ) {
-    println!("HERE");
     const TRANS_ID: i32 = 10;
 
     loop {
@@ -89,14 +87,13 @@ async fn tracker_request(
                             {
                                 Ok(x) => {
                                     let v = x.unwrap().0;
-                                    let mut response = response.drain(0..v).collect();
+                                    let response = response.drain(0..v).collect();
                                     if v >= 20 {
                                         let annnounce_response = AnnounceResponse::new(&response);
-                                        println!("Size : {:?} and {:?}", v, annnounce_response);
-                                        //tokio::time::sleep(Duration::from_secs(
-                                        //   (annnounce_response.interval - 10) as u64,
-                                        //))
-                                        //.await;
+                                        tokio::time::sleep(Duration::from_secs(
+                                            (annnounce_response.interval - 10) as u64,
+                                        ))
+                                        .await;
                                     }
                                 }
                                 _ => {}
@@ -113,6 +110,6 @@ async fn tracker_request(
         };
 
         // Makes request to the tracker in every 5 sec
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
