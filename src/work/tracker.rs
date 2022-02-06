@@ -6,6 +6,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use reqwest::Url;
 use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{net::SocketAddr, time::Instant};
 use tokio::{net::UdpSocket, time::timeout};
@@ -307,13 +308,15 @@ impl Tracker {
     pub fn getTrackers(
         announce: &String,
         announce_list: &Vec<Vec<String>>,
-    ) -> Vec<std::cell::RefCell<Tracker>> {
+    ) -> Vec<Arc<Mutex<RefCell<Tracker>>>> {
         let mut trackers: Vec<_> = Vec::new();
 
-        trackers.push(std::cell::RefCell::new(Tracker::new(announce)));
+        trackers.push(Arc::new(Mutex::new(RefCell::new(Tracker::new(announce)))));
 
         for tracker_url in announce_list {
-            trackers.push(std::cell::RefCell::new(Tracker::new(&tracker_url[0])));
+            trackers.push(Arc::new(Mutex::new(RefCell::new(Tracker::new(
+                &tracker_url[0],
+            )))));
         }
         trackers
     }
@@ -324,9 +327,10 @@ pub async fn connect_request(
     transaction_id: i32,
     socket: &UdpSocket,
     to: &SocketAddr,
-    tracker: &RefCell<Tracker>,
+    tracker: Arc<Mutex<RefCell<Tracker>>>,
 ) -> Result<()> {
-    let mut tracker_borrow_mut = tracker.borrow_mut();
+    let tracker_lock = tracker.lock().unwrap();
+    let mut tracker_borrow_mut = tracker_lock.borrow_mut();
     let mut connect_request = ConnectRequest::empty();
     connect_request.set_transaction_id(transaction_id);
     tracker_borrow_mut.connect_request = Some(connect_request.clone());
@@ -343,12 +347,13 @@ pub async fn annnounce_request(
     socket: &UdpSocket,
     to: &SocketAddr,
     info_hash: Vec<u8>,
-    tracker: &RefCell<Tracker>,
+    tracker: Arc<Mutex<RefCell<Tracker>>>,
 ) -> Result<()> {
     // Note : The message sent from announce_request is kinda dynamic in a sense that
     // it has unknown amount of peers ip addresses and ports
     // Buffer to store the response
-    let mut tracker_borrow_mut = tracker.borrow_mut();
+    let tracker_lock = tracker.lock().unwrap();
+    let mut tracker_borrow_mut = tracker_lock.borrow_mut();
 
     let mut announce_request = AnnounceRequest::empty();
     announce_request.set_connection_id(connection_response.connection_id);
