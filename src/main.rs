@@ -1,13 +1,16 @@
-#![allow(non_snake_case)]
-
 // Main thread => Draws the UI based on the working thread
 // Working thread => Works on stuffs like downloading pieces and polling trackers
 // Parsing thread => First thread to be run to parse the torrent file and create file tree
 
+#![allow(non_snake_case)]
+#![allow(unused_variables)]
+
+mod details;
 mod parse;
 mod ui;
 mod work;
 
+use details::Details;
 use std::cell::RefCell;
 use std::{
     env,
@@ -17,21 +20,6 @@ use std::{
 };
 use ui::files::FilesState;
 use work::{start::start as workStart, tracker::Tracker};
-
-// Struct that holds the state for Details Section of the UI
-#[derive(Debug, Clone)]
-pub struct Details {
-    name: Option<String>,
-    info_hash: Option<Vec<u8>>,
-}
-
-impl Default for Details {
-    fn default() -> Self {
-        let name = None;
-        let info_hash = None;
-        Self { name, info_hash }
-    }
-}
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -67,18 +55,18 @@ fn main() -> Result<()> {
     // Spawn worker thread
     let working_thread_trackers = trackers.clone();
     let working_thread_details = details.clone();
-    let working_thread_params = (file_state.clone(), args[0].clone());
+    let working_thread_file_state = file_state.clone();
     let working_thread = thread::spawn(move || {
         workStart(
-            working_thread_params,
+            working_thread_file_state,
             working_thread_trackers,
             working_thread_details,
         )
     });
 
-    working_thread.join();
+    working_thread.join().unwrap();
 
     // Draw the UI
-    ui::ui::draw_ui(file_state)?;
+    ui::ui::draw_ui(file_state, details)?;
     Ok(())
 }
