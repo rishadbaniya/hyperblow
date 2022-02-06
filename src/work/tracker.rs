@@ -70,7 +70,7 @@ pub struct ConnectResponse {
 }
 
 impl ConnectResponse {
-    pub fn from_array_buffer(v: [u8; 20]) -> Self {
+    pub fn from_array_buffer(v: Vec<u8>) -> Self {
         let mut action_bytes = &v[0..=3];
         let mut transaction_id_bytes = &v[4..=7];
         let mut connection_id_bytes = &v[8..=15];
@@ -216,12 +216,12 @@ impl AnnounceRequest {
 // Struct to handle the response received by sending "Announce" request
 #[derive(Debug, Clone)]
 pub struct AnnounceResponse {
-    action: i32,
-    transaction_id: i32,
-    interval: i32,
-    leechers: i32,
-    seeders: i32,
-    peersAddresses: Vec<SocketAddr>,
+    pub action: i32,
+    pub transaction_id: i32,
+    pub interval: i32,
+    pub leechers: i32,
+    pub seeders: i32,
+    pub peersAddresses: Vec<SocketAddr>,
 }
 
 use std::net::{IpAddr, Ipv4Addr};
@@ -327,23 +327,13 @@ pub async fn connect_request(
     tracker: &RefCell<Tracker>,
 ) -> Result<()> {
     let mut tracker_borrow_mut = tracker.borrow_mut();
-
-    // Creates a buffer to receive response
     let mut connect_request = ConnectRequest::empty();
     connect_request.set_transaction_id(transaction_id);
     tracker_borrow_mut.connect_request = Some(connect_request.clone());
     let buf = connect_request.getBytesMut();
-    let _ = socket.send_to(&buf, to).await?;
-
-    let mut buf = [0u8; 16];
-
-    socket.recv_from(&mut buf).await?;
-    println!("{:?}", buf);
-    //let _ = socket.send_to(&connect_request.getBytesMut(), to).await?;
+    socket.send_to(&buf, to).await?;
+    tracker_borrow_mut.connect_request = Some(connect_request);
     Ok(())
-    //   let (_, _) =
-    //        tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut response)).await??;
-    //    let connect_response = ConnectResponse::from_array_buffer(response);
 }
 
 /// To be called after having an instance of "ConnectResponse" which can be obtained
@@ -353,11 +343,13 @@ pub async fn annnounce_request(
     socket: &UdpSocket,
     to: &SocketAddr,
     info_hash: Vec<u8>,
-) -> Result<AnnounceResponse> {
+    tracker: &RefCell<Tracker>,
+) -> Result<()> {
     // Note : The message sent from announce_request is kinda dynamic in a sense that
     // it has unknown amount of peers ip addresses and ports
     // Buffer to store the response
-    let mut response = vec![0; 1024];
+    let mut tracker_borrow_mut = tracker.borrow_mut();
+
     let mut announce_request = AnnounceRequest::empty();
     announce_request.set_connection_id(connection_response.connection_id);
     announce_request.set_transaction_id(connection_response.transaction_id);
@@ -368,9 +360,9 @@ pub async fn annnounce_request(
     announce_request.set_left(100);
     announce_request.set_port(8001);
     announce_request.set_key(20);
-    let _ = socket.send_to(&announce_request.getBytesMut(), to).await?;
-    let (_, _) = timeout(Duration::from_secs(4), socket.recv_from(&mut response)).await??;
-
-    let announce_response = AnnounceResponse::new(&response);
-    Ok(announce_response)
+    socket.send_to(&announce_request.getBytesMut(), to).await?;
+    tracker_borrow_mut.announce_request = Some(announce_request);
+    //let (_, _) = timeout(Duration::from_secs(4), socket.recv_from(&mut response)).await??;
+    //let announce_response = AnnounceResponse::new(&response);
+    Ok(())
 }
