@@ -12,14 +12,13 @@ use futures::future;
 use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use tokio::join;
 use tokio::net::UdpSocket;
 
 // Starting Point for the working thread
 pub fn start(
     (_, _): (Arc<Mutex<FilesState>>, String),
-    trackers: Arc<Mutex<Vec<RefCell<Tracker>>>>,
+    trackers: Arc<Mutex<Vec<Arc<Mutex<RefCell<Tracker>>>>>>,
     details: Arc<Mutex<Details>>,
 ) {
     let info_hash = details.lock().unwrap().info_hash.clone().unwrap();
@@ -29,16 +28,18 @@ pub fn start(
         let socket_address: SocketAddr = format!("[::]:{}", PORT).parse().unwrap();
         let socket = UdpSocket::bind(socket_address).await.unwrap();
         let mut v: Vec<_> = vec![];
+
         for tracker in &(*trackers_lock) {
-            let tracker_borrow = tracker.borrow();
+            let tracker_lock = tracker.lock().unwrap();
+            let tracker_borrow = tracker_lock.borrow();
             if tracker_borrow.protocol == TrackerProtocol::UDP && tracker_borrow.socket_adr != None
             {
-                v.push(tracker_request(tracker, &socket, info_hash.clone()));
+                v.push(tracker_request(tracker.clone(), &socket, info_hash.clone()));
             }
         }
+        drop(trackers_lock);
+        println!("HERE");
         join!(future::join_all(v));
-
-        //udp_tracker_recv(&socket).await;
     };
 
     tokio::runtime::Runtime::new()
@@ -50,16 +51,22 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 // Makes UDP request to a tracker in certain interval
-async fn tracker_request(tracker: &RefCell<Tracker>, socket: &UdpSocket, info_hash: Vec<u8>) {
+async fn tracker_request(
+    tracker: Arc<Mutex<RefCell<Tracker>>>,
+    socket: &UdpSocket,
+    info_hash: Vec<u8>,
+) {
+    println!("HERE");
     const TRANS_ID: i32 = 10;
 
     loop {
-        let tracker_borrow = tracker.borrow();
+        let tracker_lock = tracker.lock().unwrap();
+        let tracker_borrow = tracker_lock.borrow();
         let socket_adr = &tracker_borrow.socket_adr.unwrap();
         drop(tracker_borrow);
-
+        drop(tracker_lock);
         // Make Connect Request to the tracker
-        if let Ok(_) = connect_request(TRANS_ID, &socket, socket_adr, tracker).await {
+        if let Ok(_) = connect_request(TRANS_ID, &socket, socket_adr, tracker.clone()).await {
             // If the request was sent successfully
             let mut buf = vec![0; 16];
             // Wait for 4 secs to receive something after sending Connect Request
@@ -71,7 +78,7 @@ async fn tracker_request(tracker: &RefCell<Tracker>, socket: &UdpSocket, info_ha
                         socket,
                         socket_adr,
                         info_hash.clone(),
-                        tracker,
+                        tracker.clone(),
                     )
                     .await
                     {
@@ -86,10 +93,10 @@ async fn tracker_request(tracker: &RefCell<Tracker>, socket: &UdpSocket, info_ha
                                     if v >= 20 {
                                         let annnounce_response = AnnounceResponse::new(&response);
                                         println!("Size : {:?} and {:?}", v, annnounce_response);
-                                        tokio::time::sleep(Duration::from_secs(
-                                            (annnounce_response.interval - 10) as u64,
-                                        ))
-                                        .await;
+                                        //tokio::time::sleep(Duration::from_secs(
+                                        //   (annnounce_response.interval - 10) as u64,
+                                        //))
+                                        //.await;
                                     }
                                 }
                                 _ => {}
@@ -104,7 +111,6 @@ async fn tracker_request(tracker: &RefCell<Tracker>, socket: &UdpSocket, info_ha
                 }
             };
         };
-        let tracker_borrow = tracker.borrow();
 
         // Makes request to the tracker in every 5 sec
         tokio::time::sleep(Duration::from_secs(10)).await;
