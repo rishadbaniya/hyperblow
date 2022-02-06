@@ -1,28 +1,36 @@
 // NOTE: When i say files, i mean it in Unix term. Folders are files as well, their type is Directory
 
-use super::tracker::connect_request;
-use super::tracker::Tracker;
-use super::tracker::TrackerProtocol;
+use super::tracker::{annnounce_request, connect_request, AnnounceResponse, ConnectResponse, Tracker, TrackerProtocol};
 use crate::details::Details;
 use crate::ui::files::FilesState;
-use crate::work::tracker::scrape_request;
-use crate::work::tracker::ConnectResponse;
 use futures::future::join_all;
+use futures::TryFutureExt;
 use std::cell::RefCell;
-use std::net::SocketAddr;
+use std::collections::{HashMap, HashSet};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::join;
-use tokio::net::UdpSocket;
+use tokio::net::{TcpSocket, TcpStream, UdpSocket};
+use tokio::time::timeout;
 
 // Starting Point for the working thread
 pub fn start(file_state: Arc<Mutex<FilesState>>, trackers: Arc<Mutex<Vec<Arc<Mutex<RefCell<Tracker>>>>>>, details: Arc<Mutex<Details>>) {
     const CONNECT_REQUEST_UDP_SOCKET_PORT: i16 = 8001;
     const SCRAPE_REQUEST_UDP_SOCKET_PORT: i16 = 8002;
     const ANNOUNCE_REQUEST_UDP_SOCKET_PORT: i16 = 8003;
+    const PEERS_TCP_SOCKET_PORT: i16 = 8004;
+
+    let peers: Rc<RefCell<Vec<SocketAddr>>> = Rc::new(RefCell::new(Vec::new()));
 
     let info_hash = details.lock().unwrap().info_hash.clone().unwrap();
 
     let async_block = async move {
+        let peers_tcp_socket_address: SocketAddr = format!("127.0.0.1:{}", PEERS_TCP_SOCKET_PORT).parse().unwrap();
+        let peers_tcp_socket = Arc::new(TcpSocket::new_v4().unwrap());
+        peers_tcp_socket.bind(peers_tcp_socket_address).unwrap();
+
         // UDP Socket to send Connect Request and receive Connect Response
         let connect_request_udp_socket_address: SocketAddr = format!("[::]:{}", CONNECT_REQUEST_UDP_SOCKET_PORT).parse().unwrap();
         let connect_request_udp_socket = UdpSocket::bind(connect_request_udp_socket_address).await.unwrap();
@@ -36,14 +44,22 @@ pub fn start(file_state: Arc<Mutex<FilesState>>, trackers: Arc<Mutex<Vec<Arc<Mut
         let annnounce_request_udp_socket = UdpSocket::bind(annnounce_request_udp_socket_address).await.unwrap();
 
         let trackers_request = trackers_request(
-            trackers,
+            trackers.clone(),
             &connect_request_udp_socket,
             &scrape_request_udp_socket,
             &annnounce_request_udp_socket,
             info_hash.clone(),
         );
 
-        join!(trackers_request);
+        let mut v = Vec::new();
+        for _ in 1..100 {
+            let peers_request = peers_request(trackers.clone(), &peers_tcp_socket);
+            v.push(peers_request);
+        }
+
+        join_all(v).await;
+
+        //        join!(trackers_request, peers_request);
     };
 
     tokio::runtime::Builder::new_current_thread()
@@ -54,8 +70,28 @@ pub fn start(file_state: Arc<Mutex<FilesState>>, trackers: Arc<Mutex<Vec<Arc<Mut
         .block_on(async_block);
 }
 
-use std::time::Duration;
-use tokio::time::timeout;
+// Polls all the peers concurrently
+async fn peers_request(trackers: Arc<Mutex<Vec<Arc<Mutex<RefCell<Tracker>>>>>>, peers_tcp_socket: &TcpSocket) {
+    loop {
+        let t = Instant::now();
+        let xx: SocketAddr = "142.250.74.238:80".parse().unwrap();
+        let x = TcpStream::connect(xx).await.unwrap();
+        println!("DID IT WORK {:?} {:?}", x, Instant::now().duration_since(t));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    //let trackers_lock = trackers.lock().unwrap();
+    //let mut h = HashSet::new();
+    //for tracker in &(*trackers_lock) {
+    //let tracker_lock = tracker.lock().unwrap();
+    // let tracker_borrow = tracker_lock.borrow();
+    //  for socket in &tracker_borrow.announce_response.as_ref().unwrap().peersAddresses {
+    //       h.insert(socket);
+    //    }
+    // }
+}
+
+//async fn peer_request(peers_tcp_socket: &TcpSocket, socket_adr: &SocketAddr) {}
 
 // Polls all the trackers concurrently
 async fn trackers_request(
@@ -75,6 +111,7 @@ async fn trackers_request(
                 tracker.clone(),
                 &connect_request_udp_socket,
                 &scrape_request_udp_socket,
+                &annnounce_request_udp_socket,
                 info_hash.clone(),
             ));
         }
@@ -88,6 +125,7 @@ async fn tracker_request(
     tracker: Arc<Mutex<RefCell<Tracker>>>,
     connect_request_udp_socket: &UdpSocket,
     scrape_request_udp_socket: &UdpSocket,
+    annnounce_request_udp_socket: &UdpSocket,
     info_hash: Vec<u8>,
 ) {
     const TRANS_ID: i32 = 10;
@@ -107,14 +145,20 @@ async fn tracker_request(
             match timeout(Duration::from_secs(4), connect_request_udp_socket.recv_from(&mut buf)).await {
                 Ok(_) => {
                     let connect_response = ConnectResponse::from_array_buffer(buf);
-                    match scrape_request(connect_response, scrape_request_udp_socket, socket_adr, info_hash.clone(), tracker.clone()).await {
+                    match annnounce_request(connect_response, scrape_request_udp_socket, socket_adr, info_hash.clone(), tracker.clone()).await {
                         Ok(_) => {
                             let mut response = vec![0; 1024];
                             match timeout(Duration::from_secs(4), scrape_request_udp_socket.recv_from(&mut response)).await {
                                 Ok(x) => {
                                     let v = x.unwrap().0;
+                                    //    println!("{:?}", response);
                                     response = response.drain(0..v).collect();
-                                    println!("{:?}", response);
+                                    //   println!("{:?}", response);
+                                    if let Ok(resp) = AnnounceResponse::new(&response) {
+                                        println!("{:?}", resp);
+                                        tokio::time::sleep(Duration::from_secs(resp.interval as u64)).await;
+                                    } else {
+                                    }
                                 }
                                 _ => {}
                             }
