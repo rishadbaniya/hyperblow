@@ -297,6 +297,20 @@ impl ScrapeRequest {
         bytes.put_slice(self.info_hash.as_ref().unwrap().as_slice());
         bytes
     }
+
+    fn set_connection_id(&mut self, v: i64) {
+        self.connection_id = Some(v);
+    }
+
+    fn set_transaction_id(&mut self, v: i32) {
+        self.transaction_id = Some(v);
+    }
+
+    // NOTE : It doesnt explicity takes a info hash of 20 bytes
+    // TODO : Make sure the input is 20 bytes so that any sort of bug doesn't occur
+    fn set_info_hash(&mut self, v: Vec<u8>) {
+        self.info_hash = Some(v);
+    }
 }
 
 ///Type of protocol used to connect to the tracker
@@ -361,7 +375,7 @@ impl Tracker {
     }
 }
 
-/// To be called at the first step of communicating with the UDP Tracker Server
+// To be called at the first step of communicating with the UDP Tracker Server
 pub async fn connect_request(
     transaction_id: i32,
     socket: &UdpSocket,
@@ -379,8 +393,8 @@ pub async fn connect_request(
     Ok(())
 }
 
-/// To be called after having an instance of "ConnectResponse" which can be obtained
-/// after making a call to "connect_request"
+// To be called after having an instance of "ConnectResponse" which can be obtained
+// after making a call to "connect_request"
 pub async fn annnounce_request(
     connection_response: ConnectResponse,
     socket: &UdpSocket,
@@ -408,5 +422,25 @@ pub async fn annnounce_request(
     tracker_borrow_mut.announce_request = Some(announce_request);
     //let (_, _) = timeout(Duration::from_secs(4), socket.recv_from(&mut response)).await??;
     //let announce_response = AnnounceResponse::new(&response);
+    Ok(())
+}
+
+pub async fn scrape_request(
+    connection_response: ConnectResponse,
+    socket: &UdpSocket,
+    to: &SocketAddr,
+    info_hash: Vec<u8>,
+    tracker: Arc<Mutex<RefCell<Tracker>>>,
+) -> Result<()> {
+    // TODO : Put ScrapeRequest instance inside of Tracker Instance
+    //let tracker_lock = tracker.lock().unwrap();
+    //let mut tracker_borrow_mut = tracker_lock.borrow_mut();
+    //
+    let mut scrape_request = ScrapeRequest::default();
+    scrape_request.set_connection_id(connection_response.connection_id);
+    scrape_request.set_transaction_id(connection_response.transaction_id);
+    scrape_request.set_info_hash(info_hash.clone());
+
+    socket.send_to(&scrape_request.getBytesMut(), to).await?;
     Ok(())
 }
