@@ -4,6 +4,7 @@
 //    1 : Add Scrape Request
 //    2 : Add TCP Tracker request
 // }
+//
 
 use crate::Result;
 use byteorder::{BigEndian, ReadBytesExt};
@@ -12,7 +13,10 @@ use reqwest::Url;
 use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::net::UdpSocket;
+use tokio::sync;
+use tokio::sync::mpsc::Sender;
 
 const TRACKER_ERROR: &str = "There is something wrong with the torrent file you provided \n Couldn't parse one of the tracker URL";
 //
@@ -377,21 +381,21 @@ impl Tracker {
 
     /// Create list of "Tracker" from data in the
     /// announce and announce_list field of "FileMeta"
-    pub fn getTrackers(announce: &String, announce_list: &Vec<Vec<String>>) -> Vec<Arc<Mutex<RefCell<Tracker>>>> {
+    pub fn getTrackers(announce: &String, announce_list: &Vec<Vec<String>>) -> Vec<Arc<sync::Mutex<RefCell<Tracker>>>> {
         let mut trackers: Vec<_> = Vec::new();
 
-        trackers.push(Arc::new(Mutex::new(RefCell::new(Tracker::new(announce)))));
+        trackers.push(Arc::new(sync::Mutex::new(RefCell::new(Tracker::new(announce)))));
 
         for tracker_url in announce_list {
-            trackers.push(Arc::new(Mutex::new(RefCell::new(Tracker::new(&tracker_url[0])))));
+            trackers.push(Arc::new(sync::Mutex::new(RefCell::new(Tracker::new(&tracker_url[0])))));
         }
         trackers
     }
 }
 
-// To be called at the first step of communicating with the UDP Tracker Server
-pub async fn connect_request(transaction_id: i32, socket: &UdpSocket, to: &SocketAddr, tracker: Arc<Mutex<RefCell<Tracker>>>) -> Result<()> {
-    let tracker_lock = tracker.lock().unwrap();
+// To be called at the first step of communicating with the UDP Tracker Servera
+pub async fn connect_request(transaction_id: i32, socket: &UdpSocket, to: &SocketAddr, tracker: Arc<sync::Mutex<RefCell<Tracker>>>) -> Result<()> {
+    let tracker_lock = tracker.lock().await;
     let mut tracker_borrow_mut = tracker_lock.borrow_mut();
     let mut connect_request = ConnectRequest::empty();
     connect_request.set_transaction_id(transaction_id);
@@ -452,4 +456,72 @@ pub async fn scrape_request(
 
     socket.send_to(&scrape_request.getBytesMut(), to).await?;
     Ok(())
+}
+
+//
+// It Constantly listens on the UDP socket for all the message and
+// after receiving the response, it communicates with the specific "Tracker" using "Channel" by
+// sending the received response through "Sender"
+//
+// By all the responses i mean "Connect Response" "Announce Response" and "Scrape Reponse".
+// It will automatically figure out which response is which and for which Tracker
+//
+// Figuring out which response is for which Tracker :
+// Here, all the socket address of Trackers are taken in their respective index and kept in a vec
+// called "socket_adresses" in "String" form, so when some UDP response comes from far way Server,
+// address from where the message came is taken in "String" form and the index of the
+// socket address is found by tallying it against "socket_adresses", this index is same as the index in which
+// Tracker is kept in trackers and Sender for Tracker in "senders"
+//
+// If the action != 3 i.e error from the server, then the message is forwaded through the Channel
+// to the respective Tracker through "Sender"
+//
+
+pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>>>, trackers: Arc<sync::Mutex<Vec<Arc<sync::Mutex<RefCell<Tracker>>>>>>) {
+    let socket_adresses = {
+        println!("TRYING TO GET LOCK");
+        let trackers_lock = trackers.lock().await;
+        println!("DIDNT GET LOCK");
+        let mut socket_adresses = Vec::new();
+        for tracker in &(*trackers_lock) {
+            if let Some(s) = &tracker.lock().await.borrow().socket_adr {
+                socket_adresses.push(format!("{}:{}", s.ip(), s.port()));
+            } else {
+                socket_adresses.push(String::from(""))
+            }
+        }
+        socket_adresses
+    };
+
+    loop {
+        let mut buf = vec![0; 1024];
+        match udp_socket.recv_from(&mut buf).await {
+            Ok(v) => {
+                // DEBUG
+                let x = Instant::now();
+
+                let size = v.0;
+                let buf = buf.drain(0..v.0).collect::<Vec<u8>>();
+                let socket_adr = v.1;
+                let ip = format!("{}", socket_adr.ip()).replace(":", "").replace("f", "");
+                let port = socket_adr.port();
+                let socket_adr = format!("{}:{}", ip, port);
+                for (i, v) in socket_adresses.iter().enumerate() {
+                    if *v == socket_adr {
+                        let mut action_bytes = &buf[0..=3];
+                        let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
+                        if action != 3 {
+                            senders[i].send(buf).await;
+                        }
+                        break;
+                    }
+                }
+
+                // DEBUG
+                println!("{:?}", socket_adr);
+                println!("{:?}", Instant::now().duration_since(x));
+            }
+            _ => {}
+        }
+    }
 }

@@ -6,18 +6,19 @@ use crate::Details;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use tokio::sync;
 
 // Starting point for the parsing thread
 pub fn parsing_thread_main(
     file_state: Arc<Mutex<FilesState>>,
     torrent_file_path: String,
-    trackers: Arc<Mutex<Vec<Arc<Mutex<RefCell<Tracker>>>>>>,
+    trackers: Arc<sync::Mutex<Vec<Arc<sync::Mutex<RefCell<Tracker>>>>>>,
     details: Arc<Mutex<Details>>,
 ) {
     let t = Instant::now();
     // Gets the lock of all the Mutex
     let mut file_state_lock = file_state.lock().unwrap();
-    let mut trackers_lock = trackers.lock().unwrap();
+    let mut trackers_lock = trackers.blocking_lock();
     let mut details_lock = details.lock().unwrap();
 
     // Gets the metadata from the torrent file and info_hash of the torrent
@@ -65,7 +66,7 @@ pub fn parsing_thread_main(
     let announce_list: &Vec<Vec<String>> = file_meta.announce_list.as_ref().unwrap();
     *trackers_lock = Tracker::getTrackers(&file_meta.announce, announce_list);
     for tracker in &(*trackers_lock) {
-        let tracker_lock = tracker.lock().unwrap();
+        let tracker_lock = tracker.blocking_lock();
         let mut tracker_borrow_mut = tracker_lock.borrow_mut();
         if let Ok(addrs) = tracker_borrow_mut.url.socket_addrs(|| None) {
             tracker_borrow_mut.socket_adr = Some(addrs[0]);
