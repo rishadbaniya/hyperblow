@@ -1,9 +1,10 @@
 use super::torrent_parser::parse_file;
 use crate::ui::files::FilesState;
 use crate::work::file::{File, FileType};
-use crate::work::tracker::Tracker;
+use crate::work::tracker::{self, Tracker};
 use crate::Details;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::Mutex as TokioMutex;
@@ -74,9 +75,57 @@ pub fn parsing_thread_main(
         if let Ok(addrs) = tracker_borrow_mut.url.socket_addrs(|| None) {
             tracker_borrow_mut.socket_adr = Some(addrs[0]);
         }
-        println!("{:?}", tracker_borrow_mut);
     }
-    // TODO : Remove duplicate Trackers
 
-    println!("Got all the socket address ----- [{:?}] ", Instant::now().duration_since(t));
+    //Remove all the trackers, whose Socket Address is "None"
+    *lock_trackers = (*lock_trackers)
+        .iter()
+        .filter(|v| v.blocking_lock().borrow().socket_adr != None)
+        .map(|v| v.clone())
+        .collect::<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>();
+
+    // For some unknown reason, two trackers had some Socket Address, it caused a lot of issues.
+    // So, to solve this issue of having same socket address by keeping one of them only
+    // We must remove that duplicate tracker with Same Socket Address
+
+    // Store all the Sets of Index that are repeated
+    let mut y: Vec<HashSet<usize>> = Vec::new();
+    // 1,2,5,10
+    for (i, tracker_1) in (lock_trackers).iter().enumerate() {
+        let mut set: HashSet<usize> = HashSet::new();
+        let socket_1 = tracker_1.blocking_lock().borrow().socket_adr.unwrap().clone();
+        for (j, tracker_2) in (lock_trackers).iter().enumerate() {
+            let socket_2 = tracker_2.blocking_lock().borrow().socket_adr.unwrap().clone();
+            if socket_1 == socket_2 && i != j {
+                set.insert(i);
+                set.insert(j);
+            }
+        }
+        if !y.contains(&set) && !set.is_empty() {
+            y.push(set);
+        }
+    }
+
+    println!("{:?}", y);
+
+    let mut index_to_remove: Vec<usize> = Vec::new();
+    for i in y {
+        let mut z: Vec<usize> = i.into_iter().collect();
+        z.pop();
+        for i in z {
+            index_to_remove.push(i);
+        }
+    }
+
+    println!("{:?}", index_to_remove);
+
+    let mut trackers = Vec::new();
+    for (index, tracker) in (*lock_trackers).iter().enumerate() {
+        if !index_to_remove.contains(&index) {
+            trackers.push(tracker.clone());
+        }
+    }
+
+    *lock_trackers = trackers;
+    let set = println!("Got all the socket address ----- [{:?}] ", Instant::now().duration_since(t));
 }
