@@ -1,6 +1,6 @@
+use super::torrent_parser::parse_file;
 use crate::ui::files::FilesState;
 use crate::work::file::{File, FileType};
-use crate::work::torrent_parser;
 use crate::work::tracker::Tracker;
 use crate::Details;
 use std::cell::RefCell;
@@ -16,14 +16,15 @@ pub fn parsing_thread_main(
     details: Arc<Mutex<Details>>,
 ) {
     let t = Instant::now();
+
     // Gets the lock of all the Mutex
-    let mut file_state_lock = file_state.lock().unwrap();
-    let mut trackers_lock = trackers.blocking_lock();
-    let mut details_lock = details.lock().unwrap();
+    let mut lock_file_state = file_state.lock().unwrap();
+    let mut lock_trackers = trackers.blocking_lock();
+    let mut lock_details = details.lock().unwrap();
 
     // Gets the metadata from the torrent file and info_hash of the torrent
-    let (file_meta, info_hash) = torrent_parser::parse_file(&torrent_file_path);
-    details_lock.info_hash = Some(info_hash);
+    let (file_meta, info_hash) = parse_file(&torrent_file_path);
+    lock_details.info_hash = Some(info_hash);
 
     println!(
         "Parsed torrent file : \"{}\" ----- [{:?}]",
@@ -33,10 +34,10 @@ pub fn parsing_thread_main(
 
     let t = Instant::now();
     // Sets the name of the torrent file for the UI
-    details_lock.name = Some(file_meta.info.name.as_ref().unwrap().clone());
+    lock_details.name = Some(file_meta.info.name.as_ref().unwrap().clone());
 
     // Root of the File Tree
-    file_state_lock.file = Arc::new(Mutex::new(File {
+    lock_file_state.file = Arc::new(Mutex::new(File {
         name: String::from("/"),
         file_type: FileType::DIRECTORY,
         inner_files: Some(Vec::new()),
@@ -47,10 +48,10 @@ pub fn parsing_thread_main(
     // Creates file tree
     if let Some(x) = file_meta.info.files.as_ref() {
         // Multi file mode
-        File::createFileTree(file_state_lock.file.clone(), x);
+        File::createFileTree(lock_file_state.file.clone(), x);
     } else {
         // Single file mode
-        file_state_lock.file.lock().unwrap().inner_files = Some(vec![Arc::new(Mutex::new(File {
+        lock_file_state.file.lock().unwrap().inner_files = Some(vec![Arc::new(Mutex::new(File {
             name: file_meta.info.name.as_ref().unwrap().clone(),
             file_type: FileType::REGULAR,
             inner_files: None,
@@ -66,8 +67,8 @@ pub fn parsing_thread_main(
     let announce_list: &Vec<Vec<String>> = file_meta.announce_list.as_ref().unwrap();
     //println!("{:?}", announce_list);
     //println!("{:?}", &file_meta.announce);
-    *trackers_lock = Tracker::getTrackers(&file_meta.announce, announce_list);
-    for tracker in &(*trackers_lock) {
+    *lock_trackers = Tracker::getTrackers(&file_meta.announce, announce_list);
+    for tracker in &(*lock_trackers) {
         let tracker_lock = tracker.blocking_lock();
         let mut tracker_borrow_mut = tracker_lock.borrow_mut();
         if let Ok(addrs) = tracker_borrow_mut.url.socket_addrs(|| None) {
