@@ -39,6 +39,9 @@ fn main() -> Result<()> {
     // 1. Parse the torrent file
     // 2. Create the file tree
     // 3. Get the socket address of all the trackers
+    // 4. Remove the trackers who have same socket address (Motivation : I found it that two
+    //    UDP trackers with different domain names had resolved to same socket adress and this
+    //    causes multiple Connect Request to be, creating issues)
     let parsing_thread_details = details.clone();
     let parsing_thread_file_state = file_state.clone();
     let parsing_thread_torrent_file_path = args[0].clone();

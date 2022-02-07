@@ -498,6 +498,7 @@ pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>
         let mut buf = vec![0; 1024];
         match udp_socket.recv_from(&mut buf).await {
             Ok(v) => {
+                println!("{:?}", v.1);
                 let size = v.0;
                 let buf = buf.drain(0..v.0).collect::<Vec<u8>>();
                 let socket_adr = v.1;
