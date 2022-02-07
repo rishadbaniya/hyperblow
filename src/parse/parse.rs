@@ -74,6 +74,7 @@ pub fn parsing_thread_main(
         if let Ok(addrs) = tracker_borrow_mut.url.socket_addrs(|| None) {
             tracker_borrow_mut.socket_adr = Some(addrs[0]);
         }
+        println!("{:?}", tracker_borrow_mut);
     }
     // TODO : Remove duplicate Trackers
 

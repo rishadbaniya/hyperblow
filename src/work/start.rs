@@ -105,7 +105,6 @@ async fn tracker_request(tracker: Arc<TokioMutex<RefCell<Tracker>>>, udp_socket:
         drop(tracker_lock);
 
         let mut receiver_borrow_mut = receiver.borrow_mut();
-
         if let Ok(_) = connect_request(TRANS_ID, &udp_socket, socket_adr, tracker.clone()).await {
             // Waits for 15 * 2 ^ n seconds, where n is from 0 to 8 => (3840 seconds), for Connect Response to come
             match timeout(Duration::from_secs(15 + 2 ^ no_of_times_connect_request_timeout), receiver_borrow_mut.recv()).await {
@@ -114,22 +113,20 @@ async fn tracker_request(tracker: Arc<TokioMutex<RefCell<Tracker>>>, udp_socket:
                     let buf = v.unwrap();
                     let mut action_bytes = &buf[0..=3];
                     let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
-                    match action {
+                    if action == 0 {
                         // Action = 0 means it's "Connect Response"
-                        0 => {
-                            let connect_response = ConnectResponse::from(buf);
-                            // let announce_request = AnnounceRequest::empty();
-                            // Waits for 15 seconds for a Announce Response to come
-                            println!("{:?}", connect_response);
-                            match timeout(Duration::from_secs(15), receiver_borrow_mut.recv()).await {
-                                Ok(v) => {
-                                    println!("YOOOOOOOO");
-                                    println!("{:?}", v.unwrap());
-                                }
-                                _ => {}
+                        let connect_response = ConnectResponse::from(buf);
+                        let mut announce_request = AnnounceRequest::empty();
+                        announce_request.set_connection_id(connect_response.connection_id);
+                        announce_request.set_transaction_id(connect_response.transaction_id);
+                        //announce_request.set_info_hash(info_hash.as_slice());
+                        // Waits for 15 seconds for a Announce Response to come
+                        match timeout(Duration::from_secs(10), receiver_borrow_mut.recv()).await {
+                            Ok(v) => {
+                                println!("GOT HERE {:?}", socket_adr);
                             }
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
                 Err(_) => {
