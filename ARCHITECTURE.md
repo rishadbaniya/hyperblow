@@ -17,3 +17,8 @@ http://www.bittorrent.org/beps/bep_0015.html
 Reference for the Peer ID field used in "Announce" :
 
 https://www.bittorrent.org/beps/bep_0020.html
+
+
+## How UDP request response works
+
+I've used this mechanism, where i run two futures concurrently. First one is a future that polls all the trackers i.e it sends Connect Request, Announce Request and Scrape Request, other is the future that listens to the UDP socket and as soon as it gets some message on the UDP socket, it looks at the Socket Address that message came from sends the message back to the tracker for which the message came using  ```channel::Sender```
