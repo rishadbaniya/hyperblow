@@ -1,3 +1,4 @@
+use crate::parse::torrent_parser::File as MetaFile;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
@@ -62,7 +63,7 @@ impl File {
 
     // Creates a File Tree inside of given File Node
     // Used to create a file tree inside of a root File instance
-    pub fn createFileTree(root_file: Arc<Mutex<File>>, files: &Vec<super::torrent_parser::File>) {
+    pub fn createFileTree(root_file: Arc<Mutex<File>>, files: &Vec<MetaFile>) {
         for file in files {
             let mut working_file = root_file.clone();
             for x in 0..file.path.len() {
