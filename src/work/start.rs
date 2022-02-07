@@ -118,8 +118,9 @@ async fn tracker_request(tracker: Arc<TokioMutex<RefCell<Tracker>>>, udp_socket:
                         // Action = 0 means it's "Connect Response"
                         0 => {
                             let connect_response = ConnectResponse::from(buf);
-                            //let announce_request = AnnounceRequest::empty();
+                            // let announce_request = AnnounceRequest::empty();
                             // Waits for 15 seconds for a Announce Response to come
+                            println!("{:?}", connect_response);
                             match timeout(Duration::from_secs(15), receiver_borrow_mut.recv()).await {
                                 Ok(v) => {
                                     println!("YOOOOOOOO");

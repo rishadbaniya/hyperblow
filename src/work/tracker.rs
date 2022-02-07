@@ -384,7 +384,9 @@ impl Tracker {
     pub fn getTrackers(announce: &String, announce_list: &Vec<Vec<String>>) -> Vec<Arc<sync::Mutex<RefCell<Tracker>>>> {
         let mut trackers: Vec<_> = Vec::new();
 
-        trackers.push(Arc::new(sync::Mutex::new(RefCell::new(Tracker::new(announce)))));
+        // TODO : Find difference between Announce and Announce List coz i found Announce duplicate
+        // in Announce List
+        //trackers.push(Arc::new(sync::Mutex::new(RefCell::new(Tracker::new(announce)))));
 
         for tracker_url in announce_list {
             trackers.push(Arc::new(sync::Mutex::new(RefCell::new(Tracker::new(&tracker_url[0])))));
