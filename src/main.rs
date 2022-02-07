@@ -18,6 +18,7 @@ use std::{
     sync::{Arc, Mutex},
     thread,
 };
+use tokio::sync;
 use ui::files::FilesState;
 use work::{start::start, tracker::Tracker};
 
@@ -29,10 +30,10 @@ fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
 
     // Global States that are shared across threads
-    let trackers: Vec<Arc<Mutex<RefCell<Tracker>>>> = Vec::new();
+    let trackers: Vec<Arc<sync::Mutex<RefCell<Tracker>>>> = Vec::new();
     let details = Arc::new(Mutex::new(Details::default()));
     let file_state = Arc::new(Mutex::new(FilesState::new()));
-    let trackers = Arc::new(Mutex::new(trackers));
+    let trackers = Arc::new(sync::Mutex::new(trackers));
 
     // Spawn and run the parsing thread to "completion", blocking the "main thread" in order to
     // 1. Parse the torrent file
@@ -58,7 +59,7 @@ fn main() -> Result<()> {
     let working_thread_file_state = file_state.clone();
     let working_thread = thread::spawn(move || start(working_thread_file_state, working_thread_trackers, working_thread_details));
 
-    working_thread.join().unwrap();
+    working_thread.join();
 
     // Draw the UI
     ui::ui::draw_ui(file_state, details)?;
