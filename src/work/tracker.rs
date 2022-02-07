@@ -77,7 +77,7 @@ pub struct ConnectResponse {
 }
 
 impl ConnectResponse {
-    pub fn from_array_buffer(v: Vec<u8>) -> Self {
+    pub fn from(v: Vec<u8>) -> Self {
         let mut action_bytes = &v[0..=3];
         let mut transaction_id_bytes = &v[4..=7];
         let mut connection_id_bytes = &v[8..=15];
@@ -132,7 +132,7 @@ pub struct AnnounceRequest {
 impl AnnounceRequest {
     // Creates an empty Announce instance
     pub fn empty() -> Self {
-        let peer_id_slice = b"-BOWxxx-yyyyyyyyyyyy";
+        let peer_id_slice = b"-HYBxxx-yyyyyyyyyyyy";
         let mut peer_id = [0u8; 20];
         for (index, value) in peer_id_slice.iter().enumerate() {
             peer_id[index] = *value;
@@ -479,9 +479,7 @@ pub async fn scrape_request(
 
 pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>>>, trackers: Arc<sync::Mutex<Vec<Arc<sync::Mutex<RefCell<Tracker>>>>>>) {
     let socket_adresses = {
-        println!("TRYING TO GET LOCK");
         let trackers_lock = trackers.lock().await;
-        println!("DIDNT GET LOCK");
         let mut socket_adresses = Vec::new();
         for tracker in &(*trackers_lock) {
             if let Some(s) = &tracker.lock().await.borrow().socket_adr {
@@ -493,13 +491,12 @@ pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>
         socket_adresses
     };
 
+    println!("{:?}", socket_adresses.clone());
+
     loop {
         let mut buf = vec![0; 1024];
         match udp_socket.recv_from(&mut buf).await {
             Ok(v) => {
-                // DEBUG
-                let x = Instant::now();
-
                 let size = v.0;
                 let buf = buf.drain(0..v.0).collect::<Vec<u8>>();
                 let socket_adr = v.1;
@@ -516,10 +513,6 @@ pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>
                         break;
                     }
                 }
-
-                // DEBUG
-                println!("{:?}", socket_adr);
-                println!("{:?}", Instant::now().duration_since(x));
             }
             _ => {}
         }

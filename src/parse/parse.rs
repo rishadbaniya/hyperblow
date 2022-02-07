@@ -72,5 +72,7 @@ pub fn parsing_thread_main(
             tracker_borrow_mut.socket_adr = Some(addrs[0]);
         }
     }
+    // TODO : Remove duplicate Trackers
+
     println!("Got all the socket address ----- [{:?}] ", Instant::now().duration_since(t));
 }
