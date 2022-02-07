@@ -6,13 +6,13 @@ use crate::Details;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tokio::sync;
+use tokio::sync::Mutex as TokioMutex;
 
 // Starting point for the parsing thread
 pub fn parsing_thread_main(
     file_state: Arc<Mutex<FilesState>>,
     torrent_file_path: String,
-    trackers: Arc<sync::Mutex<Vec<Arc<sync::Mutex<RefCell<Tracker>>>>>>,
+    trackers: Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>,
     details: Arc<Mutex<Details>>,
 ) {
     let t = Instant::now();

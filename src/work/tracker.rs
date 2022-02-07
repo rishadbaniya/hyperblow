@@ -13,10 +13,9 @@ use reqwest::Url;
 use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use tokio::net::UdpSocket;
-use tokio::sync;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::Mutex as TokioMutex;
 
 const TRACKER_ERROR: &str = "There is something wrong with the torrent file you provided \n Couldn't parse one of the tracker URL";
 //
@@ -381,7 +380,7 @@ impl Tracker {
 
     /// Create list of "Tracker" from data in the
     /// announce and announce_list field of "FileMeta"
-    pub fn getTrackers(announce: &String, announce_list: &Vec<Vec<String>>) -> Vec<Arc<sync::Mutex<RefCell<Tracker>>>> {
+    pub fn getTrackers(announce: &String, announce_list: &Vec<Vec<String>>) -> Vec<Arc<TokioMutex<RefCell<Tracker>>>> {
         let mut trackers: Vec<_> = Vec::new();
 
         // TODO : Find difference between Announce and Announce List coz i found Announce duplicate
@@ -389,14 +388,14 @@ impl Tracker {
         //trackers.push(Arc::new(sync::Mutex::new(RefCell::new(Tracker::new(announce)))));
 
         for tracker_url in announce_list {
-            trackers.push(Arc::new(sync::Mutex::new(RefCell::new(Tracker::new(&tracker_url[0])))));
+            trackers.push(Arc::new(TokioMutex::new(RefCell::new(Tracker::new(&tracker_url[0])))));
         }
         trackers
     }
 }
 
 // To be called at the first step of communicating with the UDP Tracker Servera
-pub async fn connect_request(transaction_id: i32, socket: &UdpSocket, to: &SocketAddr, tracker: Arc<sync::Mutex<RefCell<Tracker>>>) -> Result<()> {
+pub async fn connect_request(transaction_id: i32, socket: &UdpSocket, to: &SocketAddr, tracker: Arc<TokioMutex<RefCell<Tracker>>>) -> Result<()> {
     let tracker_lock = tracker.lock().await;
     let mut tracker_borrow_mut = tracker_lock.borrow_mut();
     let mut connect_request = ConnectRequest::empty();
@@ -479,7 +478,7 @@ pub async fn scrape_request(
 // to the respective Tracker through "Sender"
 //
 
-pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>>>, trackers: Arc<sync::Mutex<Vec<Arc<sync::Mutex<RefCell<Tracker>>>>>>) {
+pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>>>, trackers: Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>) {
     let socket_adresses = {
         let trackers_lock = trackers.lock().await;
         let mut socket_adresses = Vec::new();

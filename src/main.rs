@@ -59,7 +59,7 @@ fn main() -> Result<()> {
     let working_thread_file_state = file_state.clone();
     let working_thread = thread::spawn(move || start(working_thread_file_state, working_thread_trackers, working_thread_details));
 
-    working_thread.join();
+    working_thread.join().unwrap();
 
     // Draw the UI
     ui::ui::draw_ui(file_state, details)?;
