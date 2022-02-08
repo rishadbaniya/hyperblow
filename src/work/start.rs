@@ -3,8 +3,7 @@
 use super::tracker::{self, connect_request, AnnounceResponse, ConnectResponse, Tracker, TrackerProtocol};
 use crate::details::Details;
 use crate::ui::files::FilesState;
-use crate::work::tracker::AnnounceRequest;
-use byteorder::{BigEndian, ReadBytesExt};
+use crate::work::tracker::{tracker_request, AnnounceRequest};
 use futures::future::join_all;
 use std::cell::RefCell;
 use std::net::SocketAddr;
@@ -16,16 +15,14 @@ use tokio::net::{TcpSocket, TcpStream, UdpSocket};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::{mpsc, mpsc::Receiver};
-use tokio::time::{sleep, timeout};
 use tracker::udp_socket_recv;
 
 // Starting Point for the working thread
-pub fn start(file_state: Arc<Mutex<FilesState>>, trackers: Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>, details: Arc<Mutex<Details>>) {
+pub fn start(file_state: Arc<Mutex<FilesState>>, trackers: Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>, details: Arc<TokioMutex<Details>>) {
     const UDP_SOCKET_PORT: i16 = 8001;
-    //const PEERS_TCP_SOCKET_PORT: i16 = 8004;
 
     let peers: Rc<RefCell<Vec<SocketAddr>>> = Rc::new(RefCell::new(Vec::new()));
-    let info_hash = details.lock().unwrap().info_hash.clone().unwrap();
+    let info_hash = details.blocking_lock().info_hash.clone().unwrap();
 
     let async_block = async move {
         let udp_socket_addr: SocketAddr = format!("[::]:{}", UDP_SOCKET_PORT).parse().unwrap();
@@ -64,7 +61,7 @@ async fn peers_request(trackers: Arc<Mutex<Vec<Arc<Mutex<RefCell<Tracker>>>>>>, 
         let t = Instant::now();
         let xx: SocketAddr = "142.250.74.238:80".parse().unwrap();
         let x = TcpStream::connect(xx).await.unwrap();
-        println!("DID IT WORK {:?} {:?}", x, Instant::now().duration_since(t));
+        //        println!("DID IT WORK {:?} {:?}", x, Instant::now().duration_since(t));
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -88,62 +85,4 @@ async fn trackers_request(
     }
     drop(trackers_lock);
     join!(join_all(futures), udp_socket_recv(&udp_socket, senders, trackers.clone()));
-}
-
-// Makes UDP request to a tracker in Certain Interval
-// 1. Sends a Connect Request to the Tracker
-// If this connect request arrives within
-async fn tracker_request(tracker: Arc<TokioMutex<RefCell<Tracker>>>, udp_socket: &UdpSocket, info_hash: Vec<u8>, receiver: Rc<RefCell<Receiver<Vec<u8>>>>) {
-    const TRANS_ID: i32 = 10;
-    let mut no_of_times_connect_request_timeout: u64 = 0;
-
-    loop {
-        let tracker_lock = tracker.lock().await;
-        let tracker_borrow = tracker_lock.borrow();
-        let socket_adr = &tracker_borrow.socket_adr.unwrap();
-        drop(tracker_borrow);
-        drop(tracker_lock);
-
-        let mut receiver_borrow_mut = receiver.borrow_mut();
-        if let Ok(_) = connect_request(TRANS_ID, &udp_socket, socket_adr, tracker.clone()).await {
-            // Waits for 15 * 2 ^ n seconds, where n is from 0 to 8 => (3840 seconds), for Connect Response to come
-            match timeout(Duration::from_secs(15 + 2 ^ no_of_times_connect_request_timeout), receiver_borrow_mut.recv()).await {
-                Ok(v) => {
-                    no_of_times_connect_request_timeout = 0;
-                    let buf = v.unwrap();
-                    let mut action_bytes = &buf[0..=3];
-                    let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
-                    if action == 0 {
-                        // Action = 0 means it's "Connect Response"
-                        let connect_response = ConnectResponse::from(buf);
-                        let mut announce_request = AnnounceRequest::empty();
-                        announce_request.set_connection_id(connect_response.connection_id);
-                        announce_request.set_transaction_id(connect_response.transaction_id);
-                        //announce_request.set_info_hash(info_hash.as_slice());
-                        // Waits for 15 seconds for a Announce Response to come
-                        match timeout(Duration::from_secs(10), receiver_borrow_mut.recv()).await {
-                            Ok(v) => {
-                                println!("GOT HERE {:?}", socket_adr);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                Err(_) => {
-                    no_of_times_connect_request_timeout += 1;
-                }
-            };
-        } else {
-            // This else portion runs when a Tracker Socket cant be reached, in this condition we
-            // will poll the tracker again after 15 * 2 ^ n
-            //
-            // Waits for  seconds, where n is from 0 to 8 => (3840 seconds), for Connect Response to come
-            println!("Some error");
-            sleep(Duration::from_secs(14 + 2 ^ no_of_times_connect_request_timeout)).await;
-            if !no_of_times_connect_request_timeout == 8 {
-                no_of_times_connect_request_timeout += 1;
-            }
-        }
-        sleep(Duration::from_secs(1)).await;
-    }
 }

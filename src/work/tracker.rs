@@ -492,13 +492,11 @@ pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>
         socket_adresses
     };
 
-    println!("{:?}", socket_adresses.clone());
-
     loop {
         let mut buf = vec![0; 1024];
         match udp_socket.recv_from(&mut buf).await {
             Ok(v) => {
-                println!("{:?}", v.1);
+                //    println!("{:?}", v.1);
                 let size = v.0;
                 let buf = buf.drain(0..v.0).collect::<Vec<u8>>();
                 let socket_adr = v.1;
@@ -518,5 +516,66 @@ pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>
             }
             _ => {}
         }
+    }
+}
+
+use std::rc::Rc;
+use std::time::Duration;
+use tokio::sync::mpsc::Receiver;
+use tokio::time::{sleep, timeout};
+// Makes UDP request to a tracker in Certain Interval
+// 1. Sends a Connect Request to the Tracker
+// If this connect request arrives within
+pub async fn tracker_request(tracker: Arc<TokioMutex<RefCell<Tracker>>>, udp_socket: &UdpSocket, info_hash: Vec<u8>, receiver: Rc<RefCell<Receiver<Vec<u8>>>>) {
+    const TRANS_ID: i32 = 10;
+    let mut no_of_times_connect_request_timeout: u64 = 0;
+
+    loop {
+        let tracker_lock = tracker.lock().await;
+        let tracker_borrow = tracker_lock.borrow();
+        let socket_adr = &tracker_borrow.socket_adr.unwrap();
+        drop(tracker_borrow);
+        drop(tracker_lock);
+        let mut receiver_borrow_mut = receiver.borrow_mut();
+        if let Ok(_) = connect_request(TRANS_ID, &udp_socket, socket_adr, tracker.clone()).await {
+            // Waits for 15 * 2 ^ n seconds, where n is from 0 to 8 => (3840 seconds), for Connect Response to come
+            match timeout(Duration::from_secs(15 + 2 ^ no_of_times_connect_request_timeout), receiver_borrow_mut.recv()).await {
+                Ok(v) => {
+                    no_of_times_connect_request_timeout = 0;
+                    let buf = v.unwrap();
+                    let mut action_bytes = &buf[0..=3];
+                    let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
+                    if action == 0 {
+                        // Action = 0 means it's "Connect Response"
+                        let connect_response = ConnectResponse::from(buf);
+                        let mut announce_request = AnnounceRequest::empty();
+                        announce_request.set_connection_id(connect_response.connection_id);
+                        announce_request.set_transaction_id(connect_response.transaction_id);
+                        //announce_request.set_info_hash(info_hash.as_slice());
+                        // Waits for 15 seconds for a Announce Response to come
+                        match timeout(Duration::from_secs(10), receiver_borrow_mut.recv()).await {
+                            Ok(v) => {
+                                //                    println!("GOT HERE {:?}", socket_adr);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Err(_) => {
+                    no_of_times_connect_request_timeout += 1;
+                }
+            };
+        } else {
+            // This else portion runs when a Tracker Socket cant be reached, in this condition we
+            // will poll the tracker again after 15 * 2 ^ n
+            //
+            // Waits for  seconds, where n is from 0 to 8 => (3840 seconds), for Connect Response to come
+            // println!("Some error");
+            sleep(Duration::from_secs(14 + 2 ^ no_of_times_connect_request_timeout)).await;
+            if !no_of_times_connect_request_timeout == 8 {
+                no_of_times_connect_request_timeout += 1;
+            }
+        }
+        sleep(Duration::from_secs(1)).await;
     }
 }

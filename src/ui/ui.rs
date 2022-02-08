@@ -17,9 +17,10 @@ use tui::widgets::{Block, Borders, Gauge};
 use crate::details::Details;
 use crate::{details, Result};
 use std::sync::{Arc, Mutex};
+use tokio::sync::Mutex as TokioMutex;
 
 // Function that represents the start of the UI rendering of hyperblow
-pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>, details: Arc<Mutex<Details>>) -> Result<()> {
+pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>, details: Arc<TokioMutex<Details>>) -> Result<()> {
     // Note : Any try to invoke println! or any other method related to stdout "fd" won't work after enabling raw mode
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -40,7 +41,7 @@ pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>, details: Arc<Mutex<Deta
     Ok(())
 }
 
-pub fn draw<B>(terminal: &mut Terminal<B>, filesState: Arc<Mutex<files::FilesState>>, details: Arc<Mutex<Details>>) -> Result<()>
+pub fn draw<B>(terminal: &mut Terminal<B>, filesState: Arc<Mutex<files::FilesState>>, details: Arc<TokioMutex<Details>>) -> Result<()>
 where
     B: Backend,
 {
@@ -127,8 +128,8 @@ where
 use tui::terminal::Frame;
 
 // Draws Details section
-pub fn draw_details<B: Backend>(frame: &mut Frame<B>, size: Rect, details: Arc<Mutex<Details>>) {
-    let details_lock = details.lock().unwrap();
+pub fn draw_details<B: Backend>(frame: &mut Frame<B>, size: Rect, details: Arc<TokioMutex<Details>>) {
+    let details_lock = details.blocking_lock();
     let info_hash = details_lock.info_hash.as_ref().unwrap();
     let name = details_lock.name.as_ref().unwrap();
 
