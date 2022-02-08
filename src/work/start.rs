@@ -108,13 +108,18 @@ async fn peer_request(socket_adr: SocketAddr) {
     const CONNECTION_TIMEOUT: u64 = 15;
     loop {
         match timeout(Duration::from_secs(CONNECTION_TIMEOUT), TcpStream::connect(socket_adr)).await {
-            Ok(stream) => {
-                let stream = stream.unwrap();
-                println!("CONNECTED");
-                sleep(Duration::from_secs(240)).await
-            }
+            Ok(v) => match v {
+                Ok(stream) => {
+                    println!("CONNECTED");
+                    sleep(Duration::from_secs(10)).await
+                }
+                Err(e) => {
+                    // Connection Refused or Something related with Socket address
+                    sleep(Duration::from_secs(240)).await
+                }
+            },
             Err(e) => {
-                println!("{:?}", e);
+                // Timeout Error
                 sleep(Duration::from_secs(240)).await
             }
         }
