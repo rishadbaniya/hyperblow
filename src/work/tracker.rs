@@ -563,7 +563,7 @@ pub async fn tracker_request(
                         match timeout(Duration::from_secs(10), receiver_borrow_mut.recv()).await {
                             Ok(v) => {
                                 let announce_response = AnnounceResponse::new(v.as_ref().unwrap()).unwrap();
-                                peers_sender.send(announce_response.peersAddresses).await;
+                                peers_sender.send(announce_response.peersAddresses).await.unwrap();
                                 sleep(Duration::from_secs(announce_response.interval as u64)).await;
                             }
                             _ => {}

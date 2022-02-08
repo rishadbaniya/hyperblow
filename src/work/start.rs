@@ -4,15 +4,19 @@ use crate::ui::files::FilesState;
 use crate::work::tracker::tracker_request;
 use futures::future::join_all;
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::join;
-use tokio::net::UdpSocket;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::Mutex as TokioMutex;
-use tokio::sync::{mpsc, mpsc::Receiver};
+use tokio::net::{TcpStream, UdpSocket};
+use tokio::sync::{
+    mpsc,
+    mpsc::{Receiver, Sender},
+    Mutex as TokioMutex,
+};
+use tokio::task::spawn;
+use tokio::time::{sleep, timeout};
 
 type __Trackers = Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>;
 type __Details = Arc<TokioMutex<Details>>;
@@ -20,11 +24,11 @@ type __FileState = Arc<Mutex<FilesState>>;
 
 // Starting Point for the "Working" thread
 pub fn start(file_state: __FileState, trackers: __Trackers, details: __Details) {
+    //
     // UDP Socket to send and receive messages
     // Send => Connect Request, Scrape Request, Announce Request
     // Receive => Connect Response, Scrape Response, Announce Response
-    //
-    let UDP_SOCKET: SocketAddr = "[::]:8001".parse().unwrap();
+    let UDP_SOCKET: SocketAddr = "[::]:8002".parse().unwrap();
 
     let async_block = async move {
         let udp_socket = UdpSocket::bind(UDP_SOCKET).await.unwrap();
@@ -71,18 +75,49 @@ pub fn start(file_state: __FileState, trackers: __Trackers, details: __Details) 
         .block_on(async_block);
 }
 
-// NOTE: It must be run concurrenlty using join!{}
-// Polls all the peers concurrently
+//
+//
+// NOTE: This async function must be run concurrently using join!{}
+// It constantly downloads "pieces" from peers concurrently
 async fn peers_request(trackers: __Trackers, peers_receiver: RefCell<Receiver<Vec<SocketAddr>>>) {
     let mut peers_receiver = peers_receiver.borrow_mut();
-    let mut peers = HashSet::new();
+
+    // Stores all the Socket Addresses of the Peer
+    let mut peers = Vec::new();
     loop {
-        if let Some(v) = peers_receiver.recv().await {
-            for socket_addrs in v {
-                peers.insert(socket_addrs);
+        // Receives Socket Address sent by Tracker
+        if let Some(socket_addresses) = peers_receiver.recv().await {
+            // Stores peer Socket Address that was not received previously
+            let mut newly_added_peers = Vec::new();
+            for socket_addr in socket_addresses {
+                if !peers.contains(&socket_addr) {
+                    peers.push(socket_addr);
+                    newly_added_peers.push(socket_addr);
+                }
+            }
+            if !newly_added_peers.is_empty() {
+                for socket_adr in newly_added_peers {
+                    spawn(async move { peer_request(socket_adr).await });
+                }
             }
         }
-        println!("{:?}", peers.len());
+    }
+}
+
+async fn peer_request(socket_adr: SocketAddr) {
+    const CONNECTION_TIMEOUT: u64 = 15;
+    loop {
+        match timeout(Duration::from_secs(CONNECTION_TIMEOUT), TcpStream::connect(socket_adr)).await {
+            Ok(stream) => {
+                let stream = stream.unwrap();
+                println!("CONNECTED");
+                sleep(Duration::from_secs(240)).await
+            }
+            Err(e) => {
+                println!("{:?}", e);
+                sleep(Duration::from_secs(240)).await
+            }
+        }
     }
 }
 
