@@ -85,8 +85,8 @@ impl File {
         }
     }
 
-    // Gets the total size of the File, if it's a file then it gives the total size of all the Files within that File tree
-    // Note : Its recursive
+    /// Gets the total size of the File, if it's a "direcotry file" then it gives the total size of all the Files within that File tree
+    /// Note : Its recursive
     pub fn size(&self) -> i64 {
         let mut size = 0;
         if let Some(files) = &self.inner_files {
