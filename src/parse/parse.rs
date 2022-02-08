@@ -61,14 +61,14 @@ pub fn parsing_thread_main(
         }))])
     }
 
+    lock_details.total_bytes = Some(1000);
+
     println!("Generated File Tree ----- [{:?}]", Instant::now().duration_since(t));
     println!("Getting all the trackers socket address........");
-
     let t = Instant::now();
+
     // Gets the socket address of all the Trackers
     let announce_list: &Vec<Vec<String>> = file_meta.announce_list.as_ref().unwrap();
-    //println!("{:?}", announce_list);
-    //println!("{:?}", &file_meta.announce);
     *lock_trackers = Tracker::getTrackers(&file_meta.announce, announce_list);
     for tracker in &(*lock_trackers) {
         let tracker_lock = tracker.blocking_lock();

@@ -116,7 +116,7 @@ pub struct AnnounceRequest {
     connection_id: Option<i64>,
     action: i32,
     transaction_id: Option<i32>,
-    info_hash: Option<[u8; 20]>,
+    info_hash: Option<Vec<u8>>,
     peer_id: Option<[u8; 20]>,
     downloaded: Option<i64>,
     left: Option<i64>,
@@ -160,7 +160,7 @@ impl AnnounceRequest {
         bytes.put_i64(self.connection_id.unwrap());
         bytes.put_i32(self.action);
         bytes.put_i32(self.transaction_id.unwrap());
-        bytes.put_slice(&self.info_hash.unwrap());
+        bytes.put_slice(&self.info_hash.as_ref().unwrap()[..]);
         bytes.put_slice(&self.peer_id.unwrap());
         bytes.put_i64(self.downloaded.unwrap());
         bytes.put_i64(self.left.unwrap());
@@ -181,7 +181,7 @@ impl AnnounceRequest {
         self.transaction_id = Some(v);
     }
 
-    pub fn set_info_hash(&mut self, v: [u8; 20]) {
+    pub fn set_info_hash(&mut self, v: Vec<u8>) {
         self.info_hash = Some(v);
     }
 
@@ -410,26 +410,26 @@ pub async fn connect_request(transaction_id: i32, socket: &UdpSocket, to: &Socke
 // To be called after having an instance of "ConnectResponse" which can be obtained
 // after making a call to "connect_request"
 pub async fn annnounce_request(
-    connection_response: ConnectResponse,
+    connect_response: ConnectResponse,
     socket: &UdpSocket,
     to: &SocketAddr,
-    info_hash: Vec<u8>,
-    tracker: Arc<Mutex<RefCell<Tracker>>>,
+    details: Arc<TokioMutex<Details>>,
+    tracker: Arc<TokioMutex<RefCell<Tracker>>>,
 ) -> Result<()> {
-    // Note : The message sent from announce_request is kinda dynamic in a sense that
+    // NOTE : The message received after sending "Announce Request" is kinda dynamic in a sense that
     // it has unknown amount of peers ip addresses and ports
     // Buffer to store the response
-    let tracker_lock = tracker.lock().unwrap();
-    let mut tracker_borrow_mut = tracker_lock.borrow_mut();
-
+    let lock_tracker = tracker.lock().await;
+    let lock_details = details.lock().await;
+    let mut tracker_borrow_mut = lock_tracker.borrow_mut();
     let mut announce_request = AnnounceRequest::empty();
-    announce_request.set_connection_id(connection_response.connection_id);
-    announce_request.set_transaction_id(connection_response.transaction_id);
-    announce_request.set_info_hash(info_hash.try_into().unwrap());
+    announce_request.set_connection_id(connect_response.connection_id);
+    announce_request.set_transaction_id(connect_response.transaction_id);
+    announce_request.set_info_hash(lock_details.info_hash.as_ref().unwrap().clone());
     announce_request.set_downloaded(0);
     announce_request.set_uploaded(0);
     announce_request.set_uploaded(0);
-    announce_request.set_left(100);
+    announce_request.set_left(lock_details.total_bytes.unwrap());
     announce_request.set_port(8001);
     announce_request.set_key(20);
     socket.send_to(&announce_request.getBytesMut(), to).await?;
@@ -519,6 +519,7 @@ pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>
     }
 }
 
+use crate::details::Details;
 use std::rc::Rc;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
@@ -526,7 +527,13 @@ use tokio::time::{sleep, timeout};
 // Makes UDP request to a tracker in Certain Interval
 // 1. Sends a Connect Request to the Tracker
 // If this connect request arrives within
-pub async fn tracker_request(tracker: Arc<TokioMutex<RefCell<Tracker>>>, udp_socket: &UdpSocket, info_hash: Vec<u8>, receiver: Rc<RefCell<Receiver<Vec<u8>>>>) {
+pub async fn tracker_request(
+    tracker: Arc<TokioMutex<RefCell<Tracker>>>,
+    udp_socket: &UdpSocket,
+    details: Arc<TokioMutex<Details>>,
+    receiver: Rc<RefCell<Receiver<Vec<u8>>>>,
+    peers_sender: Sender<Vec<SocketAddr>>,
+) {
     const TRANS_ID: i32 = 10;
     let mut no_of_times_connect_request_timeout: u64 = 0;
 
@@ -538,24 +545,26 @@ pub async fn tracker_request(tracker: Arc<TokioMutex<RefCell<Tracker>>>, udp_soc
         drop(tracker_lock);
         let mut receiver_borrow_mut = receiver.borrow_mut();
         if let Ok(_) = connect_request(TRANS_ID, &udp_socket, socket_adr, tracker.clone()).await {
+            //
             // Waits for 15 * 2 ^ n seconds, where n is from 0 to 8 => (3840 seconds), for Connect Response to come
+            //
             match timeout(Duration::from_secs(15 + 2 ^ no_of_times_connect_request_timeout), receiver_borrow_mut.recv()).await {
+                //
                 Ok(v) => {
                     no_of_times_connect_request_timeout = 0;
                     let buf = v.unwrap();
                     let mut action_bytes = &buf[0..=3];
                     let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
+
+                    // Action = 0 means it's "Connect Response"
                     if action == 0 {
-                        // Action = 0 means it's "Connect Response"
                         let connect_response = ConnectResponse::from(buf);
-                        let mut announce_request = AnnounceRequest::empty();
-                        announce_request.set_connection_id(connect_response.connection_id);
-                        announce_request.set_transaction_id(connect_response.transaction_id);
-                        //announce_request.set_info_hash(info_hash.as_slice());
-                        // Waits for 15 seconds for a Announce Response to come
+                        if let Ok(_) = annnounce_request(connect_response, &udp_socket, &socket_adr, details.clone(), tracker.clone()).await {}
                         match timeout(Duration::from_secs(10), receiver_borrow_mut.recv()).await {
                             Ok(v) => {
-                                //                    println!("GOT HERE {:?}", socket_adr);
+                                let announce_response = AnnounceResponse::new(v.as_ref().unwrap()).unwrap();
+                                peers_sender.send(announce_response.peersAddresses).await;
+                                sleep(Duration::from_secs(announce_response.interval as u64)).await;
                             }
                             _ => {}
                         }
