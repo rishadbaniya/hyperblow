@@ -1,7 +1,7 @@
 use super::torrent_parser::parse_file;
 use crate::ui::files::FilesState;
 use crate::work::file::{File, FileType};
-use crate::work::tracker::{self, Tracker};
+use crate::work::tracker::Tracker;
 use crate::Details;
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -14,14 +14,14 @@ pub fn parsing_thread_main(
     file_state: Arc<Mutex<FilesState>>,
     torrent_file_path: String,
     trackers: Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>,
-    details: Arc<Mutex<Details>>,
+    details: Arc<TokioMutex<Details>>,
 ) {
     let t = Instant::now();
 
     // Gets the lock of all the Mutex
     let mut lock_file_state = file_state.lock().unwrap();
     let mut lock_trackers = trackers.blocking_lock();
-    let mut lock_details = details.lock().unwrap();
+    let mut lock_details = details.blocking_lock();
 
     // Gets the metadata from the torrent file and info_hash of the torrent
     let (file_meta, info_hash) = parse_file(&torrent_file_path);
@@ -60,6 +60,7 @@ pub fn parsing_thread_main(
             should_download: true,
         }))])
     }
+
     println!("Generated File Tree ----- [{:?}]", Instant::now().duration_since(t));
     println!("Getting all the trackers socket address........");
 
@@ -90,7 +91,6 @@ pub fn parsing_thread_main(
 
     // Store all the Sets of Index that are repeated
     let mut y: Vec<HashSet<usize>> = Vec::new();
-    // 1,2,5,10
     for (i, tracker_1) in (lock_trackers).iter().enumerate() {
         let mut set: HashSet<usize> = HashSet::new();
         let socket_1 = tracker_1.blocking_lock().borrow().socket_adr.unwrap().clone();
@@ -106,8 +106,6 @@ pub fn parsing_thread_main(
         }
     }
 
-    println!("{:?}", y);
-
     let mut index_to_remove: Vec<usize> = Vec::new();
     for i in y {
         let mut z: Vec<usize> = i.into_iter().collect();
@@ -116,8 +114,6 @@ pub fn parsing_thread_main(
             index_to_remove.push(i);
         }
     }
-
-    println!("{:?}", index_to_remove);
 
     let mut trackers = Vec::new();
     for (index, tracker) in (*lock_trackers).iter().enumerate() {
