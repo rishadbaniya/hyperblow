@@ -18,9 +18,9 @@ use tokio::sync::{
 };
 use tokio::task::spawn;
 
-type __Trackers = Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>;
-type __Details = Arc<TokioMutex<Details>>;
-type __FileState = Arc<Mutex<FilesState>>;
+pub type __Trackers = Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>;
+pub type __Details = Arc<TokioMutex<Details>>;
+pub type __FileState = Arc<Mutex<FilesState>>;
 
 // Starting Point for the "Working" thread
 pub fn start(file_state: __FileState, trackers: __Trackers, details: __Details) {
@@ -63,7 +63,7 @@ pub fn start(file_state: __FileState, trackers: __Trackers, details: __Details) 
             details.clone(),
         );
 
-        let peers_tcp_stream = peers_request(trackers.clone(), receiver_peers);
+        let peers_tcp_stream = peers_request(trackers.clone(), receiver_peers, details.clone());
         tokio::join!(udp_socket_send, peers_tcp_stream);
     };
 
@@ -79,7 +79,7 @@ pub fn start(file_state: __FileState, trackers: __Trackers, details: __Details) 
 //
 // NOTE: This async function must be run concurrently using join!{}
 // It constantly downloads "pieces" from peers concurrently
-async fn peers_request(trackers: __Trackers, peers_receiver: RefCell<Receiver<Vec<SocketAddr>>>) {
+async fn peers_request(trackers: __Trackers, peers_receiver: RefCell<Receiver<Vec<SocketAddr>>>, details: __Details) {
     let mut peers_receiver = peers_receiver.borrow_mut();
 
     // Stores all the Socket Addresses of the Peer
@@ -97,7 +97,8 @@ async fn peers_request(trackers: __Trackers, peers_receiver: RefCell<Receiver<Ve
             }
             if !newly_added_peers.is_empty() {
                 for socket_adr in newly_added_peers {
-                    spawn(async move { peer_request(socket_adr).await });
+                    let _details = details.clone();
+                    spawn(async move { peer_request(socket_adr, _details).await });
                 }
             }
         }
