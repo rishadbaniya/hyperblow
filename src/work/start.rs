@@ -7,16 +7,16 @@ use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+
+use super::peer::peer_request;
 use tokio::join;
-use tokio::net::{TcpStream, UdpSocket};
+use tokio::net::UdpSocket;
 use tokio::sync::{
     mpsc,
     mpsc::{Receiver, Sender},
     Mutex as TokioMutex,
 };
 use tokio::task::spawn;
-use tokio::time::{sleep, timeout};
 
 type __Trackers = Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>;
 type __Details = Arc<TokioMutex<Details>>;
@@ -99,28 +99,6 @@ async fn peers_request(trackers: __Trackers, peers_receiver: RefCell<Receiver<Ve
                 for socket_adr in newly_added_peers {
                     spawn(async move { peer_request(socket_adr).await });
                 }
-            }
-        }
-    }
-}
-
-async fn peer_request(socket_adr: SocketAddr) {
-    const CONNECTION_TIMEOUT: u64 = 15;
-    loop {
-        match timeout(Duration::from_secs(CONNECTION_TIMEOUT), TcpStream::connect(socket_adr)).await {
-            Ok(v) => match v {
-                Ok(stream) => {
-                    println!("CONNECTED");
-                    sleep(Duration::from_secs(10)).await
-                }
-                Err(e) => {
-                    // Connection Refused or Something related with Socket address
-                    sleep(Duration::from_secs(240)).await
-                }
-            },
-            Err(e) => {
-                // Timeout Error
-                sleep(Duration::from_secs(240)).await
             }
         }
     }
