@@ -25,7 +25,7 @@ struct HandshakeRequest {
 }
 
 impl HandshakeRequest {
-    fn new() -> Self {
+    fn build_empty() -> Self {
         let pstr: Vec<u8> = b"BitTorrent protocol".map(|v| v).into_iter().collect();
         let reserved = vec![0; 8];
         let pstrlen: u8 = 19;
@@ -53,50 +53,49 @@ impl HandshakeRequest {
     }
 }
 
+// Struct to store Handshake Response by deserializing the response sent by making Handshake Request to the peer
+struct HandshakeResponse {}
+
 //
 // PEER REQUEST (TCP)
 //
 // Objective : Connect to Peers and download pieces(blocks)
-//
-// First of all, we make a TCP connection with the "peer", after making TCP connection with the p
+// First of all, we make a TCP connection with the "peer", after making TCP connection with the
+// peer
 pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
     const CONNECTION_TIMEOUT: u64 = 15;
+
     loop {
+        // Attempts to make a TCP connection with the peer until 15 seconds has passed
         match timeout(Duration::from_secs(CONNECTION_TIMEOUT), TcpStream::connect(socket_adr)).await {
+            // Means TCP connection was established
             Ok(v) => match v {
                 Ok(mut stream) => {
+                    // Split the TCP stream into read and write half
                     let (mut read_half, mut write_half) = stream.split();
 
-                    let mut handshake_request = HandshakeRequest::new();
-                    let lock_details = details.lock().await;
-                    handshake_request.set_info_hash(lock_details.info_hash.as_ref().unwrap().clone());
-                    drop(lock_details);
+                    // Build data for Handshake Request
+                    let mut handshake_request = HandshakeRequest::build_empty();
+                    handshake_request.set_info_hash(details.lock().await.info_hash.as_ref().unwrap().clone());
                     let handshake_request = handshake_request.getBytesMut();
 
-                    let stream_write = write_half.write_all(&handshake_request).await;
+                    // Send Handshake Request through the connected TCP socket
+                    if write_half.write_all(&handshake_request).await.is_ok() {
+                        let mut buf = BytesMut::new();
 
-                    if stream_write.is_ok() {
-                        println!("WROTE THE FUCK");
-                        loop {
-                            let t = Instant::now();
-                            let mut buf = BytesMut::new();
-                            read_half.readable().await.unwrap();
-                            let s = read_half.read_buf(&mut buf).await.unwrap();
-                            if s != 0 {
-                                println!("{:?}", Instant::now().duration_since(t));
-                                println!("{:?}", buf);
-                            }
-                        }
+                        // Waits for some data to arrive on the TCP socket
+                        read_half.readable().await.unwrap();
+
+                        // When the data is availaible, we read it into the buffer
+                        let s = read_half.read_buf(&mut buf).await.unwrap();
                     }
-
-                    sleep(Duration::from_secs(10)).await
                 }
-                Err(e) => {
+                Err(_) => {
                     // Connection Refused or Something related with Socket address
                     sleep(Duration::from_secs(240)).await
                 }
             },
-            Err(e) => {
+            Err(_) => {
                 // Timeout Error
                 sleep(Duration::from_secs(240)).await
             }
