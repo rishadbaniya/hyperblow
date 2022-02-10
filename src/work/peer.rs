@@ -174,6 +174,44 @@ fn messageType(message: &BytesMut) -> MessageType {
     }
 }
 
+// Struct to build a Request Message and deserialize peer's Request Message
+//
+// length_prefix => 13u32 (Total length of the payload)
+// id => u8 (id of the message)
+// index => (index of the piece)
+// begin => (index of the beginning byte)
+// begin => (length of the piece from beginning offset)
+struct RequestMessage {
+    length_prefix: u32,
+    id: u8,
+    index: u32,
+    begin: u32,
+    length: u32,
+}
+
+impl RequestMessage {
+    pub fn new(index: u32, begin: u32, length: u32) -> Self {
+        //let mut buf = BytesMut::new();
+        Self {
+            length_prefix: 13,
+            id: 6,
+            index,
+            begin,
+            length,
+        }
+    }
+
+    pub fn getBytesMut(&self) -> BytesMut {
+        let mut bytes_mut: BytesMut = BytesMut::new();
+        bytes_mut.put_u32(self.length_prefix);
+        bytes_mut.put_u8(self.id);
+        bytes_mut.put_u32(self.index);
+        bytes_mut.put_u32(self.begin);
+        bytes_mut.put_u32(self.length);
+        bytes_mut
+    }
+}
+
 fn messageHandler(message: &BytesMut) {
     let message_type = messageType(&message);
     println!("{:?}", message_type);
