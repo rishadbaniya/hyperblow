@@ -11,3 +11,5 @@ It's gonna take time, good things does take time
 - ☐ Can search for peers by making HTTP request to TCP Trackers
 - ☐ Implements rare piece first algorithm
 - ☐ Implements Choking and Unchoking Algorithm
+- ☐ Implements Fast Extension
+- ☐ Implements extension for partial seeds
