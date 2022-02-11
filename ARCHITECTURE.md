@@ -18,6 +18,9 @@ Reference for the Peer ID field used in "Announce" :
 
 https://www.bittorrent.org/beps/bep_0020.html
 
+Extensions for Partial Seeds : 
+http://www.bittorrent.org/beps/bep_0021.html
+
 
 ## How UDP request response works
 
