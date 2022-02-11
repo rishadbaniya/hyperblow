@@ -27,3 +27,7 @@ I've used this mechanism, where i run two futures concurrently. First one is a f
 ## Connecting to **peers** and getting pieces(blocks) (through TCP)
 
 In order to connect to peers and start sending and receiving pieces, first of all we must make a TCP connection with the peer. After making TCP connection with the peer, we send something called a "Handshake" message and receive a "Handshake" response.
+
+## Message Flow
+
+Once you have received peer's ip address, you can use it to send a "Handshake" **Message**. The tricky part comes right here, we expect one of 11 Message Type to be sent by peer as a response to that Handshake Message, but what happens is that sometimes there is some sort of incosistency. It means, when we can recieve multiple Message in single packet i.e we can end up getting a very long unusual message consisting of several *Message* at the same time. Eg both **Handshake** and **Bitfield** in the same packet. We need to build some sort of mechanism to deal with this inconsistency of *Message*
