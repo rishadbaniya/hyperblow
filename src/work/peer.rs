@@ -1,15 +1,12 @@
 #![allow(non_camel_case_types)]
+#![allow(unused_must_use)]
+use super::message::{Interested, Unchoke};
 use super::start::__Details;
 use crate::Result;
-use byteorder::{BigEndian, ReadBytesExt};
-use bytes::{BufMut, Bytes, BytesMut};
-use crossterm::event::read;
-use futures::join;
-use sha1::digest::generic_array::typenum::Len;
-use std::error::Error;
+use bytes::{BufMut, BytesMut};
+use futures::{join, select, FutureExt};
 use std::net::SocketAddr;
 use std::time::Duration;
-use tokio::fs::write;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -124,55 +121,82 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                     //
                     let write_details = details.clone();
                     let write = async move {
-                        let mut received_messages: Vec<Message> = Vec::new();
+                        let mut messages: Vec<Message> = Vec::new();
                         // Build data for Handshake Request
                         let mut handshake_request = Handshake::empty();
                         handshake_request.set_info_hash(write_details.lock().await.info_hash.as_ref().unwrap().clone());
                         let handshake_request = handshake_request.getBytesMut();
 
+                        // Writes "Handshake message" on the TCP stream
                         write_half.write_all(&handshake_request).await.unwrap();
 
-                        'main: loop {
-                            //
-                            if let Some(v) = receiver.recv().await {
-                                received_messages.push(v);
+                        // If it's the first phase i.e peer has sent a Handshake message
+                        // Wait for one of the following message to come
+                        // 1 => Handshake
+                        // 2 => Handshake, Inconsistent
+                        // 3 => Handshake, Bitfield
+                        // 4 => Handshake, Unchoke
+                        // 5 => Handshake, Bitfield, Unchoke
+                        // 6 => Handshake, Inconsistent, Unchoke
+                        // 7 => Handshake, Inconsistent, Bitfield
+                        if let Some(msg) = receiver.recv().await {
+                            messages.push(msg);
+                            if messages.len() == 1 {
                                 //
-                                // If it's the first phase i.e peer has sent a Handshake message
-                                if v == Message::HANDSHAKE {
-                                    // Wait maximum of 5 seconds for the next message
-                                    match timeout(Duration::from_secs(5), receiver.recv()).await {
-                                        Ok(v) => {
-                                            received_messages.push(v.unwrap());
-                                            match timeout(Duration::from_secs(5), receiver.recv()).await {
-                                                Ok(v) => {
-                                                    received_messages.push(v.unwrap());
-                                                    if received_messages.contains(&Message::CHOKE) {
-                                                        write_half.shutdown().await.unwrap();
-                                                        break 'main;
-                                                    }
-                                                    write_half.write_all(&InterestedMessage::getBytes()).await.unwrap();
-
-                                                    println!("{:?}", received_messages);
-                                                }
-                                                _ => {}
-                                            }
+                                // TODO : Write some efficient algorithm to not wait for 5 seconds and just
+                                // continue after receiving enough information
+                                // Waits for whole 10 seconds in total for all messages after Handshake to come
+                                timeout(Duration::from_secs(5), async {
+                                    loop {
+                                        if let Some(v) = receiver.recv().await {
+                                            messages.push(v);
                                         }
-                                        _ => {}
                                     }
-                                } else if received_messages[0] == Message::HANDSHAKE {
-                                    if v == Message::UNCHOKE {
-                                        write_half.write_all(&UnchokeMessage::getBytes()).await.unwrap();
-                                        println!("{:?}", v);
-                                    } else if v == Message::CHOKE {
-                                        write_half.shutdown().await.unwrap();
-                                    } else {
-                                    }
-                                }
+                                })
+                                .await;
                             }
                         }
+
+                        // On Choke, shutdown the TCP stream and stop progression of the future
+                        if messages.contains(&Message::CHOKE) {
+                            println!("{:?}", messages);
+                            write_half.shutdown();
+                            return;
+                        }
+
+                        // Wait maximum of 5 seconds for the next message
+                        //              match timeout(Duration::from_secs(5), receiver.recv()).await {
+                        //                  Ok(v) => {
+                        //                      received_messages.push(v.unwrap());
+                        //                      match timeout(Duration::from_secs(5), receiver.recv()).await {
+                        //                          Ok(v) => {
+                        //                              received_messages.push(v.unwrap());
+                        //                              if received_messages.contains(&Message::CHOKE) {
+                        //                                  write_half.shutdown().await.unwrap();
+                        //                                  break 'main;
+                        //                              }
+                        //                              write_half.write_all(&Interested::build_message()).await.unwrap();
+                        //                          }
+                        //                          _ => {}
+                        //                      }
+                        //                  }
+                        //                  _ => {}
+                        //              }
+                        //          } else if received_messages[0] == Message::HANDSHAKE {
+                        //              if v == Message::CHOKE {
+                        //                  write_half.shutdown().await.unwrap();
+                        //                  break 'main;
+                        //              } else if v == Message::UNCHOKE {
+                        //                  println!("{:?}", received_messages);
+                        //                  write_half.write_all(&Unchoke::build_message()).await.unwrap();
+                        //              } else if received_messages.contains(&Message::UNCHOKE) {
+                        //              }
                     };
 
-                    join!(write, read);
+                    select! {
+                        () = read.fuse() => (),
+                        () = write.fuse() => ()
+                    };
 
                     // Send Handshake Request through the connected TCP socket
                     //if write_half.write_all(&handshake_request).await.is_ok() {
@@ -262,69 +286,6 @@ fn messageType(message: &BytesMut) -> Message {
             9 => Message::PORT,
             _ => Message::INCONSISTENT,
         }
-    }
-}
-
-// Struct to build a Request Message and deserialize peer's Request Message
-//
-// length_prefix => 13u32 (Total length of the payload that follows the initial 4 bytes)
-// id => u8 (id of the message)
-// index => (index of the piece)
-// begin => (index of the beginning byte)
-// length => (length of the piece from beginning offset)
-//
-struct RequestMessage {
-    length_prefix: u32,
-    id: u8,
-    index: u32,
-    begin: u32,
-    length: u32,
-}
-
-impl RequestMessage {
-    pub fn new(index: u32, begin: u32, length: u32) -> Self {
-        //let mut buf = BytesMut::new();
-        Self {
-            length_prefix: 13,
-            id: 6,
-            index,
-            begin,
-            length,
-        }
-    }
-
-    pub fn getBytesMut(&self) -> BytesMut {
-        let mut bytes_mut: BytesMut = BytesMut::new();
-        bytes_mut.put_u32(self.length_prefix);
-        bytes_mut.put_u8(self.id);
-        bytes_mut.put_u32(self.index);
-        bytes_mut.put_u32(self.begin);
-        bytes_mut.put_u32(self.length);
-        bytes_mut
-    }
-}
-
-// Interested message
-struct InterestedMessage;
-
-impl InterestedMessage {
-    fn getBytes() -> BytesMut {
-        let mut bytes_mut = BytesMut::new();
-        bytes_mut.put_u32(1);
-        bytes_mut.put_u8(2);
-        bytes_mut
-    }
-}
-
-// Unchoke Message
-struct UnchokeMessage;
-
-impl UnchokeMessage {
-    pub fn getBytes() -> BytesMut {
-        let mut bytes_mut = BytesMut::new();
-        bytes_mut.put_u32(1);
-        bytes_mut.put_u8(1);
-        bytes_mut
     }
 }
 
