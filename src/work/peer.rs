@@ -2,12 +2,17 @@
 use super::start::__Details;
 use crate::Result;
 use byteorder::{BigEndian, ReadBytesExt};
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
+use crossterm::event::read;
+use futures::join;
 use sha1::digest::generic_array::typenum::Len;
+use std::error::Error;
 use std::net::SocketAddr;
 use std::time::Duration;
+use tokio::fs::write;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 
 //
@@ -92,21 +97,103 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                 Ok(mut stream) => {
                     // Split the TCP stream into read and write half
                     let (mut read_half, mut write_half) = stream.split();
+                    let (sender, mut receiver) = mpsc::channel::<Message>(2000);
+                    // Continuosly read on the TCP stream
+                    let read = async move {
+                        'read_loop: loop {
+                            let mut buf = BytesMut::with_capacity(512);
+                            match read_half.read_buf(&mut buf).await {
+                                Ok(v) => {
+                                    if v == 0 {
+                                        break 'read_loop;
+                                    }
+                                    let value = messageHandler(&buf);
+                                    sender.send(value).await.unwrap();
+                                }
+                                Err(e) => println!("{:?}", e),
+                            }
+                        }
+                    };
 
-                    // Build data for Handshake Request
-                    let mut handshake_request = Handshake::empty();
-                    handshake_request.set_info_hash(details.lock().await.info_hash.as_ref().unwrap().clone());
-                    let handshake_request = handshake_request.getBytesMut();
+                    // TCP stream is bidirectional, so once we have sent a Handshake message, we
+                    // will until some message has arrived on the Stream's socket, if the message
+                    // has arrived then we read it and deserialize it to certain Message Type, at
+                    // first we're gonna expect it to be a Handshake Message.
+                    //
+                    //
+                    //
+                    let write_details = details.clone();
+                    let write = async move {
+                        let mut received_messages: Vec<Message> = Vec::new();
+                        // Build data for Handshake Request
+                        let mut handshake_request = Handshake::empty();
+                        handshake_request.set_info_hash(write_details.lock().await.info_hash.as_ref().unwrap().clone());
+                        let handshake_request = handshake_request.getBytesMut();
+
+                        write_half.write_all(&handshake_request).await.unwrap();
+
+                        'main: loop {
+                            //
+                            if let Some(v) = receiver.recv().await {
+                                received_messages.push(v);
+                                //
+                                // If it's the first phase i.e peer has sent a Handshake message
+                                if v == Message::HANDSHAKE {
+                                    // Wait maximum of 5 seconds for the next message
+                                    match timeout(Duration::from_secs(5), receiver.recv()).await {
+                                        Ok(v) => {
+                                            received_messages.push(v.unwrap());
+                                            match timeout(Duration::from_secs(5), receiver.recv()).await {
+                                                Ok(v) => {
+                                                    received_messages.push(v.unwrap());
+                                                    if received_messages.contains(&Message::CHOKE) {
+                                                        write_half.shutdown().await.unwrap();
+                                                        break 'main;
+                                                    }
+                                                    write_half.write_all(&InterestedMessage::getBytes()).await.unwrap();
+
+                                                    println!("{:?}", received_messages);
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                } else if received_messages[0] == Message::HANDSHAKE {
+                                    if v == Message::UNCHOKE {
+                                        write_half.write_all(&UnchokeMessage::getBytes()).await.unwrap();
+                                        println!("{:?}", v);
+                                    } else if v == Message::CHOKE {
+                                        write_half.shutdown().await.unwrap();
+                                    } else {
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    join!(write, read);
 
                     // Send Handshake Request through the connected TCP socket
-                    if write_half.write_all(&handshake_request).await.is_ok() {
-                        let mut buf = BytesMut::with_capacity(1024);
-                        // Waits for some data to arrive on the TCP socket
-                        read_half.readable().await.unwrap();
-                        // When the data is availaible, we read it into the buffer
-                        let s = read_half.read_buf(&mut buf).await.unwrap();
-                        messageHandler(&buf);
-                    }
+                    //if write_half.write_all(&handshake_request).await.is_ok() {
+                    //let mut buf = BytesMut::with_capacity(1024);
+                    // Waits for some data to arrive on the TCP socket
+                    //     read_half.readable().await.unwrap();
+                    //     // When the data is availaible, we read it into the buffer
+                    //     let s = read_half.read_buf(&mut buf).await.unwrap();
+                    //     match messageHandler(&buf) {
+                    //         MessageType::HANDSHAKE => {
+                    //             let interested_request = InterestedMessage::getBytesMut();
+                    //             if write_half.write_all(&&interested_request).await.is_ok() {
+                    //                 read_half.readable().await.unwrap();
+                    //                 let mut buf = BytesMut::with_capacity(1024);
+                    //                 let s = read_half.read_buf(&mut buf).await.unwrap();
+                    //                 println!("After i sent interested i got {:?} of length {}", messageHandler(&buf), buf.len());
+                    //             }
+                    //         }
+                    //         _ => {}
+                    //     }
+                    //}
                 }
                 Err(_) => {
                     // Connection Refused or Something related with Socket address
@@ -126,8 +213,8 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
 //
 // All possible messages are specified by BitTorrent Specifications at :
 // https://wiki.theory.org/index.php/BitTorrentSpecification#Messages
-#[derive(PartialEq, Debug)]
-enum MessageType {
+#[derive(PartialEq, Debug, Clone, Copy)]
+enum Message {
     HANDSHAKE,
     KEEP_ALIVE,
     CHOKE,
@@ -140,6 +227,7 @@ enum MessageType {
     PIECE,
     CANCEL,
     PORT,
+    INCONSISTENT,
     UNKNOWN,
 }
 
@@ -148,39 +236,43 @@ enum MessageType {
 //
 // All possible messages are specified by BitTorrent Specifications at :
 // https://wiki.theory.org/index.php/BitTorrentSpecification#Messages
-fn messageType(message: &BytesMut) -> MessageType {
-    if message.len() == 0 {
-        MessageType::KEEP_ALIVE
+//
+// NOTE : A peer can also choose to send a Handshake Message immediately followed by a Bitfield
+// message in the same packet
+//
+fn messageType(message: &BytesMut) -> Message {
+    if message.len() < 4 {
+        Message::UNKNOWN
+    } else if message.len() == 4 {
+        Message::KEEP_ALIVE
     } else if message.len() == 68 {
-        MessageType::HANDSHAKE
+        Message::HANDSHAKE
     } else {
         let message_id = *message.get(4).unwrap();
         match message_id {
-            0 => MessageType::CHOKE,
-            1 => MessageType::UNCHOKE,
-            2 => MessageType::INTERESTED,
-            3 => MessageType::NOT_INTERESTED,
-            4 => MessageType::HAVE,
-            5 => MessageType::BITFIELD,
-            6 => MessageType::REQUEST,
-            7 => MessageType::PIECE,
-            8 => MessageType::CANCEL,
-            9 => MessageType::PORT,
-            _ => {
-                println!("{:?}", message);
-                MessageType::UNKNOWN
-            }
+            0 => Message::CHOKE,
+            1 => Message::UNCHOKE,
+            2 => Message::INTERESTED,
+            3 => Message::NOT_INTERESTED,
+            4 => Message::HAVE,
+            5 => Message::BITFIELD,
+            6 => Message::REQUEST,
+            7 => Message::PIECE,
+            8 => Message::CANCEL,
+            9 => Message::PORT,
+            _ => Message::INCONSISTENT,
         }
     }
 }
 
 // Struct to build a Request Message and deserialize peer's Request Message
 //
-// length_prefix => 13u32 (Total length of the payload)
+// length_prefix => 13u32 (Total length of the payload that follows the initial 4 bytes)
 // id => u8 (id of the message)
 // index => (index of the piece)
 // begin => (index of the beginning byte)
-// begin => (length of the piece from beginning offset)
+// length => (length of the piece from beginning offset)
+//
 struct RequestMessage {
     length_prefix: u32,
     id: u8,
@@ -212,7 +304,30 @@ impl RequestMessage {
     }
 }
 
-fn messageHandler(message: &BytesMut) {
-    let message_type = messageType(&message);
-    println!("{:?}", message_type);
+// Interested message
+struct InterestedMessage;
+
+impl InterestedMessage {
+    fn getBytes() -> BytesMut {
+        let mut bytes_mut = BytesMut::new();
+        bytes_mut.put_u32(1);
+        bytes_mut.put_u8(2);
+        bytes_mut
+    }
+}
+
+// Unchoke Message
+struct UnchokeMessage;
+
+impl UnchokeMessage {
+    pub fn getBytes() -> BytesMut {
+        let mut bytes_mut = BytesMut::new();
+        bytes_mut.put_u32(1);
+        bytes_mut.put_u8(1);
+        bytes_mut
+    }
+}
+
+fn messageHandler(message: &BytesMut) -> Message {
+    messageType(&message)
 }
