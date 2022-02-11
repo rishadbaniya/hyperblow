@@ -7,6 +7,7 @@ It's gonna take time, good things does take time
 
 ## Features checklist :
 
-- ✅Can search for peers by making UDP request to UDP Trackers
+- ✅ Can search for peers by making UDP request to UDP Trackers
+- ☐ Can search for peers by making HTTP request to TCP Trackers
 - ☐ Implements rare piece first algorithm
 - ☐ Implements Choking and Unchoking Algorithm
