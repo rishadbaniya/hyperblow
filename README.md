@@ -4,3 +4,7 @@
 
 
 It's gonna take time, good things does take time
+
+Features checklist : 
+✅Can search for peers in requesting to UDP Trackers
+☐ Implements rare piece first algorithm
