@@ -1,4 +1,7 @@
+#![allow(unused_must_use)]
+use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
+use serde_derive::{Deserialize, Serialize};
 
 // Interested message
 pub struct Interested;
@@ -61,5 +64,156 @@ impl RequestMessage {
         bytes_mut.put_u32(self.begin);
         bytes_mut.put_u32(self.length);
         bytes_mut
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bitfield {
+    have: Vec<u32>,
+    not_have: Vec<u32>,
+}
+
+impl Bitfield {
+    pub fn from(bytes: &mut BytesMut) -> Self {
+        let mut have: Vec<u32> = Vec::new();
+        let mut not_have: Vec<u32> = Vec::new();
+
+        let length_prefix: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[0..=3]).unwrap();
+        let bitfield_total_length = (length_prefix + 4) as usize;
+        let bitfield_payload = bytes.split_to(bitfield_total_length);
+
+        for i in 0..bitfield_payload.len() - 1 {
+            match bitfield_payload[i] {
+                0 => not_have.push(i as u32),
+                1 => have.push(i as u32),
+                _ => {}
+            }
+        }
+
+        Self { have, not_have }
+    }
+}
+
+// Extended Message :
+//
+// A message type for those who implement the Extension Protocol
+// from - http://www.bittorrent.org/beps/bep_0010.html
+//
+// Structure :
+// length_prefix => u32 (No of bytes for the entire message) : Offset [0,3]
+// message_id => u8 (value = 20) (id of the message) : Offset : [4]
+// extension_message_id => u8 (id of the message) : Offset : [5]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Extended {
+    length_prefix: u32,
+    message_id: u8,
+    extension_message_id: u8,
+    payload: ExtendedPayload,
+}
+
+impl Extended {
+    pub fn from(bytes: &mut BytesMut) -> Self {
+        let length_prefix: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[0..=3]).unwrap();
+        let message_id: u8 = bytes[4];
+        let extension_message_id: u8 = bytes[5];
+        bytes.split_to(6);
+
+        let payload_length = (length_prefix - 2) as usize;
+        let payload = bytes.split_to(payload_length);
+
+        let payload: ExtendedPayload = serde_bencode::de::from_bytes(&payload).unwrap();
+
+        Extended {
+            length_prefix,
+            message_id,
+            extension_message_id,
+            payload,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+struct ExtendedPayload {
+    //pub m: Option<Vec<u8>>,
+    //pub p: Option<Vec<Vec<String>>>,
+    pub v: Option<String>,
+}
+
+// Message => Have
+#[derive(Debug, PartialEq, Clone)]
+pub struct Have {
+    piece_index: u32,
+}
+
+impl Have {
+    pub fn from(bytes: &mut BytesMut) -> Self {
+        let piece_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[5..=8]).unwrap();
+        bytes.split_to(9);
+        Self { piece_index }
+    }
+}
+
+// Protocol Implemented From :  https://wiki.theory.org/indx.php/BitTorrentSpecification#Handshakee
+// In version 1.0 of the BitTorrent protocol, pstrlen = 19, and pstr = "BitTorrent protocol".
+
+// 0. pstrlen => Single byte value which is length of "pstr", i.e u8 (Value = 19)
+// 1. pstr => String identifier of the protocol (Value = "BitTorrent protocol" )
+// 2. reserved => 8 reserved bytes. Current implentation uses all zeroes
+// 3.
+#[derive(PartialEq, Debug, Clone)]
+pub struct Handshake {
+    pub pstrlen: u8,
+    pub pstr: Vec<u8>,
+    pub reserved: Vec<u8>,
+    pub info_hash: Option<Vec<u8>>,
+    pub peer_id: Vec<u8>,
+}
+
+impl Handshake {
+    pub fn empty() -> Self {
+        let pstrlen: u8 = 19;
+        let pstr: Vec<u8> = b"BitTorrent protocol".map(|v| v).into_iter().collect();
+        let reserved = vec![0; 8];
+        let peer_id = b"-HYBLOW-110011001100".map(|v| v).into_iter().collect();
+        Self {
+            pstrlen,
+            pstr,
+            reserved,
+            info_hash: None,
+            peer_id,
+        }
+    }
+
+    pub fn from(v: &BytesMut) -> Self {
+        let v: Vec<u8> = v.iter().map(|v| *v).collect();
+        let bytes_peer_id: Vec<u8> = v[49..].iter().map(|v| *v).collect();
+
+        let pstrlen = v[0];
+        let pstr: Vec<u8> = v[1..=19].iter().map(|v| *v).collect();
+        let reserved: Vec<u8> = v[20..=27].iter().map(|v| *v).collect();
+        let info_hash: Option<Vec<u8>> = Some(v[28..=48].iter().map(|v| *v).collect());
+        let peer_id: Vec<u8> = v[49..].iter().map(|v| *v).collect();
+
+        Self {
+            pstrlen,
+            pstr,
+            reserved,
+            info_hash,
+            peer_id,
+        }
+    }
+
+    pub fn getBytesMut(&self) -> BytesMut {
+        let mut buf = BytesMut::new();
+        buf.put_u8(self.pstrlen);
+        buf.put_slice(self.pstr.as_slice());
+        buf.put_slice(self.reserved.as_slice());
+        buf.put_slice(self.info_hash.as_ref().unwrap().as_slice());
+        buf.put_slice(self.peer_id.as_slice());
+        buf
+    }
+
+    pub fn set_info_hash(&mut self, v: Vec<u8>) {
+        self.info_hash = Some(v);
     }
 }
