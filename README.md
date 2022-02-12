@@ -13,3 +13,4 @@ It's gonna take time, good things does take time
 - ☐ Implements Choking and Unchoking Algorithm
 - ☐ Implements Fast Extension
 - ☐ Implements extension for partial seeds
+- ☐ Implements Extension Protocol
