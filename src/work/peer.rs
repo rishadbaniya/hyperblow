@@ -1,5 +1,7 @@
 #![allow(non_camel_case_types)]
 #![allow(unused_must_use)]
+use crate::work::message::{self, Interested, Unchoke};
+
 use super::message::{Bitfield, Extended, Handshake, Have};
 use super::start::__Details;
 use bytes::{BufMut, BytesMut};
@@ -7,6 +9,7 @@ use futures::{select, FutureExt};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::tcp::WriteHalf;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
@@ -57,6 +60,7 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                     // has arrived then we read it and deserialize it to certain Message Types
                     let write_details = details.clone();
                     let write = async move {
+                        let write_details = write_details;
                         let mut messages: Vec<Message> = Vec::new();
                         let mut handshake_msg = Handshake::empty();
                         handshake_msg.set_info_hash(write_details.lock().await.info_hash.as_ref().unwrap().clone());
@@ -91,12 +95,27 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                             }
                         }
 
-                        println!("{:?}", messages);
+                        // On Choke, shutdown the TCP stream and stop progression of the future
+                        if messages.contains(&Message::CHOKE) {
+                            write_half.shutdown();
+                            return;
+                        }
+
+                        // Send interested message to the peers and unchoke expect them to send unchoke message
+                        write_half.write_all(&Interested::build_message()).await.unwrap();
+
+                        if let Some(mut msg) = receiver.recv().await {
+                            messages.push(messageHandler(&mut msg).unwrap());
+                        }
 
                         // On Choke, shutdown the TCP stream and stop progression of the future
                         if messages.contains(&Message::CHOKE) {
                             write_half.shutdown();
                             return;
+                        }
+
+                        if messages.contains(&Message::UNCHOKE) {
+                            write_half.write_all(&Unchoke::build_message()).await.unwrap();
                         }
                     };
 
@@ -125,7 +144,6 @@ fn handshake_responses(bytes: &mut BytesMut) -> Vec<Message> {
     while let Some(msg) = messageHandler(bytes) {
         messages.push(msg);
     }
-    println!("{:?}", bytes.len());
     messages
 }
 
