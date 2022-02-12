@@ -26,6 +26,10 @@ Fast Extension :
 
 http://www.bittorrent.org/beps/bep_0006.html
 
+Extension Protocol :
+
+http://www.bittorrent.org/beps/bep_0010.html
+
 
 ## How UDP request response works
 
