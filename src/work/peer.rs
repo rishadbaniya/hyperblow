@@ -1,47 +1,58 @@
 #![allow(non_camel_case_types)]
 #![allow(unused_must_use)]
-use crate::work::message::{self, Interested, Unchoke};
+#![allow(dead_code)]
 
 use super::message::{Bitfield, Extended, Handshake, Have};
-use super::start::__Details;
+use super::start::{self, __Details};
+use crate::work::message::{Interested, Request, Unchoke};
+use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use futures::{select, FutureExt};
+use sha1::digest::generic_array::sequence::Split;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::WriteHalf;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 
 // PEER REQUEST (TCP) :
 //
-// OBJECTIVE : Connect to Peers and download pieces(blocks)
-// First of all, we make a TCP connection with the "peer"
+// OBJECTIVE : Connect to Peers and download pieces chunk by chunk
+// We do it by making a TCP connection with the "peer"
+//
+// NOTE : A torrent contains multiple pieces and pieces contain multiple chunks, each chunk should
+// not be greater than 16 Kb, i.e we should not request data greater than 16 Kb in request message
+//
+const CONNECTION_TIMEOUT: u64 = 60;
+const MAX_CHUNK_LENGTH: u32 = 16384;
+const CONNECTION_FAILED_TRY_AGAIN_AFTER: u64 = 60;
+const MAX_TCP_WINDOW_SIZE: u32 = 65_535;
+
 pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
-    const CONNECTION_TIMEOUT: u64 = 60;
+    let PIECE_LENGTH = details.lock().await.piece_length.unwrap() as u32;
 
     loop {
-        // Attempts to make a TCP connection with the peer until CONNECTION_TIMEOUT has passed
+        // Tries to make a TCP connection with the peer until CONNECTION_TIMEOUT has passed
         match timeout(Duration::from_secs(CONNECTION_TIMEOUT), TcpStream::connect(socket_adr)).await {
-            // Means TCP connection was established
+            // When TCP connection is established
             Ok(v) => match v {
                 Ok(mut stream) => {
                     // Split the TCP stream into read and write half
                     let (mut read_half, mut write_half) = stream.split();
-                    // Channelt to communicate data between read and write half :
-                    // TODO: Find perfect channel buffer size, currently its set almost same size as TCP window size
-                    let (sender, mut receiver) = mpsc::channel::<BytesMut>(70000);
+
+                    // Channel to communicate between read and write half :
+                    let (sender, mut receiver) = mpsc::channel::<BytesMut>(MAX_TCP_WINDOW_SIZE as usize);
 
                     // READ HALF :
                     // Continuosly reads on the TCP stream until EOF
                     let read = async move {
-                        'read_loop: loop {
-                            let mut buf = BytesMut::with_capacity(70000);
+                        'main: loop {
+                            let mut buf = BytesMut::with_capacity(MAX_TCP_WINDOW_SIZE as usize);
                             match read_half.read_buf(&mut buf).await {
                                 Ok(v) => {
                                     if v == 0 {
-                                        break 'read_loop;
+                                        break 'main;
                                     }
                                     sender.send(buf).await.unwrap();
                                 }
@@ -60,13 +71,9 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                     // has arrived then we read it and deserialize it to certain Message Types
                     let write_details = details.clone();
                     let write = async move {
-                        let write_details = write_details;
                         let mut messages: Vec<Message> = Vec::new();
-                        let mut handshake_msg = Handshake::empty();
-                        handshake_msg.set_info_hash(write_details.lock().await.info_hash.as_ref().unwrap().clone());
-
                         // Writes "Handshake message" on the TCP stream
-                        write_half.write_all(&handshake_msg.getBytesMut()).await.unwrap();
+                        write_half.write_all(&createHandshakeMsg(write_details).await).await.unwrap();
 
                         // NOTE : This block must run once
                         //
@@ -113,9 +120,32 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                             write_half.shutdown();
                             return;
                         }
-
                         if messages.contains(&Message::UNCHOKE) {
                             write_half.write_all(&Unchoke::build_message()).await.unwrap();
+                        }
+
+                        let pieces = Pieces::new(&mut messages);
+
+                        //println!("{:?}", pieces.have);
+                        let mut chunks: Vec<Chunk> = Vec::new();
+                        let current_piece = pieces.have[0];
+                        let mut begin_offset: u32 = 0;
+                        let mut piece = pieces.have[0];
+                        loop {
+                            if !begin_offset >= PIECE_LENGTH {
+                                write_half
+                                    .write_all(&Request::build_message(pieces.have[0], begin_offset, MAX_CHUNK_LENGTH))
+                                    .await
+                                    .unwrap();
+                                if let Some(mut msg) = receiver.recv().await {
+                                    let chunk = Chunk::from(&mut msg).unwrap();
+                                    begin_offset = begin_offset + chunk.chunk_length - 1;
+                                    println!("FULL PIECE SIZE : {}", PIECE_LENGTH);
+                                    println!("DOWNLOADING {}", pieces.have[0]);
+                                    println!("Total Chunks i had {} and byte_end_index {}", chunks.len(), begin_offset);
+                                    chunks.push(chunk);
+                                }
+                            }
                         }
                     };
 
@@ -137,6 +167,45 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
         }
         sleep(Duration::from_secs(100)).await;
     }
+}
+
+struct Pieces {
+    have: Vec<u32>,
+}
+
+impl Pieces {
+    fn new(v: &mut Vec<Message>) -> Self {
+        let mut have: Vec<u32> = Vec::new();
+        *v = v
+            .iter()
+            .filter(|f| {
+                match f {
+                    Message::BITFIELD(_bitfield) => {
+                        have.append(&mut _bitfield.have.clone());
+                    }
+                    Message::HAVE(_have) => {
+                        have.push(_have.piece_index);
+                    }
+                    _ => {
+                        return true;
+                    }
+                }
+                return false;
+            })
+            .map(|v| v.clone())
+            .collect();
+        Self { have }
+    }
+}
+
+/// Creates a Handshake Message and gives us a buffer containing
+/// Handshake Message that we can send to the "peer"
+async fn createHandshakeMsg(details: __Details) -> BytesMut {
+    let mut handshake_msg = Handshake::empty();
+    let lock_details = details.lock().await;
+    let info_hash = lock_details.info_hash.as_ref().unwrap().clone();
+    handshake_msg.set_info_hash(info_hash);
+    handshake_msg.getBytesMut()
 }
 
 fn handshake_responses(bytes: &mut BytesMut) -> Vec<Message> {
@@ -222,4 +291,38 @@ enum Message {
     PIECE,
     CANCEL,
     PORT,
+}
+
+/// Stores block's data and its metadata sent by a peer
+#[derive(Debug, Clone)]
+struct Chunk {
+    len: u32,
+    id: u8,
+    piece_index: u32,
+    byte_start_index: u32,
+    byte_end_index: u32,
+    chunk_length: u32,
+    chunk: BytesMut,
+}
+
+impl Chunk {
+    fn from(bytes: &mut BytesMut) -> Option<Self> {
+        let len: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[0..=3]).unwrap();
+        let id: u8 = *bytes.get(4).unwrap();
+        let piece_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[5..=8]).unwrap();
+        let byte_start_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[9..=12]).unwrap();
+        bytes.split_to(13);
+        let chunk = bytes.clone();
+        let byte_end_index = (chunk.len() - 1) as u32;
+
+        Some(Self {
+            len,
+            id,
+            piece_index,
+            byte_start_index,
+            byte_end_index,
+            chunk_length: chunk.len() as u32,
+            chunk,
+        })
+    }
 }
