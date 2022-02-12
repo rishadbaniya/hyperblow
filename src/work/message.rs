@@ -36,7 +36,7 @@ impl Unchoke {
 // begin => (index of the beginning byte)
 // length => (length of the piece from beginning offset)
 //
-struct RequestMessage {
+pub struct Request {
     length_prefix: u32,
     id: u8,
     index: u32,
@@ -44,8 +44,9 @@ struct RequestMessage {
     length: u32,
 }
 
-impl RequestMessage {
-    pub fn new(index: u32, begin: u32, length: u32) -> Self {
+impl Request {
+    // TODO : Remove all parameters and make it BytesMut
+    pub fn from(index: u32, begin: u32, length: u32) -> Self {
         //let mut buf = BytesMut::new();
         Self {
             length_prefix: 13,
@@ -56,21 +57,23 @@ impl RequestMessage {
         }
     }
 
-    pub fn getBytesMut(&self) -> BytesMut {
+    pub fn build_message(index: u32, begin: u32, length: u32) -> BytesMut {
+        let length_prefix = 13;
+        let id = 6;
         let mut bytes_mut: BytesMut = BytesMut::new();
-        bytes_mut.put_u32(self.length_prefix);
-        bytes_mut.put_u8(self.id);
-        bytes_mut.put_u32(self.index);
-        bytes_mut.put_u32(self.begin);
-        bytes_mut.put_u32(self.length);
+        bytes_mut.put_u32(length_prefix);
+        bytes_mut.put_u8(id);
+        bytes_mut.put_u32(index);
+        bytes_mut.put_u32(begin);
+        bytes_mut.put_u32(length);
         bytes_mut
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bitfield {
-    have: Vec<u32>,
-    not_have: Vec<u32>,
+    pub have: Vec<u32>,
+    pub not_have: Vec<u32>,
 }
 
 impl Bitfield {
@@ -142,7 +145,7 @@ struct ExtendedPayload {
 // Message => Have
 #[derive(Debug, PartialEq, Clone)]
 pub struct Have {
-    piece_index: u32,
+    pub piece_index: u32,
 }
 
 impl Have {

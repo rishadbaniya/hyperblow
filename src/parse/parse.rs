@@ -26,6 +26,7 @@ pub fn parsing_thread_main(
     // Gets the metadata from the torrent file and info_hash of the torrent
     let (file_meta, info_hash) = parse_file(&torrent_file_path);
     lock_details.info_hash = Some(info_hash);
+    lock_details.piece_length = file_meta.info.piece_length.clone();
 
     println!(
         "Parsed torrent file : \"{}\" ----- [{:?}]",
