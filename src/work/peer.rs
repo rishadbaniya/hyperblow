@@ -2,6 +2,7 @@
 #![allow(unused_must_use)]
 
 use super::{start::__Details, Bitfield, Block, Extended, Handshake, Have, Interested, Message, Unchoke};
+use crate::work::Request;
 use crate::Result;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
@@ -27,8 +28,8 @@ use tokio::time::{sleep, timeout};
 ///
 pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
     const CONNECTION_TIMEOUT: u64 = 60;
-    //const MAX_BLOCK_SIZE: u32 = 16384 + 13;
-    const CONNECTION_FAILED_TRY_AGAIN_AFTER: u64 = 60;
+    const CONNECTION_FAILED_TRY_AGAIN_AFTER: u64 = 120;
+    const MAX_BUFFER_CAPACITY: u32 = 16384;
 
     let PIECE_LENGTH = details.lock().await.piece_length.unwrap() as u32;
 
@@ -71,6 +72,23 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                         // Sends UNCHOKE message
                         tcp_sender.sendUnchokeMessage();
 
+                        let peer_details = PeerDetails::from(&mut messages);
+
+                        if !peer_details.pieces_have.is_empty() {
+                            let piece_index = peer_details.pieces_have[0];
+                            let mut byte_offset: u32 = 0;
+                            if PIECE_LENGTH != byte_offset + 1 {
+                                tcp_sender
+                                    .write_half
+                                    .write_all(&Request::build_message(piece_index, byte_offset, MAX_BUFFER_CAPACITY))
+                                    .await;
+
+                                if let Some(v) = tcp_sender.receiver.recv().await {
+                                    println!("{:?}", v.len());
+                                }
+                            }
+                        }
+
                         println!("{:?}", messages);
                     };
 
@@ -94,9 +112,38 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
     }
 }
 
+#[derive(Debug, Clone)]
 struct PeerDetails {
     pieces_have: Vec<u32>,
     pieces_not_have: Vec<u32>,
+}
+
+impl PeerDetails {
+    fn from(v: &mut Vec<Message>) -> Self {
+        let mut pieces_have: Vec<u32> = Vec::new();
+        let mut pieces_not_have: Vec<u32> = Vec::new();
+        *v = v
+            .iter()
+            .filter(|f| {
+                match f {
+                    Message::BITFIELD(_bitfield) => {
+                        pieces_have.append(&mut _bitfield.have.clone());
+                        pieces_not_have.append(&mut _bitfield.not_have.clone());
+                    }
+                    Message::HAVE(_have) => {
+                        pieces_have.push(_have.piece_index);
+                    }
+                    _ => {
+                        return true;
+                    }
+                }
+                return false;
+            })
+            .map(|v| v.clone())
+            .collect();
+
+        Self { pieces_have, pieces_not_have }
+    }
 }
 
 /// A function that removes the bytes of that message from buffer
@@ -146,16 +193,10 @@ async fn messageHandler<'a>(bytes: &mut BytesMut, receiver: &mut TCPReceiver<'a>
                 }
                 6 => Some(Ok(Message::REQUEST)),
                 7 => {
-                    // TODO : Handle errors here
-                    let total_length: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[0..=3]).unwrap() + 4;
-                    let mut buf = BytesMut::with_capacity(total_length as usize);
-                    buf.put_slice(&bytes);
-                    if buf.len() != buf.capacity() {
-                        receiver.read_half.read_exact(&mut buf).await;
-                        Some(Ok(Message::PIECE(Block::from(&mut buf).unwrap())))
-                    } else {
-                        Some(Ok(Message::PIECE(Block::from(bytes).unwrap())))
-                    }
+                    return Some(match Block::from(bytes) {
+                        Ok(block) => Ok(Message::PIECE(block)),
+                        Err(e) => Err(e),
+                    });
                 }
                 8 => Some(Ok(Message::CANCEL)),
                 9 => Some(Ok(Message::PORT)),
@@ -220,7 +261,7 @@ impl<'a> TCPReceiver<'a> {
                             messages.push(msg);
                         }
                         if messageHandler(&mut buf, self).await.is_none() {
-                            break;
+                            break 'main;
                         }
                     }
                 }
