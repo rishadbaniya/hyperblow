@@ -65,12 +65,11 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                         let mut handshake_response = tcp_sender.sendHandshakeMessage().await.unwrap();
                         messages.append(&mut handshake_response);
 
+                        println!("{:?}", messages);
                         let mut interested_response = tcp_sender.sendInterestedMessage().await.unwrap();
                         messages.append(&mut interested_response);
 
                         tcp_sender.sendUnchokeMessage();
-
-                        println!("{:?}", messages);
                     };
 
                     // End both the future as soon as one gets completed
@@ -231,6 +230,7 @@ impl<'a> TCPSender<'a> {
         let lock_details = self.details.lock().await;
         let info_hash = lock_details.info_hash.as_ref().unwrap().clone();
         handshake_msg.set_info_hash(info_hash);
+        drop(lock_details);
 
         // Writes the HANDSHAKE message on the TCPStream
         self.write_half.write_all(&handshake_msg.getBytesMut()).await;
