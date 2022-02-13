@@ -1,34 +1,35 @@
 #![allow(non_camel_case_types)]
 #![allow(unused_must_use)]
-#![allow(dead_code)]
 
-use super::message::{Bitfield, Extended, Handshake, Have};
-use super::start::{self, __Details};
-use crate::work::message::{Interested, Request, Unchoke};
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use super::{start::__Details, Bitfield, Block, Extended, Handshake, Have, Interested, Message, Unchoke};
+use crate::Result;
+use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use futures::{select, FutureExt};
-use sha1::digest::generic_array::sequence::Split;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::net::{
+    tcp::{ReadHalf, WriteHalf},
+    TcpStream,
+};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::time::{sleep, timeout};
 
-// PEER REQUEST (TCP) :
-//
-// OBJECTIVE : Connect to Peers and download pieces chunk by chunk
-// We do it by making a TCP connection with the "peer"
-//
-// NOTE : A torrent contains multiple pieces and pieces contain multiple chunks, each chunk should
-// not be greater than 16 Kb, i.e we should not request data greater than 16 Kb in request message
-const CONNECTION_TIMEOUT: u64 = 60;
-const MAX_CHUNK_LENGTH: u32 = 16384;
-const CONNECTION_FAILED_TRY_AGAIN_AFTER: u64 = 60;
-const MAX_TCP_WINDOW_SIZE: u32 = 65_535;
-
+/// Peer Request (TCP) :
+///
+/// OBJECTIVE : Connect to Peers and download pieces block by block
+/// We do it by making a TCP connection with the "peer"
+///
+/// NOTE : A torrent contains multiple pieces and pieces contain multiple blocks, each block should
+/// not be greater than 16 Kb, i.e we should not request data greater than 16 Kb in request message
+///
+///
 pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
+    const CONNECTION_TIMEOUT: u64 = 60;
+    const MAX_BLOCK_SIZE: u32 = 16384 + 13;
+    const CONNECTION_FAILED_TRY_AGAIN_AFTER: u64 = 60;
+
     let PIECE_LENGTH = details.lock().await.piece_length.unwrap() as u32;
 
     loop {
@@ -37,113 +38,39 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
             // When TCP connection is established
             Ok(v) => match v {
                 Ok(mut stream) => {
-                    // Split the TCP stream into read and write half
-                    let (mut read_half, mut write_half) = stream.split();
+                    let (read_half, write_half) = stream.split();
 
                     // Channel to communicate between read and write half :
-                    let (sender, mut receiver) = unbounded_channel::<BytesMut>();
+                    let (sender, receiver) = unbounded_channel::<Vec<Message>>();
 
                     // READ HALF :
-                    // Continuosly reads on the TCP stream until EOF
+                    // Continuosly reads for message on the TCP stream until EOF
                     let read = async move {
-                        'main: loop {
-                            let mut buf = BytesMut::with_capacity(MAX_TCP_WINDOW_SIZE as usize);
-                            match read_half.read_buf(&mut buf).await {
-                                Ok(v) => {
-                                    if v == 0 {
-                                        break 'main;
-                                    }
-                                    sender.send(buf);
-                                }
-                                Err(e) => println!("{:?}", e),
+                        let mut tcp_receiver = TCPReceiver::new(read_half);
+                        loop {
+                            if let Ok(msgs) = tcp_receiver.getMessage().await {
+                                sender.send(msgs);
+                            } else {
+                                break;
                             }
                         }
                     };
 
                     // WRITE HALF :
-                    //
-                    // NOTE :According to my knowledge, TCP is not req-res like most protocols built on top of TCP, HTTP is req-res not because its
-                    // built on top TCP
-                    //
-                    // TCP is bidirectional, so once we have sent a Handshake message, we
-                    // can wait until some message has arrived on the Socket, if the messages
-                    // has arrived then we read it and deserialize it to certain Message Types
-                    let write_details = details.clone();
+                    let _details = details.clone();
                     let write = async move {
                         let mut messages: Vec<Message> = Vec::new();
-                        // Writes "Handshake message" on the TCP stream
-                        write_half.write_all(&createHandshakeMsg(write_details).await).await.unwrap();
+                        let mut tcp_sender = TCPSender::new(write_half, _details, receiver);
 
-                        // NOTE : This block must run once
-                        //
-                        // First phase i.e peer has sent responses for the "Handshake" message we sent
-                        // It gets all the message that peer has sent as a response and
-                        // deserializes it, it even handles incosistency among message, like
-                        // mulitple messages sent by peer as one single and multiple messages sent
-                        // in different packet
-                        if let Some(msg) = receiver.recv().await {
-                            // If messages is empty, then it means we were waiting for some message
-                            // to come after a Handshake request was sent
-                            if messages.is_empty() {
-                                // We'll push all the bytes sent to us by the peer as a response of the "Handshake" message we sent into one big chunk
-                                // i.e "response_from_handshake" and then deserialize all messages out of this big chunk
-                                let mut response_from_handshake = BytesMut::new();
-                                response_from_handshake.put_slice(&msg);
-                                timeout(Duration::from_secs(2), async {
-                                    loop {
-                                        if let Some(v) = receiver.recv().await {
-                                            response_from_handshake.put_slice(&v);
-                                        }
-                                    }
-                                })
-                                .await;
-                                messages.append(&mut handshake_responses(&mut response_from_handshake));
-                            }
-                        }
+                        let mut handshake_response = tcp_sender.sendHandshakeMessage().await.unwrap();
+                        messages.append(&mut handshake_response);
 
-                        // On Choke, shutdown the TCP stream and stop progression of the future
-                        if messages.contains(&Message::CHOKE) {
-                            write_half.shutdown();
-                            return;
-                        }
+                        let mut interested_response = tcp_sender.sendInterestedMessage().await.unwrap();
+                        messages.append(&mut interested_response);
 
-                        // Send interested message to the peers and unchoke expect them to send unchoke message
-                        write_half.write_all(&Interested::build_message()).await.unwrap();
+                        tcp_sender.sendUnchokeMessage();
 
-                        if let Some(mut msg) = receiver.recv().await {
-                            messages.push(messageHandler(&mut msg).unwrap());
-                        }
-
-                        // On Choke, shutdown the TCP stream and stop progression of the future
-                        if messages.contains(&Message::CHOKE) {
-                            write_half.shutdown();
-                            return;
-                        }
-                        if messages.contains(&Message::UNCHOKE) {
-                            write_half.write_all(&Unchoke::build_message()).await.unwrap();
-                        }
-
-                        let pieces = Pieces::new(&mut messages);
-
-                        //println!("{:?}", pieces.have);
-                        let mut blocks: Vec<Block> = Vec::new();
-
-                        if !pieces.have.is_empty() {
-                            let piece_index = pieces.have[0];
-                            let mut begin: u32 = 0;
-                            loop {
-                                if !begin >= PIECE_LENGTH {
-                                    write_half
-                                        .write_all(&Request::build_message(pieces.have[0], begin, MAX_CHUNK_LENGTH))
-                                        .await
-                                        .unwrap();
-                                    if let Some(mut msg) = receiver.recv().await {
-                                        let block = Block::from(&mut msg);
-                                        blocks.push(block);
-                                    }
-                                }
-                            }
-                        }
+                        println!("{:?}", messages);
                     };
 
                     // End both the future as soon as one gets completed
@@ -159,63 +86,16 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
             },
             Err(_) => {
                 // Timeout Error
-                sleep(Duration::from_secs(240)).await
+                sleep(Duration::from_secs(CONNECTION_FAILED_TRY_AGAIN_AFTER)).await
             }
         }
-        sleep(Duration::from_secs(100)).await;
     }
 }
 
-struct Pieces {
-    have: Vec<u32>,
-}
-
-impl Pieces {
-    fn new(v: &mut Vec<Message>) -> Self {
-        let mut have: Vec<u32> = Vec::new();
-        *v = v
-            .iter()
-            .filter(|f| {
-                match f {
-                    Message::BITFIELD(_bitfield) => {
-                        have.append(&mut _bitfield.have.clone());
-                    }
-                    Message::HAVE(_have) => {
-                        have.push(_have.piece_index);
-                    }
-                    _ => {
-                        return true;
-                    }
-                }
-                return false;
-            })
-            .map(|v| v.clone())
-            .collect();
-        Self { have }
-    }
-}
-
-/// Creates a Handshake Message and gives us a buffer containing
-/// Handshake Message that we can send to the "peer"
-async fn createHandshakeMsg(details: __Details) -> BytesMut {
-    let mut handshake_msg = Handshake::empty();
-    let lock_details = details.lock().await;
-    let info_hash = lock_details.info_hash.as_ref().unwrap().clone();
-    handshake_msg.set_info_hash(info_hash);
-    handshake_msg.getBytesMut()
-}
-
-fn handshake_responses(bytes: &mut BytesMut) -> Vec<Message> {
-    let mut messages: Vec<Message> = Vec::new();
-    while let Some(msg) = messageHandler(bytes) {
-        messages.push(msg);
-    }
-    messages
-}
-
-/// This function removes bytes from buffer that is provided after it finds a message
-/// NOTE : Digests bytes acoording to the message foundk
-fn messageHandler(bytes: &mut BytesMut) -> Option<Message> {
+/// A function that removes the bytes of that message from buffer
+/// that it provided after it finds a message
+///
+async fn messageHandler<'a>(bytes: &mut BytesMut, receiver: &mut TCPReceiver<'a>) -> Option<Message> {
     if bytes.len() == 0 {
         // If the buffer is empty then it means there is no message
         None
@@ -228,13 +108,14 @@ fn messageHandler(bytes: &mut BytesMut) -> Option<Message> {
         let pstr_len = bytes[0];
 
         if pstr_len == 19u8 {
-            let handshake_msg = Handshake::from(&bytes.split_to(68));
-            Some(Message::HANDSHAKE(handshake_msg))
+            Some(Message::HANDSHAKE(Handshake::from(bytes)))
         } else {
             let mut message_id = 100;
             if let Some(v) = bytes.get(4) {
                 message_id = *v;
+                println!("{}", message_id);
             }
+
             match message_id {
                 0 => {
                     bytes.split_to(5);
@@ -255,7 +136,18 @@ fn messageHandler(bytes: &mut BytesMut) -> Option<Message> {
                 4 => Some(Message::HAVE(Have::from(bytes))),
                 5 => Some(Message::BITFIELD(Bitfield::from(bytes))),
                 6 => Some(Message::REQUEST),
-                7 => Some(Message::PIECE(Block::from(bytes))),
+                7 => {
+                    // TODO : Handle errors here
+                    let total_length: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[0..=3]).unwrap() + 4;
+                    let mut buf = BytesMut::with_capacity(total_length as usize);
+                    buf.put_slice(&bytes);
+                    if buf.len() != buf.capacity() {
+                        receiver.read_half.read_exact(&mut buf).await;
+                        Some(Message::PIECE(Block::from(&mut buf).unwrap()))
+                    } else {
+                        Some(Message::PIECE(Block::from(bytes).unwrap()))
+                    }
+                }
                 8 => Some(Message::CANCEL),
                 9 => Some(Message::PORT),
                 20 => Some(Message::EXTENDED(Extended::from(bytes))),
@@ -265,56 +157,115 @@ fn messageHandler(bytes: &mut BytesMut) -> Option<Message> {
     }
 }
 
-/// Messages sent to the peer and recieved form the peer takes the following forms
-///
-/// All possible messages are specified by BitTorrent Specifications at :
-///
-/// https://wiki.theory.org/index.php/BitTorrentSpecification#Messages
-/// https://www.bittorrent.org/beps/bep_0010.html
-#[derive(PartialEq, Debug, Clone)]
-enum Message {
-    HANDSHAKE(Handshake),
-    BITFIELD(Bitfield),
-    EXTENDED(Extended),
-    HAVE(Have),
-    KEEP_ALIVE,
-    CHOKE,
-    UNCHOKE,
-    INTERESTED,
-    NOT_INTERESTED,
-    REQUEST,
-    PIECE(Block),
-    CANCEL,
-    PORT,
+/// A wrapper around ReadHalf of the TCPStream
+struct TCPReceiver<'a> {
+    read_half: ReadHalf<'a>,
+}
+impl<'a> TCPReceiver<'a> {
+    ///
+    /// Creates a new TCPReceiver instance
+    fn new(read_half: ReadHalf<'a>) -> Self {
+        Self { read_half }
+    }
+
+    /// Reads on the TCP socket until a Message is found
+    /// NOTE : On error, drop the connection!
+    /// TODO : Study about tokio_codec and try to use it here
+    async fn getMessage(&mut self) -> Result<Vec<Message>> {
+        // It's the max amount of data we'll ever receive, which is the max size of block we're
+        // ever gonna request
+        const MAX_BUFFER_CAPACITY: usize = 16013;
+
+        let mut buf = BytesMut::with_capacity(MAX_BUFFER_CAPACITY);
+        if let Ok(size) = self.read_half.read_buf(&mut buf).await {
+            match size {
+                // If the returned "size" is 0, then its EOF, which means the connection was closed
+                0 => {
+                    return Err("EOF".into());
+                }
+                _ => {
+                    // In the Bittorent Protocol, the first message we send is a HANDSHAKE message
+                    // after connecting to a peer. We expect a HANDSHAKE and BITFIELD, EXTENDED or
+                    // HAVE immediately followed to that HANDSHAKE response in a different TCP packet
+                    // to be sent by the peer to us as a response. Some peers send them as different packet
+                    // but some peers send them on the same packet that they sent the HANDSHAKE
+                    // response, so in order to extract all these messages if they exist we try to find multiple
+                    // messages on the buffer
+                    let mut messages: Vec<Message> = Vec::new();
+                    while let Some(message) = messageHandler(&mut buf, self).await {
+                        messages.push(message);
+                    }
+
+                    Ok(messages)
+                }
+            }
+        } else {
+            return Err("Some Error Occured".into());
+        }
+    }
 }
 
-/// Stores Block sent by peer as a response to "Request" message
-#[derive(Debug, Clone, PartialEq)]
-struct Block {
-    /// Length of the data following "len"
-    len: u32,
-    /// Message id
-    id: u8,
-    /// Zero based piece index
-    index: u32,
-    /// Zero based byte offset within the piece
-    begin: u32,
-    /// Block of data(bytes)
-    block: Vec<u8>,
+/// A wrapper around write half of the TCPStream :
+struct TCPSender<'a> {
+    write_half: WriteHalf<'a>,
+    details: __Details,
+    receiver: UnboundedReceiver<Vec<Message>>,
 }
 
-impl Block {
-    fn from(bytes: &mut BytesMut) -> Self {
-        // TODO : Check if the size of block is same as mentioned in the len field, if not then
-        // return "None"
-        let mut bytes = bytes.to_vec();
-        let len: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[0..=3]).unwrap();
+impl<'a> TCPSender<'a> {
+    /// Creates a new TCPSender instance
+    fn new(write_half: WriteHalf<'a>, details: __Details, receiver: UnboundedReceiver<Vec<Message>>) -> Self {
+        Self { write_half, details, receiver }
+    }
 
-        let id: u8 = *bytes.get(4).unwrap();
-        let index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[5..=8]).unwrap();
-        let begin: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[9..=12]).unwrap();
-        let block: Vec<u8> = bytes.drain(13..).collect();
-        println!("{:?}", block.len());
-        Self { len, id, index, begin, block }
+    /// Creates a HANDSHAKE message and sends the Handshake Message to the peer
+    /// and returns the responses of that Handshake Message
+    ///
+    /// NOTE : It drops the connection as soon as it sees CHOKE message as a response
+    /// of the HANDSHAKE message
+    pub async fn sendHandshakeMessage(&mut self) -> Result<Vec<Message>> {
+        const HANDSHAKE_RESPONSE_WAIT_TIME: u64 = 2;
+
+        // Creates a HANDSHAKE Message
+        let mut handshake_msg = Handshake::default();
+        let lock_details = self.details.lock().await;
+        let info_hash = lock_details.info_hash.as_ref().unwrap().clone();
+        handshake_msg.set_info_hash(info_hash);
+
+        // Writes the HANDSHAKE message on the TCPStream
+        self.write_half.write_all(&handshake_msg.getBytesMut()).await;
+
+        // Waits for all the messages that peer is gonna send as response to the HANDSHAKE message we sent
+        let mut messages = Vec::new();
+        if let Some(mut msgs) = self.receiver.recv().await {
+            messages.append(&mut msgs);
+            // Store all responses sent after 2 seconds of receiving HANDSHAKE response, its usually BITFIELD/HAVE/EXTENDED
+            timeout(Duration::from_secs(HANDSHAKE_RESPONSE_WAIT_TIME), async {
+                loop {
+                    if let Some(mut _msgs) = self.receiver.recv().await {
+                        messages.append(&mut _msgs);
+                    }
+                }
+            })
+            .await;
+        }
+
+        // If the peer sends CHOKE, then we'll disconnect from that peer
+        if messages.contains(&Message::CHOKE) {
+            self.write_half.shutdown();
+        }
+        Ok(messages)
+    }
+
+    /// Writes INTERESTED message on the TCPStream
+    pub async fn sendInterestedMessage(&mut self) -> Option<Vec<Message>> {
+        self.write_half.write_all(&Interested::build_message()).await;
+
+        self.receiver.recv().await
+    }
+
+    /// Writes UNCHOKE message on the TCPStream
+    pub async fn sendUnchokeMessage(&mut self) {
+        self.write_half.write_all(&Unchoke::build_message()).await;
     }
 }
