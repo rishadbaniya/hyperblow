@@ -28,10 +28,9 @@ impl Block {
         if (length + 4) as usize != bytes.len() {
             return Err("NEED MOER TCP SEGMENT".into());
         }
-        let message_id: u8 = 7;
-        let byte_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[4..=8])?;
-        let piece_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[9..=12])?;
-
+        let message_id: u8 = bytes[4];
+        let piece_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[5..=8])?;
+        let byte_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[9..=12])?;
         // Strip away the total no of initial bytes that are not part of the raw block we want
         let total_non_raw_block_bytes = 13;
         bytes.split_to(13);

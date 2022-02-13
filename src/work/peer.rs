@@ -76,20 +76,32 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
 
                         if !peer_details.pieces_have.is_empty() {
                             let piece_index = peer_details.pieces_have[0];
-                            let mut byte_offset: u32 = 0;
-                            if PIECE_LENGTH != byte_offset + 1 {
-                                tcp_sender
-                                    .write_half
-                                    .write_all(&Request::build_message(piece_index, byte_offset, MAX_BUFFER_CAPACITY))
-                                    .await;
+                            let mut byte_index: u32 = 0;
+                            let mut blocks: Vec<Block> = Vec::new();
+                            loop {
+                                if PIECE_LENGTH != byte_index + 1 {
+                                    tcp_sender
+                                        .write_half
+                                        .write_all(&Request::build_message(piece_index, byte_index, MAX_BUFFER_CAPACITY))
+                                        .await;
 
-                                if let Some(v) = tcp_sender.receiver.recv().await {
-                                    println!("{:?}", v.len());
+                                    if let Some(msg) = tcp_sender.receiver.recv().await {
+                                        if let Message::PIECE(block) = &msg[0] {
+                                            blocks.push(block.clone());
+                                            println!(
+                                                "Piece index : {} BLOCK SIZE : {}, BYTE INDEX : {}",
+                                                block.piece_index,
+                                                block.raw_block.len(),
+                                                block.byte_index
+                                            );
+                                            //byte_index = block.byte_index + block.raw_block.len() as u32;
+                                        }
+                                    }
+                                } else {
+                                    break;
                                 }
                             }
                         }
-
-                        println!("{:?}", messages);
                     };
 
                     // End both the future as soon as one gets completed
@@ -234,7 +246,7 @@ impl<'a> TCPReceiver<'a> {
     async fn getMessage(&mut self) -> Result<Vec<Message>> {
         // It's the max amount of data we'll ever receive, which is the max size of block we're
         // ever gonna request
-        const MAX_BUFFER_CAPACITY: usize = 16384;
+        const MAX_BUFFER_CAPACITY: usize = 17000;
 
         let mut messages: Vec<Message> = Vec::new();
         let mut buf = BytesMut::with_capacity(MAX_BUFFER_CAPACITY);
