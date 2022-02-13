@@ -75,10 +75,8 @@ pub fn start(file_state: __FileState, trackers: __Trackers, details: __Details) 
         .block_on(async_block);
 }
 
-//
-//
-// NOTE: This async function must be run concurrently using join!{}
-// It constantly downloads "pieces" from peers concurrently
+/// NOTE: This async function must be run concurrently using join!{}
+/// It constantly downloads "pieces" from peers concurrently
 async fn peers_request(trackers: __Trackers, peers_receiver: RefCell<Receiver<Vec<SocketAddr>>>, details: __Details) {
     let mut peers_receiver = peers_receiver.borrow_mut();
 

@@ -5,7 +5,7 @@
 use super::message::{Bitfield, Extended, Handshake, Have};
 use super::start::{self, __Details};
 use crate::work::message::{Interested, Request, Unchoke};
-use byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use futures::{select, FutureExt};
 use sha1::digest::generic_array::sequence::Split;
@@ -13,7 +13,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::time::{sleep, timeout};
 
 // PEER REQUEST (TCP) :
@@ -23,7 +23,6 @@ use tokio::time::{sleep, timeout};
 //
 // NOTE : A torrent contains multiple pieces and pieces contain multiple chunks, each chunk should
 // not be greater than 16 Kb, i.e we should not request data greater than 16 Kb in request message
-//
 const CONNECTION_TIMEOUT: u64 = 60;
 const MAX_CHUNK_LENGTH: u32 = 16384;
 const CONNECTION_FAILED_TRY_AGAIN_AFTER: u64 = 60;
@@ -42,7 +41,7 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                     let (mut read_half, mut write_half) = stream.split();
 
                     // Channel to communicate between read and write half :
-                    let (sender, mut receiver) = mpsc::channel::<BytesMut>(MAX_TCP_WINDOW_SIZE as usize);
+                    let (sender, mut receiver) = unbounded_channel::<BytesMut>();
 
                     // READ HALF :
                     // Continuosly reads on the TCP stream until EOF
@@ -54,7 +53,7 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                                     if v == 0 {
                                         break 'main;
                                     }
-                                    sender.send(buf).await.unwrap();
+                                    sender.send(buf);
                                 }
                                 Err(e) => println!("{:?}", e),
                             }
@@ -127,23 +126,21 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                         let pieces = Pieces::new(&mut messages);
 
                         //println!("{:?}", pieces.have);
-                        let mut chunks: Vec<Chunk> = Vec::new();
-                        let current_piece = pieces.have[0];
-                        let mut begin_offset: u32 = 0;
-                        let mut piece = pieces.have[0];
-                        loop {
-                            if !begin_offset >= PIECE_LENGTH {
-                                write_half
-                                    .write_all(&Request::build_message(pieces.have[0], begin_offset, MAX_CHUNK_LENGTH))
-                                    .await
-                                    .unwrap();
-                                if let Some(mut msg) = receiver.recv().await {
-                                    let chunk = Chunk::from(&mut msg).unwrap();
-                                    begin_offset = begin_offset + chunk.chunk_length - 1;
-                                    println!("FULL PIECE SIZE : {}", PIECE_LENGTH);
-                                    println!("DOWNLOADING {}", pieces.have[0]);
-                                    println!("Total Chunks i had {} and byte_end_index {}", chunks.len(), begin_offset);
-                                    chunks.push(chunk);
+                        let mut blocks: Vec<Block> = Vec::new();
+
+                        if !pieces.have.is_empty() {
+                            let piece_index = pieces.have[0];
+                            let mut begin: u32 = 0;
+                            loop {
+                                if !begin >= PIECE_LENGTH {
+                                    write_half
+                                        .write_all(&Request::build_message(pieces.have[0], begin, MAX_CHUNK_LENGTH))
+                                        .await
+                                        .unwrap();
+                                    if let Some(mut msg) = receiver.recv().await {
+                                        let block = Block::from(&mut msg);
+                                        blocks.push(block);
+                                    }
                                 }
                             }
                         }
@@ -216,8 +213,8 @@ fn handshake_responses(bytes: &mut BytesMut) -> Vec<Message> {
     messages
 }
 
-// NOTE : Digests bytes acoording to the message found
-// This function removes bytes from buffer that is provided after it founds a message
+/// This function removes bytes from buffer that is provided after it finds a message
+/// NOTE : Digests bytes acoording to the message foundk
 fn messageHandler(bytes: &mut BytesMut) -> Option<Message> {
     if bytes.len() == 0 {
         // If the buffer is empty then it means there is no message
@@ -258,7 +255,7 @@ fn messageHandler(bytes: &mut BytesMut) -> Option<Message> {
                 4 => Some(Message::HAVE(Have::from(bytes))),
                 5 => Some(Message::BITFIELD(Bitfield::from(bytes))),
                 6 => Some(Message::REQUEST),
-                7 => Some(Message::PIECE),
+                7 => Some(Message::PIECE(Block::from(bytes))),
                 8 => Some(Message::CANCEL),
                 9 => Some(Message::PORT),
                 20 => Some(Message::EXTENDED(Extended::from(bytes))),
@@ -268,14 +265,12 @@ fn messageHandler(bytes: &mut BytesMut) -> Option<Message> {
     }
 }
 
-//
-// Messages sent to the peer and recieved form the peer takes the following forms
-//
-// All possible messages are specified by BitTorrent Specifications at :
-//
-// https://wiki.theory.org/index.php/BitTorrentSpecification#Messages
-// https://www.bittorrent.org/beps/bep_0010.html
-//
+/// Messages sent to the peer and recieved form the peer takes the following forms
+///
+/// All possible messages are specified by BitTorrent Specifications at :
+///
+/// https://wiki.theory.org/index.php/BitTorrentSpecification#Messages
+/// https://www.bittorrent.org/beps/bep_0010.html
 #[derive(PartialEq, Debug, Clone)]
 enum Message {
     HANDSHAKE(Handshake),
@@ -288,41 +283,38 @@ enum Message {
     INTERESTED,
     NOT_INTERESTED,
     REQUEST,
-    PIECE,
+    PIECE(Block),
     CANCEL,
     PORT,
 }
 
-/// Stores block's data and its metadata sent by a peer
-#[derive(Debug, Clone)]
-struct Chunk {
+/// Stores Block sent by peer as a response to "Request" message
+#[derive(Debug, Clone, PartialEq)]
+struct Block {
+    /// Length of the data following "len"
     len: u32,
+    /// Message id
     id: u8,
-    piece_index: u32,
-    byte_start_index: u32,
-    byte_end_index: u32,
-    chunk_length: u32,
-    chunk: BytesMut,
+    /// Zero based piece index
+    index: u32,
+    /// Zero based byte offset within the piece
+    begin: u32,
+    /// Block of data(bytes)
+    block: Vec<u8>,
 }
 
-impl Chunk {
-    fn from(bytes: &mut BytesMut) -> Option<Self> {
+impl Block {
+    fn from(bytes: &mut BytesMut) -> Self {
+        // TODO : Check if the size of block is same as mentioned in the len field, if not then
+        // return "None"
+        let mut bytes = bytes.to_vec();
         let len: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[0..=3]).unwrap();
-        let id: u8 = *bytes.get(4).unwrap();
-        let piece_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[5..=8]).unwrap();
-        let byte_start_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[9..=12]).unwrap();
-        bytes.split_to(13);
-        let chunk = bytes.clone();
-        let byte_end_index = (chunk.len() - 1) as u32;
 
-        Some(Self {
-            len,
-            id,
-            piece_index,
-            byte_start_index,
-            byte_end_index,
-            chunk_length: chunk.len() as u32,
-            chunk,
-        })
+        let id: u8 = *bytes.get(4).unwrap();
+        let index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[5..=8]).unwrap();
+        let begin: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[9..=12]).unwrap();
+        let block: Vec<u8> = bytes.drain(13..).collect();
+        println!("{:?}", block.len());
+        Self { len, id, index, begin, block }
     }
 }
