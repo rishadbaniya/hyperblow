@@ -15,7 +15,7 @@
 
 use super::Block;
 use byteorder::{BigEndian, ReadBytesExt};
-use bytes::{BufMut, BytesMut};
+use bytes::{buf, BufMut, BytesMut};
 use serde_derive::{Deserialize, Serialize};
 
 /// Messages sent to the peer and recieved form the peer takes the following forms
@@ -120,23 +120,29 @@ pub struct Bitfield {
 }
 
 impl Bitfield {
-    pub fn from(bytes: &mut BytesMut) -> Self {
+    pub fn from(bytes: &mut BytesMut) -> crate::Result<Self> {
         let mut have: Vec<u32> = Vec::new();
         let mut not_have: Vec<u32> = Vec::new();
 
         let length_prefix: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[0..=3]).unwrap();
         let bitfield_total_length = (length_prefix + 4) as usize;
-        let bitfield_payload = bytes.split_to(bitfield_total_length);
 
-        for i in 0..bitfield_payload.len() - 1 {
-            match bitfield_payload[i] {
-                0 => not_have.push(i as u32),
-                1 => have.push(i as u32),
-                _ => {}
+        // If the bytes size is less than bitfield total length then it means it needs more tcp
+        // packet to combine and create its full data
+        if bytes.len() < bitfield_total_length {
+            return Err("WAIT FOR MORE TCP SEGMENT".into());
+        } else {
+            let bitfield_payload = bytes.split_to(bitfield_total_length);
+            for i in 0..bitfield_payload.len() - 1 {
+                match bitfield_payload[i] {
+                    0 => not_have.push(i as u32),
+                    1 => have.push(i as u32),
+                    _ => {}
+                }
             }
         }
 
-        Self { have, not_have }
+        Ok(Self { have, not_have })
     }
 }
 
@@ -179,8 +185,6 @@ impl Extended {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 struct ExtendedPayload {
-    pub m: Option<Vec<u8>>,
-    pub p: Option<Vec<Vec<String>>>,
     pub v: Option<String>,
 }
 
@@ -212,9 +216,9 @@ impl Have {
 ///
 /// pstrlen => length of pstr (u8) (value = 19)
 /// pstr => b"BitTorrent Protocol"
-/// reserved => 8 reserved bits, if no extension is used then its usually all 0's, use to define Extensions Used
-/// info_hash => The info hash of the torrent
-/// peer_id => Peer id of the peer
+/// reserved => 8 reserved bytes, if no extension is used then its usually all 0's, use to define Extensions Used
+/// info_hash => The info hash of the torrent (20 bytes)
+/// peer_id => Peer id of the peer (20 bytes)
 ///
 ///
 /// For More : https://wiki.theory.org/indx.php/BitTorrentSpecification#Handshakee
@@ -247,10 +251,10 @@ impl Default for Handshake {
 impl Handshake {
     pub fn from(v: &mut BytesMut) -> Self {
         let pstrlen = v.split_to(1).to_vec()[0];
-        let pstr: Vec<u8> = v.split_to(20).to_vec();
+        let pstr: Vec<u8> = v.split_to(19).to_vec();
         let reserved: Vec<u8> = v.split_to(8).to_vec();
         let info_hash: Option<Vec<u8>> = Some(v.split_to(20).to_vec());
-        let peer_id: Vec<u8> = v.split_to(19).to_vec();
+        let peer_id: Vec<u8> = v.split_to(20).to_vec();
 
         Self {
             pstrlen,
