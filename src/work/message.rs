@@ -229,16 +229,27 @@ impl Default for Handshake {
         }
     }
 }
-/// Handshake Message
+/// Handshake Message :
+///
+/// It's the first message to be exchanged by us (the initiator of the connection), with the peer.
+/// A Handshake message has fixed 68 byte length
+///
+/// Structure :
+///
+/// pstrlen => length of pstr (u8) (value = 19)
+/// pstr => b"BitTorrent Protocol"
+/// reserved => 8 reserved bits, use to define Extensions Used
+/// info_hash => The info hash of the torrent
+/// peer_id => Peer id of the peer
 ///
 impl Handshake {
     /// Consumes the given bytes
     pub fn from(v: &mut BytesMut) -> Self {
-        let pstrlen = v[0];
+        let pstrlen = v.split_to(1).to_vec()[0];
         let pstr: Vec<u8> = v.split_to(20).to_vec();
-        let reserved: Vec<u8> = v.split_to(28).to_vec();
-        let info_hash: Option<Vec<u8>> = Some(v.split_to(49).to_vec());
-        let peer_id: Vec<u8> = v.split_to(68).to_vec();
+        let reserved: Vec<u8> = v.split_to(8).to_vec();
+        let info_hash: Option<Vec<u8>> = Some(v.split_to(20).to_vec());
+        let peer_id: Vec<u8> = v.split_to(19).to_vec();
 
         Self {
             pstrlen,
