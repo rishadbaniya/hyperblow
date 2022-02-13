@@ -140,15 +140,15 @@ impl Bitfield {
     }
 }
 
-// Extended Message :
-//
-// A message type for those who implement the Extension Protocol
-// from - http://www.bittorrent.org/beps/bep_0010.html
-//
-// Structure :
-// length_prefix => u32 (No of bytes for the entire message) : Offset [0,3]
-// message_id => u8 (value = 20) (id of the message) : Offset : [4]
-// extension_message_id => u8 (id of the message) : Offset : [5]
+/// Extended Message :
+///
+/// A message type for those who implement the Extension Protocol
+/// from - http://www.bittorrent.org/beps/bep_0010.html
+///
+/// Structure :
+/// length_prefix => u32 (No of bytes for the entire message) : Offset [0,3]
+/// message_id => u8 (value = 20) (id of the message) : Offset : [4]
+/// extension_message_id => u8 (id of the message) : Offset : [5]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Extended {
     length_prefix: u32,
@@ -179,12 +179,13 @@ impl Extended {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 struct ExtendedPayload {
-    //pub m: Option<Vec<u8>>,
-    //pub p: Option<Vec<Vec<String>>>,
+    pub m: Option<Vec<u8>>,
+    pub p: Option<Vec<Vec<String>>>,
     pub v: Option<String>,
 }
 
-// Message => Have
+/// HAVE Message :
+/// TODO : Add info about HAVE message
 #[derive(Debug, PartialEq, Clone)]
 pub struct Have {
     pub piece_index: u32,
@@ -198,14 +199,27 @@ impl Have {
     }
 }
 
-// Protocol Implemented From :  https://wiki.theory.org/indx.php/BitTorrentSpecification#Handshakee
-// In version 1.0 of the BitTorrent protocol, pstrlen = 19, and pstr = "BitTorrent protocol".
-
-// 0. pstrlen => Single byte value which is length of "pstr", i.e u8 (Value = 19)
-// 1. pstr => String identifier of the protocol (Value = "BitTorrent protocol" )
-// 2. reserved => 8 reserved bytes. Current implentation uses all zeroes
-// 3.
-#[derive(PartialEq, Debug, Clone)]
+/// HANDSHAKE Message :
+///
+/// It's the first message to be exchanged by us (the initiator of the connection), with the peer.
+/// A Handshake message has fixed 68 byte length. The peer also sends HANDSHAKE as the first
+/// message to us.
+///
+/// NOTE : If any peer sends message other than HANDSHAKE as the first message when we send
+/// them HANDSHAKE message, then we must terminate the Connection.
+///
+/// Structure :
+///
+/// pstrlen => length of pstr (u8) (value = 19)
+/// pstr => b"BitTorrent Protocol"
+/// reserved => 8 reserved bits, if no extension is used then its usually all 0's, use to define Extensions Used
+/// info_hash => The info hash of the torrent
+/// peer_id => Peer id of the peer
+///
+///
+/// For More : https://wiki.theory.org/indx.php/BitTorrentSpecification#Handshakee
+///
+#[derive(Debug, Clone, PartialEq)]
 pub struct Handshake {
     pub pstrlen: u8,
     pub pstr: Vec<u8>,
@@ -229,21 +243,8 @@ impl Default for Handshake {
         }
     }
 }
-/// Handshake Message :
-///
-/// It's the first message to be exchanged by us (the initiator of the connection), with the peer.
-/// A Handshake message has fixed 68 byte length
-///
-/// Structure :
-///
-/// pstrlen => length of pstr (u8) (value = 19)
-/// pstr => b"BitTorrent Protocol"
-/// reserved => 8 reserved bits, use to define Extensions Used
-/// info_hash => The info hash of the torrent
-/// peer_id => Peer id of the peer
-///
+
 impl Handshake {
-    /// Consumes the given bytes
     pub fn from(v: &mut BytesMut) -> Self {
         let pstrlen = v.split_to(1).to_vec()[0];
         let pstr: Vec<u8> = v.split_to(20).to_vec();
