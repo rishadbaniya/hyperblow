@@ -1,9 +1,52 @@
+// NOTE : This file contains all the structs and methods related to
+// Bittorent Message
+//
+// All the messages and their specified protocol is taken from :
+// https://wiki.theory.org/index.php/BitTorrentSpecification#Messages
+// https://www.bittorrent.org/beps/bep_0010.html
+//
+// Initially we as a peer start as :
+//
+// NOT_INTERESTED and
+// CHOKE
+
 #![allow(unused_must_use)]
+#![allow(non_camel_case_types)]
+
+use super::Block;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use serde_derive::{Deserialize, Serialize};
 
-// Interested message
+/// Messages sent to the peer and recieved form the peer takes the following forms
+///
+/// All possible messages are specified by BitTorrent Specifications at :
+///
+#[derive(PartialEq, Debug, Clone)]
+pub enum Message {
+    HANDSHAKE(Handshake),
+    BITFIELD(Bitfield),
+    EXTENDED(Extended),
+    HAVE(Have),
+    PIECE(Block),
+    KEEP_ALIVE,
+    CHOKE,
+    UNCHOKE,
+    INTERESTED,
+    NOT_INTERESTED,
+    REQUEST,
+    CANCEL,
+    PORT,
+}
+
+/// INTERESTED message
+///
+/// INTERESTED Message is sent after HANDSHAKE message has been
+/// exchanged between the peers, its used to tell the peer "hey i'm interested in exchanging files with you",
+/// and the peer can choose choke or unchoke us by sending us CHOKE or UNCHOKE message,
+/// we can then choose to CHOKE and UNCHOKE the user after by looking at the response of this INTERESTED message
+///
+/// NOTE : Sending an INTERESTED message doesn't guarantee that the peer would send UNCHOKE
 pub struct Interested;
 
 impl Interested {
@@ -15,7 +58,9 @@ impl Interested {
     }
 }
 
-// Unchoke Message
+/// Unchoke Message
+///
+///
 pub struct Unchoke;
 
 impl Unchoke {
@@ -27,15 +72,13 @@ impl Unchoke {
     }
 }
 
-//
-// Struct to build a Request Message and deserialize peer's Request Message
-//
-// length_prefix => 13u32 (Total length of the payload that follows the initial 4 bytes)
-// id => u8 (id of the message)
-// index => (index of the piece)
-// begin => (index of the beginning byte)
-// length => (length of the piece from beginning offset)
-//
+/// Request Message
+///
+/// length_prefix => 13u32 (Total length of the payload that follows the initial 4 bytes)
+/// id => u8 (id of the message)
+/// index => (index of the piece)
+/// begin => (index of the beginning byte)
+/// length => (length of the piece from beginning offset)
 pub struct Request {
     length_prefix: u32,
     id: u8,
@@ -123,7 +166,6 @@ impl Extended {
 
         let payload_length = (length_prefix - 2) as usize;
         let payload = bytes.split_to(payload_length);
-
         let payload: ExtendedPayload = serde_bencode::de::from_bytes(&payload).unwrap();
 
         Extended {
@@ -172,8 +214,8 @@ pub struct Handshake {
     pub peer_id: Vec<u8>,
 }
 
-impl Handshake {
-    pub fn empty() -> Self {
+impl Default for Handshake {
+    fn default() -> Self {
         let pstrlen: u8 = 19;
         let pstr: Vec<u8> = b"BitTorrent protocol".map(|v| v).into_iter().collect();
         let reserved = vec![0; 8];
@@ -186,16 +228,17 @@ impl Handshake {
             peer_id,
         }
     }
-
-    pub fn from(v: &BytesMut) -> Self {
-        let v: Vec<u8> = v.iter().map(|v| *v).collect();
-        let bytes_peer_id: Vec<u8> = v[49..].iter().map(|v| *v).collect();
-
+}
+/// Handshake Message
+///
+impl Handshake {
+    /// Consumes the given bytes
+    pub fn from(v: &mut BytesMut) -> Self {
         let pstrlen = v[0];
-        let pstr: Vec<u8> = v[1..=19].iter().map(|v| *v).collect();
-        let reserved: Vec<u8> = v[20..=27].iter().map(|v| *v).collect();
-        let info_hash: Option<Vec<u8>> = Some(v[28..=48].iter().map(|v| *v).collect());
-        let peer_id: Vec<u8> = v[49..].iter().map(|v| *v).collect();
+        let pstr: Vec<u8> = v.split_to(20).to_vec();
+        let reserved: Vec<u8> = v.split_to(28).to_vec();
+        let info_hash: Option<Vec<u8>> = Some(v.split_to(49).to_vec());
+        let peer_id: Vec<u8> = v.split_to(68).to_vec();
 
         Self {
             pstrlen,
