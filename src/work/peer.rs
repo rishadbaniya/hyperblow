@@ -1,21 +1,125 @@
 #![allow(non_camel_case_types)]
 #![allow(unused_must_use)]
+#![allow(dead_code)]
 
 use super::{start::__Details, Bitfield, Block, Extended, Handshake, Have, Interested, Message, Unchoke};
 use crate::work::Request;
 use crate::Result;
-use byteorder::{BigEndian, ReadBytesExt};
-use bytes::{BufMut, BytesMut};
+use bytes::BytesMut;
 use futures::{select, FutureExt};
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{
     tcp::{ReadHalf, WriteHalf},
     TcpStream,
 };
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::RwLock;
 use tokio::time::{sleep, timeout};
+
+/// Current relationship with the Peer
+pub enum PeerStatus {
+    NOT_CONNECTED,
+    CONNECTED,
+    SENT_HANDHSAKE,
+}
+
+/// Type of Peer
+pub enum PeerType {
+    /// One that doesnt have all pieces and wants more piece
+    LEECHER,
+
+    /// One that has all the needed pieces
+    SEEDER,
+
+    /// One that has downloaded required files and doesnt wanna download other files
+    PARTIAL_SEEDER,
+}
+
+/// PeerInfo holds crucial informations about the Peer such as
+/// the pieces the peer has or doesn't have, if the peer is a Seeder or a Leecher
+///
+/// It should be created when the peer sends us some messages like BITFIELD, EXTENDED or HAVE
+pub struct PeerInfo {
+    /// Zero based index of the piece the peer has
+    pieces_have: Vec<u32>,
+
+    /// Zero based index of the piece the peer does not have
+    pieces_not_have: Vec<u32>,
+
+    /// Whether the peer is a Seeder or Leecher
+    peer_type: PeerType,
+}
+
+pub struct Peer<'a> {
+    /// Current state of relationship between us and the peer
+    status: Option<Arc<RwLock<PeerStatus>>>,
+
+    /// Holds information needed to download pieces
+    info: Option<Arc<RwLock<PeerInfo>>>,
+
+    /// TcpStream after getting connected to the peer
+    tcp_stream: Option<TcpStream>,
+
+    /// Wrapper around WriteHalf to send certain Bittorent Message as raw bytes to the peer
+    tcp_sender: Option<TCPSender<'a>>,
+
+    /// Wrapper around ReadHalf to receive raw bytes as certain Bittorent Message from the peer
+    tcp_receiver: Option<TCPReceiver<'a>>,
+
+    /// Socket address of the Peer
+    socket_adr: SocketAddr,
+
+    /// Details of the torrent file
+    details: __Details,
+}
+
+impl<'a> Peer<'a> {
+    /// Creates a new peer instance by storing the socket address of the
+    /// peer
+    pub fn new(socket_adr: SocketAddr, details: __Details) -> Self {
+        let status = Some(Arc::new(RwLock::new(PeerStatus::NOT_CONNECTED)));
+        Self {
+            status,
+            info: None,
+            tcp_stream: None,
+            tcp_sender: None,
+            tcp_receiver: None,
+            socket_adr,
+            details,
+        }
+    }
+
+    /// Tries to connect to the peer until CONNECTION_TIMEOUT or until some ERROR occurs
+    ///
+    /// It'll return Error if trying to connect fails, on such condition we should try to connect
+    /// to the peer again after X seconds, where X is any time defined by Developer
+    pub async fn try_connect(&'a mut self) -> Option<((TCPSender<'a>, TCPReceiver<'a>), UnboundedSender<Vec<Message>>)> {
+        let CONNECTION_TIMEOUT = Duration::from_secs(60);
+
+        match timeout(CONNECTION_TIMEOUT, TcpStream::connect(self.socket_adr)).await {
+            Ok(Ok(tcp_stream)) => {
+                self.tcp_stream = Some(tcp_stream);
+                let (channel_sender, channel_receiver) = unbounded_channel::<Vec<Message>>();
+                let (read_half, write_half) = self.tcp_stream.as_mut().unwrap().split();
+
+                let tcp_receiver = TCPReceiver::new(read_half);
+                let tcp_sender = TCPSender::new(write_half, self.details.clone(), channel_receiver);
+
+                // Changes the PeerStatus to CONNECTED
+                let mut write_lock_status = self.status.as_ref().unwrap().write().await;
+                *write_lock_status = PeerStatus::CONNECTED;
+
+                return Some(((tcp_sender, tcp_receiver), channel_sender));
+            }
+            _ => {
+                return None;
+            }
+        }
+    }
+}
 
 /// Peer Request (TCP) :
 ///
@@ -32,96 +136,86 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
     const MAX_BUFFER_CAPACITY: u32 = 16384;
 
     let PIECE_LENGTH = details.lock().await.piece_length.unwrap() as u32;
-
     loop {
-        match timeout(Duration::from_secs(CONNECTION_TIMEOUT), TcpStream::connect(socket_adr)).await {
-            Ok(v) => match v {
-                Ok(mut stream) => {
-                    // Splits the stream and also creates channel to communicate between those two
-                    // halves
-                    let (read_half, write_half) = stream.split();
-                    let (sender, receiver) = unbounded_channel::<Vec<Message>>();
-
-                    // READ HALF :
-                    // Continuosly reads for message on the TCP stream until EOF
-                    let read = async move {
-                        let mut tcp_receiver = TCPReceiver::new(read_half);
-                        loop {
-                            if let Ok(msgs) = tcp_receiver.getMessage().await {
-                                sender.send(msgs);
-                            } else {
-                                break;
-                            }
+        let mut peer = Peer::new(socket_adr, details.clone());
+        match peer.try_connect().await {
+            Some(((mut tcp_sender, mut tcp_receiver), channel_sender)) => {
+                // Continuosly reads on the stream for some message
+                let read = async move {
+                    loop {
+                        if let Ok(msgs) = tcp_receiver.getMessage().await {
+                            channel_sender.send(msgs);
+                        } else {
+                            break;
                         }
-                    };
+                    }
+                };
 
-                    // WRITE HALF :
-                    let _details = details.clone();
-                    let write = async move {
-                        let mut messages: Vec<Message> = Vec::new();
-                        let mut tcp_sender = TCPSender::new(write_half, _details, receiver);
+                let write = async move {
+                    let mut messages: Vec<Message> = Vec::new();
 
-                        // Sends HANDSHAKE message
-                        let mut handshake_response = tcp_sender.sendHandshakeMessage().await.unwrap();
-                        messages.append(&mut handshake_response);
+                    // Sends HANDSHAKE message
+                    let mut handshake_response = tcp_sender.sendHandshakeMessage().await.unwrap();
+                    messages.append(&mut handshake_response);
 
-                        // Sends INTERESTED message
-                        let mut interested_response = tcp_sender.sendInterestedMessage().await.unwrap();
-                        messages.append(&mut interested_response);
+                    // Sends INTERESTED message
+                    let mut interested_response = tcp_sender.sendInterestedMessage().await.unwrap();
+                    messages.append(&mut interested_response);
 
-                        // Sends UNCHOKE message
-                        tcp_sender.sendUnchokeMessage();
+                    // Sends UNCHOKE message
+                    tcp_sender.sendUnchokeMessage();
+                    println!("{:?}", messages);
+                };
 
-                        let peer_details = PeerDetails::from(&mut messages);
-
-                        if !peer_details.pieces_have.is_empty() {
-                            let piece_index = peer_details.pieces_have[0];
-                            let mut byte_index: u32 = 0;
-                            let mut blocks: Vec<Block> = Vec::new();
-                            loop {
-                                if PIECE_LENGTH != byte_index + 1 {
-                                    tcp_sender
-                                        .write_half
-                                        .write_all(&Request::build_message(piece_index, byte_index, MAX_BUFFER_CAPACITY))
-                                        .await;
-
-                                    if let Some(msg) = tcp_sender.receiver.recv().await {
-                                        if let Message::PIECE(block) = &msg[0] {
-                                            blocks.push(block.clone());
-                                            println!(
-                                                "Piece index : {} BLOCK SIZE : {}, BYTE INDEX : {}",
-                                                block.piece_index,
-                                                block.raw_block.len(),
-                                                block.byte_index
-                                            );
-                                            //byte_index = block.byte_index + block.raw_block.len() as u32;
-                                        }
-                                    }
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-                    };
-
-                    // End both the future as soon as one gets completed
-                    select! {
-                        () = read.fuse() => (),
-                        () = write.fuse() => ()
-                    };
-                }
-                Err(_) => {
-                    // Connection Refused or Something related with Socket address
-                    sleep(Duration::from_secs(240)).await
-                }
-            },
-            Err(_) => {
-                // Timeout Error
-                sleep(Duration::from_secs(CONNECTION_FAILED_TRY_AGAIN_AFTER)).await;
+                // End both the future as soon as one gets completed
+                select! {
+                    () = read.fuse() => (),
+                    () = write.fuse() => ()
+                };
             }
-        }
-        sleep(Duration::from_secs(2000)).await;
+            _ => {}
+        };
+
+        sleep(Duration::from_secs(260)).await;
     }
+
+    //                     let peer_details = PeerDetails::from(&mut messages);
+
+    //                     for piece_index in peer_details.pieces_have {
+    //                         let mut byte_index: u32 = 0;
+    //                         let mut blocks: Vec<Block> = Vec::new();
+
+    //                         let x = Instant::now();
+    //                         loop {
+    //                             if PIECE_LENGTH != byte_index {
+    //                                 let length = {
+    //                                     if PIECE_LENGTH - byte_index < MAX_BUFFER_CAPACITY {
+    //                                         PIECE_LENGTH - byte_index
+    //                                     } else {
+    //                                         MAX_BUFFER_CAPACITY
+    //                                     }
+    //                                 };
+
+    //                                 tcp_sender.write_half.write_all(&Request::build_message(piece_index, byte_index, length)).await;
+
+    //                                 if let Some(msg) = tcp_sender.receiver.recv().await {
+    //                                     if let Message::PIECE(block) = &msg[0] {
+    //                                         blocks.push(block.clone());
+    //                                         byte_index = block.byte_index + block.raw_block.len() as u32;
+    //                                     }
+    //                                 }
+    //                             } else {
+    //                                 println!(
+    //                                     "DOWNLOADED total {} blocks of index {} in {:?}",
+    //                                     blocks.len(),
+    //                                     piece_index,
+    //                                     Instant::now().duration_since(x),
+    //                                 );
+    //                                 break;
+    //                             }
+    //                         }
+    //                     }
+    //                 };
 }
 
 #[derive(Debug, Clone)]
@@ -232,7 +326,7 @@ async fn messageHandler<'a>(bytes: &mut BytesMut, receiver: &mut TCPReceiver<'a>
 /// response comes we'll see the length of the data using "len" and compare it with the length
 /// mentioned in the "length_prefix" of the data:w
 ///
-struct TCPReceiver<'a> {
+pub struct TCPReceiver<'a> {
     read_half: ReadHalf<'a>,
 }
 impl<'a> TCPReceiver<'a> {
@@ -286,7 +380,7 @@ impl<'a> TCPReceiver<'a> {
 }
 
 /// A wrapper around write half of the TCPStream :
-struct TCPSender<'a> {
+pub struct TCPSender<'a> {
     write_half: WriteHalf<'a>,
     details: __Details,
     receiver: UnboundedReceiver<Vec<Message>>,
