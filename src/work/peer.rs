@@ -3,37 +3,35 @@
 #![allow(dead_code)]
 
 use super::{start::__Details, Bitfield, Block, Extended, Handshake, Have, Interested, Message, Unchoke};
-use crate::work::Request;
 use crate::Result;
 use bytes::BytesMut;
 use futures::{select, FutureExt};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{
-    tcp::{ReadHalf, WriteHalf},
-    TcpStream,
-};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::net::TcpStream;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, timeout};
 
 /// Current relationship with the Peer
+#[derive(Debug, Clone)]
 pub enum PeerStatus {
     NOT_CONNECTED,
     CONNECTED,
     SENT_HANDHSAKE,
+    RECEIVED_HANDSHAKE,
 }
 
 /// Type of Peer
+#[derive(Debug, Clone)]
 pub enum PeerType {
     /// One that doesnt have all pieces and wants more piece
     LEECHER,
-
     /// One that has all the needed pieces
     SEEDER,
-
     /// One that has downloaded required files and doesnt wanna download other files
     PARTIAL_SEEDER,
 }
@@ -42,41 +40,33 @@ pub enum PeerType {
 /// the pieces the peer has or doesn't have, if the peer is a Seeder or a Leecher
 ///
 /// It should be created when the peer sends us some messages like BITFIELD, EXTENDED or HAVE
+///
+#[derive(Debug, Clone)]
 pub struct PeerInfo {
     /// Zero based index of the piece the peer has
     pieces_have: Vec<u32>,
-
     /// Zero based index of the piece the peer does not have
     pieces_not_have: Vec<u32>,
-
     /// Whether the peer is a Seeder or Leecher
     peer_type: PeerType,
 }
 
-pub struct Peer<'a> {
+pub struct Peer {
     /// Current state of relationship between us and the peer
     status: Option<Arc<RwLock<PeerStatus>>>,
-
     /// Holds information needed to download pieces
     info: Option<Arc<RwLock<PeerInfo>>>,
-
-    /// TcpStream after getting connected to the peer
-    tcp_stream: Option<TcpStream>,
-
-    /// Wrapper around WriteHalf to send certain Bittorent Message as raw bytes to the peer
-    tcp_sender: Option<TCPSender<'a>>,
-
-    /// Wrapper around ReadHalf to receive raw bytes as certain Bittorent Message from the peer
-    tcp_receiver: Option<TCPReceiver<'a>>,
-
+    /// Wrapper around OwnedWriteHalf of the TcpStream to send certain Bittorent Message as raw bytes to the peer
+    tcp_sender: Option<TcpSender>,
+    /// Wrapper around OwnedReadHalf of the TcpStream to receive raw bytes as certain Bittorent Message from the peer
+    tcp_receiver: Option<TcpReceiver>,
     /// Socket address of the Peer
     socket_adr: SocketAddr,
-
     /// Details of the torrent file
     details: __Details,
 }
 
-impl<'a> Peer<'a> {
+impl Peer {
     /// Creates a new peer instance by storing the socket address of the
     /// peer
     pub fn new(socket_adr: SocketAddr, details: __Details) -> Self {
@@ -84,7 +74,6 @@ impl<'a> Peer<'a> {
         Self {
             status,
             info: None,
-            tcp_stream: None,
             tcp_sender: None,
             tcp_receiver: None,
             socket_adr,
@@ -96,17 +85,16 @@ impl<'a> Peer<'a> {
     ///
     /// It'll return Error if trying to connect fails, on such condition we should try to connect
     /// to the peer again after X seconds, where X is any time defined by Developer
-    pub async fn try_connect(&'a mut self) -> Option<((TCPSender<'a>, TCPReceiver<'a>), UnboundedSender<Vec<Message>>)> {
+    pub async fn try_connect(&mut self) -> Option<((TcpSender, TcpReceiver), UnboundedSender<Vec<Message>>)> {
         let CONNECTION_TIMEOUT = Duration::from_secs(60);
 
         match timeout(CONNECTION_TIMEOUT, TcpStream::connect(self.socket_adr)).await {
             Ok(Ok(tcp_stream)) => {
-                self.tcp_stream = Some(tcp_stream);
                 let (channel_sender, channel_receiver) = unbounded_channel::<Vec<Message>>();
-                let (read_half, write_half) = self.tcp_stream.as_mut().unwrap().split();
+                let (read_half, write_half) = tcp_stream.into_split();
 
-                let tcp_receiver = TCPReceiver::new(read_half);
-                let tcp_sender = TCPSender::new(write_half, self.details.clone(), channel_receiver);
+                let tcp_receiver = TcpReceiver::new(read_half);
+                let tcp_sender = TcpSender::new(write_half, self.details.clone(), channel_receiver);
 
                 // Changes the PeerStatus to CONNECTED
                 let mut write_lock_status = self.status.as_ref().unwrap().write().await;
@@ -136,11 +124,14 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
     const MAX_BUFFER_CAPACITY: u32 = 16384;
 
     let PIECE_LENGTH = details.lock().await.piece_length.unwrap() as u32;
+
     loop {
-        let mut peer = Peer::new(socket_adr, details.clone());
-        match peer.try_connect().await {
+        let peer = std::sync::Arc::new(tokio::sync::RwLock::new(Peer::new(socket_adr, details.clone())));
+        let mut write_peer = peer.write().await;
+        match write_peer.try_connect().await {
             Some(((mut tcp_sender, mut tcp_receiver), channel_sender)) => {
                 // Continuosly reads on the stream for some message
+                drop(write_peer);
                 let read = async move {
                     loop {
                         if let Ok(msgs) = tcp_receiver.getMessage().await {
@@ -151,6 +142,7 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                     }
                 };
 
+                let read_peer = peer.read().await;
                 let write = async move {
                     let mut messages: Vec<Message> = Vec::new();
 
@@ -164,7 +156,9 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
 
                     // Sends UNCHOKE message
                     tcp_sender.sendUnchokeMessage();
+
                     println!("{:?}", messages);
+                    drop(read_peer);
                 };
 
                 // End both the future as soon as one gets completed
@@ -218,43 +212,37 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
     //                 };
 }
 
-#[derive(Debug, Clone)]
-struct PeerDetails {
-    pieces_have: Vec<u32>,
-    pieces_not_have: Vec<u32>,
-}
-
-impl PeerDetails {
-    fn from(v: &mut Vec<Message>) -> Self {
-        let mut pieces_have: Vec<u32> = Vec::new();
-        let mut pieces_not_have: Vec<u32> = Vec::new();
-        *v = v
-            .iter()
-            .filter(|f| {
-                match f {
-                    Message::BITFIELD(_bitfield) => {
-                        pieces_have.append(&mut _bitfield.have.clone());
-                        pieces_not_have.append(&mut _bitfield.not_have.clone());
-                    }
-                    Message::HAVE(_have) => {
-                        pieces_have.push(_have.piece_index);
-                    }
-                    _ => {
-                        return true;
-                    }
-                }
-                return false;
-            })
-            .map(|v| v.clone())
-            .collect();
-
-        Self { pieces_have, pieces_not_have }
-    }
-}
+///impl PeerDetails {
+///    fn from(v: &mut Vec<Message>) -> Self {
+///        let mut pieces_have: Vec<u32> = Vec::new();
+///        let mut pieces_not_have: Vec<u32> = Vec::new();
+///        *v = v
+///            .iter()
+///            .filter(|f| {
+///                match f {
+///                    Message::BITFIELD(_bitfield) => {
+///                        pieces_have.append(&mut _bitfield.have.clone());
+///                        pieces_not_have.append(&mut _bitfield.not_have.clone());
+///                    }
+///                    Message::HAVE(_have) => {
+///                        pieces_have.push(_have.piece_index);
+///                    }
+///                    _ => {
+///                        return true;
+///                    }
+///                }
+///                return false;
+///            })
+///            .map(|v| v.clone())
+///            .collect();
+///
+///        Self { pieces_have, pieces_not_have }
+///    }
+///}
 
 /// A function that removes the bytes of that message from buffer
 /// that it provided after it finds a message
-async fn messageHandler<'a>(bytes: &mut BytesMut, receiver: &mut TCPReceiver<'a>) -> Option<crate::Result<Message>> {
+async fn messageHandler(bytes: &mut BytesMut, receiver: &mut TcpReceiver) -> Option<crate::Result<Message>> {
     if bytes.len() == 0 {
         // If the buffer is empty then it means there is no message
         None
@@ -325,13 +313,12 @@ async fn messageHandler<'a>(bytes: &mut BytesMut, receiver: &mut TCPReceiver<'a>
 /// In order to make sure we are reding a complete data, what we will do is whenever some
 /// response comes we'll see the length of the data using "len" and compare it with the length
 /// mentioned in the "length_prefix" of the data:w
-///
-pub struct TCPReceiver<'a> {
-    read_half: ReadHalf<'a>,
+pub struct TcpReceiver {
+    read_half: OwnedReadHalf,
 }
-impl<'a> TCPReceiver<'a> {
+impl TcpReceiver {
     /// Creates a new TCPReceiver instance
-    fn new(read_half: ReadHalf<'a>) -> Self {
+    fn new(read_half: OwnedReadHalf) -> Self {
         Self { read_half }
     }
 
@@ -380,15 +367,15 @@ impl<'a> TCPReceiver<'a> {
 }
 
 /// A wrapper around write half of the TCPStream :
-pub struct TCPSender<'a> {
-    write_half: WriteHalf<'a>,
+pub struct TcpSender {
+    write_half: OwnedWriteHalf,
     details: __Details,
     receiver: UnboundedReceiver<Vec<Message>>,
 }
 
-impl<'a> TCPSender<'a> {
+impl TcpSender {
     /// Creates a new TCPSender instance
-    fn new(write_half: WriteHalf<'a>, details: __Details, receiver: UnboundedReceiver<Vec<Message>>) -> Self {
+    fn new(write_half: OwnedWriteHalf, details: __Details, receiver: UnboundedReceiver<Vec<Message>>) -> Self {
         Self { write_half, details, receiver }
     }
 
