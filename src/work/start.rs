@@ -16,7 +16,7 @@ use tokio::sync::{
     mpsc::{Receiver, Sender},
     Mutex as TokioMutex,
 };
-use tokio::task::spawn;
+use tokio::task;
 
 pub type __Trackers = Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>;
 pub type __Details = Arc<TokioMutex<Details>>;
@@ -96,7 +96,7 @@ async fn peers_request(trackers: __Trackers, peers_receiver: RefCell<Receiver<Ve
             if !newly_added_peers.is_empty() {
                 for socket_adr in newly_added_peers {
                     let _details = details.clone();
-                    spawn(async move { peer_request(socket_adr, _details).await });
+                    task::spawn(async move { peer_request(socket_adr, _details).await });
                 }
             }
         }
