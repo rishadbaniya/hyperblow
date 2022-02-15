@@ -40,6 +40,7 @@ pub struct Info {
     pub length: Option<i64>,
     #[serde(rename = "piece length")]
     pub piece_length: Option<i64>,
+    /// Consists of byte string of concatenation of all 20-byte SHA1 hash values, one per piece
     #[serde(with = "serde_bytes")]
     pub pieces: Vec<u8>,
     pub files: Option<Vec<File>>,

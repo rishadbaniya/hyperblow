@@ -9,7 +9,7 @@ use futures::{select, FutureExt};
 use sha1::{Digest, Sha1};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
@@ -123,7 +123,7 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
     const CONNECTION_TIMEOUT: u64 = 60;
     const CONNECTION_FAILED_TRY_AGAIN_AFTER: u64 = 120;
     const MAX_BUFFER_CAPACITY: u32 = 16384;
-
+    let details = details.clone();
     loop {
         let peer = Arc::new(RwLock::new(Peer::new(socket_adr, details.clone())));
 
@@ -142,6 +142,7 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                     }
                 };
 
+                let write_details = details.clone();
                 let write = async move {
                     let mut messages: Vec<Message> = Vec::new();
 
@@ -155,9 +156,14 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
 
                     // Sends UNCHOKE message
                     tcp_sender.sendUnchokeMessage();
-                    println!("{:?}", messages);
 
-                    let p = tcp_sender.request_piece(0).await;
+                    let piece = tcp_sender.request_piece(0).await;
+                    println!(
+                        "Index of piece is {} and length of the data is {} and validity is {}",
+                        piece.index,
+                        piece.data.len(),
+                        piece.is_valid_piece(write_details.lock().await.pieces_hash[0])
+                    );
                 };
 
                 // End both the future as soon as one gets completed
@@ -392,7 +398,7 @@ impl TcpSender {
         self.write_half.write_all(&Unchoke::build_message()).await;
     }
 
-    pub async fn request_piece(&mut self, piece_index: u32) -> Option<Message> {
+    pub async fn request_piece(&mut self, piece_index: u32) -> Piece {
         // Maximum size of block we can request
         const MAX_BLOCK_SIZE: u32 = 16384;
 
@@ -433,12 +439,13 @@ impl TcpSender {
                     }
                 }
             } else {
-                println!("DOWNLOADED PIECE {} AND {} blocks", piece_index, blocks.len());
                 break;
             }
         }
 
-        return Some(Message::UNCHOKE);
+        let piece = Piece::from_blocks(blocks);
+
+        return piece;
     }
 }
 
@@ -449,7 +456,7 @@ pub struct Piece {
     /// Raw data of the piece
     data: BytesMut,
     /// Computed Hash of the piece
-    hash: Vec<u8>,
+    hash: [u8; 20],
 }
 
 impl Piece {
@@ -464,18 +471,18 @@ impl Piece {
             data.put_slice(&block.raw_block);
         }
 
+        // Get the sha1 hash of the piece data
         let mut hasher = Sha1::new();
         hasher.update(&data);
-        let hash: Vec<u8> = hasher.finalize().into_iter().collect();
+        let hash: [u8; 20] = hasher.finalize().into();
 
         Self { index, data, hash }
     }
-
-    /// Checks the validity of the piece by tallying it with the hash provided, usually
+    /// Checks the validity of the piece by tallying it with the hash provided as parameter, usually
     /// we take hash of the piece from the ".torrent" and then pass the hash here into the
     /// function and this function checks whether the hash mentioned in the ".torrent" file is
     /// equal to the computed hash of the piece data
-    pub fn is_piece_valid(&self, hash: Vec<u8>) -> bool {
+    pub fn is_valid_piece(&self, hash: [u8; 20]) -> bool {
         if hash == self.hash {
             true
         } else {

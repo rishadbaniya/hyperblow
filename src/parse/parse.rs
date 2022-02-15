@@ -1,4 +1,5 @@
 use super::torrent_parser::parse_file;
+use super::FileMeta;
 use crate::ui::files::FilesState;
 use crate::work::file::{File, FileType};
 use crate::work::tracker::Tracker;
@@ -122,7 +123,19 @@ pub fn parsing_thread_main(
             trackers.push(tracker.clone());
         }
     }
-
     *lock_trackers = trackers;
+
+    lock_details.pieces_hash.append(&mut get_pieces_hash(&file_meta));
+
     let set = println!("Got all the socket address ----- [{:?}] ", Instant::now().duration_since(t));
+}
+
+fn get_pieces_hash(file_meta: &FileMeta) -> Vec<[u8; 20]> {
+    let mut pieces_hash: Vec<[u8; 20]> = Vec::new();
+
+    for (i, _) in file_meta.info.pieces.iter().enumerate().step_by(20) {
+        let hash: [u8; 20] = file_meta.info.pieces[i..i + 20].try_into().unwrap();
+        pieces_hash.push(hash);
+    }
+    pieces_hash
 }
