@@ -9,7 +9,7 @@ use futures::{select, FutureExt};
 use sha1::{Digest, Sha1};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
@@ -22,8 +22,9 @@ use tokio::time::{sleep, timeout};
 pub enum PeerStatus {
     NOT_CONNECTED,
     CONNECTED,
-    SENT_HANDHSAKE,
-    RECEIVED_HANDSHAKE,
+    HANDHSAKING,
+    REQUESTING_PIECE,
+    DOWNLOADING_PIECE,
 }
 
 /// Type of Peer
@@ -54,7 +55,7 @@ pub struct PeerInfo {
 
 pub struct Peer {
     /// Current state of relationship between us and the peer
-    status: Arc<RwLock<PeerStatus>>,
+    status: PeerStatus,
     /// Holds information needed to download pieces
     info: Option<Arc<RwLock<PeerInfo>>>,
     /// Wrapper around OwnedWriteHalf of the TcpStream to send certain Bittorent Message as raw bytes to the peer
@@ -71,10 +72,16 @@ impl Peer {
     /// Creates a new peer instance by storing the socket address of the
     /// peer
     pub fn new(socket_adr: SocketAddr, details: __Details) -> Self {
-        let status = Arc::new(RwLock::new(PeerStatus::NOT_CONNECTED));
+        let status = PeerStatus::NOT_CONNECTED;
+        let info = Some(Arc::new(RwLock::new(PeerInfo {
+            pieces_have: Vec::new(),
+            pieces_not_have: Vec::new(),
+            peer_type: PeerType::LEECHER,
+        })));
+
         Self {
             status,
-            info: None,
+            info,
             tcp_sender: None,
             tcp_receiver: None,
             socket_adr,
@@ -86,11 +93,12 @@ impl Peer {
     ///
     /// It'll return Error if trying to connect fails, on such condition we should try to connect
     /// to the peer again after X seconds, where X is any time defined by Developer
-    pub async fn try_connect(&mut self) -> Option<((TcpSender, TcpReceiver), UnboundedSender<Vec<Message>>)> {
+    pub async fn try_connect(&mut self) -> Option<(TcpSender, TcpReceiver, UnboundedSender<Vec<Message>>)> {
         let CONNECTION_TIMEOUT = Duration::from_secs(60);
 
         match timeout(CONNECTION_TIMEOUT, TcpStream::connect(self.socket_adr)).await {
             Ok(Ok(tcp_stream)) => {
+                // Channel to share Bittorent Messags between Read and Write Half
                 let (channel_sender, channel_receiver) = unbounded_channel::<Vec<Message>>();
                 let (read_half, write_half) = tcp_stream.into_split();
 
@@ -98,15 +106,40 @@ impl Peer {
                 let tcp_sender = TcpSender::new(write_half, self.details.clone(), channel_receiver);
 
                 // Changes the PeerStatus to CONNECTED
-                let mut write_lock_status = self.status.write().await;
-                *write_lock_status = PeerStatus::CONNECTED;
+                self.status = PeerStatus::CONNECTED;
 
-                return Some(((tcp_sender, tcp_receiver), channel_sender));
+                return Some((tcp_sender, tcp_receiver, channel_sender));
             }
             _ => {
                 return None;
             }
         }
+    }
+
+    pub async fn get_peer_info(&self, messages: &mut Vec<Message>) {
+        let mut peer_details = self.info.as_ref().unwrap().write().await;
+
+        let x: Vec<Message> = messages
+            .iter()
+            .filter(|msg| {
+                match msg {
+                    Message::BITFIELD(bitfield) => {
+                        let mut have = bitfield.have.clone();
+                        let mut not_have = bitfield.not_have.clone();
+                        peer_details.pieces_have.append(&mut have);
+                        peer_details.pieces_not_have.append(&mut not_have);
+                    }
+                    Message::HAVE(have) => {
+                        peer_details.pieces_have.push(have.piece_index);
+                    }
+                    _ => {
+                        return true;
+                    }
+                }
+                return false;
+            })
+            .map(|v| v.clone())
+            .collect();
     }
 }
 
@@ -123,13 +156,13 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
     const CONNECTION_TIMEOUT: u64 = 60;
     const CONNECTION_FAILED_TRY_AGAIN_AFTER: u64 = 120;
     const MAX_BUFFER_CAPACITY: u32 = 16384;
-    let details = details.clone();
+
     loop {
         let peer = Arc::new(RwLock::new(Peer::new(socket_adr, details.clone())));
 
         let mut write_peer = peer.write().await;
         match write_peer.try_connect().await {
-            Some(((mut tcp_sender, mut tcp_receiver), channel_sender)) => {
+            Some((mut tcp_sender, mut tcp_receiver, channel_sender)) => {
                 // Continuosly reads on the stream for some message
                 drop(write_peer);
                 let read = async move {
@@ -142,11 +175,12 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                     }
                 };
 
-                let write_details = details.clone();
+                let _details = details.clone();
                 let write = async move {
                     let mut messages: Vec<Message> = Vec::new();
 
                     // Sends HANDSHAKE message
+                    peer.write().await.status = PeerStatus::HANDHSAKING;
                     let mut handshake_response = tcp_sender.sendHandshakeMessage().await.unwrap();
                     messages.append(&mut handshake_response);
 
@@ -157,13 +191,33 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                     // Sends UNCHOKE message
                     tcp_sender.sendUnchokeMessage();
 
-                    let piece = tcp_sender.request_piece(0).await;
-                    println!(
-                        "Index of piece is {} and length of the data is {} and validity is {}",
-                        piece.index,
-                        piece.data.len(),
-                        piece.is_valid_piece(write_details.lock().await.pieces_hash[0])
-                    );
+                    // Extracts what pieces the peer has and doesn't have and stores it internally
+                    // into peer_info field of Peer instance
+                    let peer_write = peer.write().await;
+                    peer_write.get_peer_info(&mut messages).await;
+                    let peer_info = peer_write.info.as_ref().unwrap().clone();
+                    drop(peer_write);
+
+                    for piece_index in peer_info.read().await.pieces_have.iter() {
+                        let mut write_details_lock = _details.lock().await;
+
+                        if !write_details_lock.pieces_downloaded.contains(piece_index) && !write_details_lock.pieces_requested.contains(piece_index) {
+                            write_details_lock.pieces_requested.insert(*piece_index);
+                            drop(write_details_lock);
+
+                            let piece = tcp_sender.request_piece(*piece_index).await;
+
+                            let mut write_details_lock = _details.lock().await;
+                            println!(
+                                "Index of piece is {} and length of the data is {} and validity is {}",
+                                piece.index,
+                                piece.data.len(),
+                                piece.is_valid_piece(write_details_lock.pieces_hash[*piece_index as usize])
+                            );
+                            write_details_lock.pieces_requested.remove(piece_index);
+                            write_details_lock.pieces_downloaded.insert(*piece_index);
+                        }
+                    }
                 };
 
                 // End both the future as soon as one gets completed
@@ -178,34 +232,6 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
         sleep(Duration::from_secs(260)).await;
     }
 }
-
-///impl PeerDetails {
-///    fn from(v: &mut Vec<Message>) -> Self {
-///        let mut pieces_have: Vec<u32> = Vec::new();
-///        let mut pieces_not_have: Vec<u32> = Vec::new();
-///        *v = v
-///            .iter()
-///            .filter(|f| {
-///                match f {
-///                    Message::BITFIELD(_bitfield) => {
-///                        pieces_have.append(&mut _bitfield.have.clone());
-///                        pieces_not_have.append(&mut _bitfield.not_have.clone());
-///                    }
-///                    Message::HAVE(_have) => {
-///                        pieces_have.push(_have.piece_index);
-///                    }
-///                    _ => {
-///                        return true;
-///                    }
-///                }
-///                return false;
-///            })
-///            .map(|v| v.clone())
-///            .collect();
-///
-///        Self { pieces_have, pieces_not_have }
-///    }
-///}
 
 /// A function that removes the bytes of that message from buffer
 /// that it provided after it finds a message
