@@ -73,20 +73,9 @@ where
                 Rect::new(1, 2, frame.size().width - 2, 1),
             );
 
-            let downloadProgressBar = (
-                Gauge::default()
-                    .block(Block::default().title(format!(
-                        "Downloading : 10.5 Mb/ 2500 Mb || Down Speed : {} Mb/s || Up Speed : {} Mb/s",
-                        3.1, 2.1
-                    )))
-                    .gauge_style(Style::default().fg(tui::style::Color::Green))
-                    .percent(0),
-                Rect::new(1, 6, frame.size().width - 2, 2),
-            );
-
             frame.render_widget(details_section.0, details_section.1);
             frame.render_widget(torrent_name.0, torrent_name.1);
-            frame.render_widget(downloadProgressBar.0, downloadProgressBar.1);
+
             files::draw_files(frame, chunks[1], &mut filesState);
             draw_details(frame, chunks[0], details.clone());
             // Save the current draw scroll state and use it as previous draw scroll state in
@@ -130,16 +119,29 @@ use tui::terminal::Frame;
 // Draws Details section
 pub fn draw_details<B: Backend>(frame: &mut Frame<B>, size: Rect, details: Arc<TokioMutex<Details>>) {
     let details_lock = details.blocking_lock();
-    let info_hash = details_lock.info_hash.as_ref().unwrap();
-    let name = details_lock.name.as_ref().unwrap();
+    let info_hash = details_lock.info_hash.as_ref().unwrap().clone();
+    let name = details_lock.name.as_ref().unwrap().clone();
+    let pieces_downloaded = details_lock.pieces_downloaded.len() as u32;
+    let total_pieces = details_lock.total_pieces;
+    let percent_downloaded = (pieces_downloaded as f32 / total_pieces as f32) * 100_f32;
+    drop(details_lock);
 
     let name = (Block::default().title(format!("Name : {}", name)), Rect::new(1, 2, frame.size().width - 2, 1));
 
     let info_hash = (
-        Block::default().title(format!("Info Hash : {:?}", info_hash)),
+        Block::default().title(format!("Pieces Downloaded : {}/{}", pieces_downloaded, total_pieces)),
         Rect::new(1, 4, frame.size().width - 2, 1),
+    );
+
+    let downloadProgressBar = (
+        Gauge::default()
+            .block(Block::default().title(format!("Downloading : {:.2} % ", percent_downloaded)))
+            .gauge_style(Style::default().fg(tui::style::Color::Green))
+            .percent(percent_downloaded as u16),
+        Rect::new(1, 6, frame.size().width - 2, 2),
     );
 
     frame.render_widget(name.0, name.1);
     frame.render_widget(info_hash.0, info_hash.1);
+    frame.render_widget(downloadProgressBar.0, downloadProgressBar.1);
 }

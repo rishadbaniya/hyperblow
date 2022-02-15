@@ -211,12 +211,6 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                             let piece = tcp_sender.request_piece(*piece_index).await;
 
                             let mut write_details_lock = _details.lock().await;
-                            println!(
-                                "Index of piece is {} and length of the data is {} and validity is {}",
-                                piece.index,
-                                piece.data.len(),
-                                piece.is_valid_piece(write_details_lock.pieces_hash[*piece_index as usize])
-                            );
                             write_details_lock.pieces_requested.remove(piece_index);
                             write_details_lock.pieces_downloaded.insert(*piece_index);
                         }
@@ -231,7 +225,7 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
             }
             _ => {}
         };
-        println!("IM AT THE END");
+
         sleep(Duration::from_secs(5)).await;
     }
 }
