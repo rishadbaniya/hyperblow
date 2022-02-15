@@ -14,7 +14,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
 
 /// Current state of the relationship with the Peer
@@ -36,6 +36,8 @@ pub enum PeerType {
     SEEDER,
     /// One that has downloaded required files and doesnt wanna download other files
     PARTIAL_SEEDER,
+    /// PeerType not figured out
+    UNKNOWN,
 }
 
 /// PeerInfo holds crucial informations about the Peer such as
@@ -57,7 +59,7 @@ pub struct Peer {
     /// Current state of relationship between us and the peer
     status: PeerStatus,
     /// Holds information needed to download pieces
-    info: Option<Arc<RwLock<PeerInfo>>>,
+    info: Arc<Mutex<PeerInfo>>,
     /// Wrapper around OwnedWriteHalf of the TcpStream to send certain Bittorent Message as raw bytes to the peer
     tcp_sender: Option<TcpSender>,
     /// Wrapper around OwnedReadHalf of the TcpStream to receive raw bytes as certain Bittorent Message from the peer
@@ -69,18 +71,17 @@ pub struct Peer {
 }
 
 impl Peer {
-    /// Creates a new peer instance by storing the socket address of the
-    /// peer
+    /// Creates a new peer instance by storing the "SocketAddr" of the
+    /// peer and storing the "Details" of the torrent
     pub fn new(socket_adr: SocketAddr, details: __Details) -> Self {
-        let status = PeerStatus::NOT_CONNECTED;
-        let info = Some(Arc::new(RwLock::new(PeerInfo {
+        let info = Arc::new(Mutex::new(PeerInfo {
             pieces_have: Vec::new(),
             pieces_not_have: Vec::new(),
-            peer_type: PeerType::LEECHER,
-        })));
+            peer_type: PeerType::UNKNOWN,
+        }));
 
         Self {
-            status,
+            status: PeerStatus::NOT_CONNECTED,
             info,
             tcp_sender: None,
             tcp_receiver: None,
@@ -94,16 +95,18 @@ impl Peer {
     /// It'll return Error if trying to connect fails, on such condition we should try to connect
     /// to the peer again after X seconds, where X is any time defined by Developer
     pub async fn try_connect(&mut self) -> Option<(TcpSender, TcpReceiver, UnboundedSender<Vec<Message>>)> {
+        // Waits for 60 seconds for connection to happen
         let CONNECTION_TIMEOUT = Duration::from_secs(60);
 
         match timeout(CONNECTION_TIMEOUT, TcpStream::connect(self.socket_adr)).await {
             Ok(Ok(tcp_stream)) => {
                 // Channel to share Bittorent Messags between Read and Write Half
                 let (channel_sender, channel_receiver) = unbounded_channel::<Vec<Message>>();
-                let (read_half, write_half) = tcp_stream.into_split();
+                //
+                let (read, write) = tcp_stream.into_split();
 
-                let tcp_receiver = TcpReceiver::new(read_half);
-                let tcp_sender = TcpSender::new(write_half, self.details.clone(), channel_receiver);
+                let tcp_receiver = TcpReceiver::new(read);
+                let tcp_sender = TcpSender::new(write, self.details.clone(), channel_receiver);
 
                 // Changes the PeerStatus to CONNECTED
                 self.status = PeerStatus::CONNECTED;
@@ -117,7 +120,7 @@ impl Peer {
     }
 
     pub async fn get_peer_info(&self, messages: &mut Vec<Message>) {
-        let mut peer_details = self.info.as_ref().unwrap().write().await;
+        let mut peer_details = self.info.lock().await;
 
         let x: Vec<Message> = messages
             .iter()
@@ -158,13 +161,13 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
     const MAX_BUFFER_CAPACITY: u32 = 16384;
 
     loop {
-        let peer = Arc::new(RwLock::new(Peer::new(socket_adr, details.clone())));
+        let peer = Arc::new(Mutex::new(Peer::new(socket_adr, details.clone())));
+        let mut guard_peer = peer.lock().await;
 
-        let mut write_peer = peer.write().await;
-        match write_peer.try_connect().await {
+        match guard_peer.try_connect().await {
             Some((mut tcp_sender, mut tcp_receiver, channel_sender)) => {
                 // Continuosly reads on the stream for some message
-                drop(write_peer);
+                drop(guard_peer);
                 let read = async move {
                     loop {
                         if let Ok(msgs) = tcp_receiver.getMessage().await {
@@ -180,7 +183,7 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                     let mut messages: Vec<Message> = Vec::new();
 
                     // Sends HANDSHAKE message
-                    peer.write().await.status = PeerStatus::HANDHSAKING;
+                    peer.lock().await.status = PeerStatus::HANDHSAKING;
                     let mut handshake_response = tcp_sender.sendHandshakeMessage().await.unwrap();
                     messages.append(&mut handshake_response);
 
@@ -193,12 +196,12 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
 
                     // Extracts what pieces the peer has and doesn't have and stores it internally
                     // into peer_info field of Peer instance
-                    let peer_write = peer.write().await;
+                    let peer_write = peer.lock().await;
                     peer_write.get_peer_info(&mut messages).await;
-                    let peer_info = peer_write.info.as_ref().unwrap().clone();
+                    let peer_info = peer_write.info.clone();
                     drop(peer_write);
 
-                    for piece_index in peer_info.read().await.pieces_have.iter() {
+                    for piece_index in peer_info.lock().await.pieces_have.iter() {
                         let mut write_details_lock = _details.lock().await;
 
                         if !write_details_lock.pieces_downloaded.contains(piece_index) && !write_details_lock.pieces_requested.contains(piece_index) {
@@ -228,14 +231,21 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
             }
             _ => {}
         };
-
-        sleep(Duration::from_secs(260)).await;
+        println!("IM AT THE END");
+        sleep(Duration::from_secs(5)).await;
     }
+}
+
+fn get_pstr_and_pstr_len(bytes: &BytesMut) -> Result<(u8, String)> {
+    let pstr_len = bytes[0];
+    let pstr_bytes: [u8; 19] = bytes[1..=19].try_into()?;
+    let pstr = String::from_utf8(pstr_bytes.to_vec())?;
+    Ok((pstr_len, pstr))
 }
 
 /// A function that removes the bytes of that message from buffer
 /// that it provided after it finds a message
-async fn messageHandler(bytes: &mut BytesMut, receiver: &mut TcpReceiver) -> Option<crate::Result<Message>> {
+async fn messageHandler(bytes: &mut BytesMut, receiver: &mut TcpReceiver) -> Option<Result<Message>> {
     if bytes.len() == 0 {
         // If the buffer is empty then it means there is no message
         None
@@ -243,9 +253,7 @@ async fn messageHandler(bytes: &mut BytesMut, receiver: &mut TcpReceiver) -> Opt
         // TODO : Check if the length is (0_u32) as well
         Some(Ok(Message::KEEP_ALIVE))
     } else {
-        // If it's a HANDSHAKE message, then the first message is pstr_len, whose value is 19
-        // TODO : Check if pstr = "BitTorrent protocol" as well
-        let pstr_len = bytes[0];
+        let (pstr_len, pstr) = get_pstr_and_pstr_len(bytes).unwrap();
 
         if pstr_len == 19u8 {
             Some(Ok(Message::HANDSHAKE(Handshake::from(bytes))))
@@ -320,7 +328,7 @@ impl TcpReceiver {
     async fn getMessage(&mut self) -> Result<Vec<Message>> {
         // It's the max amount of data we'll ever receive, which is the max size of block we're
         // ever gonna request
-        const MAX_BUFFER_CAPACITY: usize = 17000;
+        const MAX_BUFFER_CAPACITY: usize = 16000;
 
         let mut messages: Vec<Message> = Vec::new();
         let mut buf = BytesMut::with_capacity(MAX_BUFFER_CAPACITY);
