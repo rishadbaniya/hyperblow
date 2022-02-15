@@ -7,10 +7,12 @@ pub struct Details {
     pub piece_length: Option<i64>,
     pub total_bytes: Option<i64>,
     pub downloaded_bytes: Option<u64>,
+    pub pieces_hash: Vec<[u8; 20]>,
 }
 
 impl Default for Details {
     fn default() -> Self {
+        let pieces_hash = Vec::new();
         Self {
             name: None,
             info_hash: None,
@@ -18,6 +20,7 @@ impl Default for Details {
             downloaded_bytes: None,
             piece_length: None,
             total_pieces: None,
+            pieces_hash,
         }
     }
 }
