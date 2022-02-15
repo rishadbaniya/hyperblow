@@ -53,7 +53,7 @@ pub struct PeerInfo {
 
 pub struct Peer {
     /// Current state of relationship between us and the peer
-    status: Option<Arc<RwLock<PeerStatus>>>,
+    status: Arc<RwLock<PeerStatus>>,
     /// Holds information needed to download pieces
     info: Option<Arc<RwLock<PeerInfo>>>,
     /// Wrapper around OwnedWriteHalf of the TcpStream to send certain Bittorent Message as raw bytes to the peer
@@ -70,7 +70,7 @@ impl Peer {
     /// Creates a new peer instance by storing the socket address of the
     /// peer
     pub fn new(socket_adr: SocketAddr, details: __Details) -> Self {
-        let status = Some(Arc::new(RwLock::new(PeerStatus::NOT_CONNECTED)));
+        let status = Arc::new(RwLock::new(PeerStatus::NOT_CONNECTED));
         Self {
             status,
             info: None,
@@ -97,7 +97,7 @@ impl Peer {
                 let tcp_sender = TcpSender::new(write_half, self.details.clone(), channel_receiver);
 
                 // Changes the PeerStatus to CONNECTED
-                let mut write_lock_status = self.status.as_ref().unwrap().write().await;
+                let mut write_lock_status = self.status.write().await;
                 *write_lock_status = PeerStatus::CONNECTED;
 
                 return Some(((tcp_sender, tcp_receiver), channel_sender));
