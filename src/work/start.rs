@@ -96,6 +96,7 @@ async fn peers_request(trackers: __Trackers, peers_receiver: RefCell<Receiver<Ve
             if !newly_added_peers.is_empty() {
                 for socket_adr in newly_added_peers {
                     let _details = details.clone();
+
                     task::spawn(async move { peer_request(socket_adr, _details).await });
                 }
             }
