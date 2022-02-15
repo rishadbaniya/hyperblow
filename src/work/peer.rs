@@ -170,7 +170,7 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                 drop(guard_peer);
                 let read = async move {
                     loop {
-                        if let Ok(msgs) = tcp_receiver.getMessage().await {
+                        if let Some(msgs) = tcp_receiver.getMessage().await {
                             channel_sender.send(msgs);
                         } else {
                             break;
@@ -236,13 +236,6 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
     }
 }
 
-fn get_pstr_and_pstr_len(bytes: &BytesMut) -> Result<(u8, String)> {
-    let pstr_len = bytes[0];
-    let pstr_bytes: [u8; 19] = bytes[1..=19].try_into()?;
-    let pstr = String::from_utf8(pstr_bytes.to_vec())?;
-    Ok((pstr_len, pstr))
-}
-
 /// A function that removes the bytes of that message from buffer
 /// that it provided after it finds a message
 async fn messageHandler(bytes: &mut BytesMut, receiver: &mut TcpReceiver) -> Option<Result<Message>> {
@@ -250,10 +243,12 @@ async fn messageHandler(bytes: &mut BytesMut, receiver: &mut TcpReceiver) -> Opt
         // If the buffer is empty then it means there is no message
         None
     } else if bytes.len() == 4 {
-        // TODO : Check if the length is (0_u32) as well
+        // TODO : Check if the length is (0_u32) as well, coz a block's remaing data can also be 4
+        // bytes
+        bytes.split_to(4);
         Some(Ok(Message::KEEP_ALIVE))
     } else {
-        let (pstr_len, pstr) = get_pstr_and_pstr_len(bytes).unwrap();
+        let pstr_len = bytes[0];
 
         if pstr_len == 19u8 {
             Some(Ok(Message::HANDSHAKE(Handshake::from(bytes))))
@@ -293,8 +288,14 @@ async fn messageHandler(bytes: &mut BytesMut, receiver: &mut TcpReceiver) -> Opt
                         Err(e) => Err(e),
                     });
                 }
-                8 => Some(Ok(Message::CANCEL)),
-                9 => Some(Ok(Message::PORT)),
+                8 => {
+                    bytes.split_to(5);
+                    Some(Ok(Message::CANCEL))
+                }
+                9 => {
+                    bytes.split_to(5);
+                    Some(Ok(Message::PORT))
+                }
                 20 => Some(Ok(Message::EXTENDED(Extended::from(bytes)))),
                 _ => None,
             }
@@ -325,7 +326,7 @@ impl TcpReceiver {
 
     /// Reads on the TCP socket until a Message is found
     /// NOTE : On error, drop the connection!
-    async fn getMessage(&mut self) -> Result<Vec<Message>> {
+    async fn getMessage(&mut self) -> Option<Vec<Message>> {
         // It's the max amount of data we'll ever receive, which is the max size of block we're
         // ever gonna request
         const MAX_BUFFER_CAPACITY: usize = 16000;
@@ -337,7 +338,7 @@ impl TcpReceiver {
                 match size {
                     // If the returned "size" is 0, then its EOF, which means the connection was closed
                     0 => {
-                        return Err("EOF".into());
+                        return None;
                     }
                     _ => {
                         // In the Bittorent Protocol, the first message we send is a HANDSHAKE message
@@ -360,10 +361,10 @@ impl TcpReceiver {
                     }
                 }
             } else {
-                return Err("Some Error Occured".into());
+                return None;
             }
         }
-        Ok(messages)
+        Some(messages)
     }
 }
 
