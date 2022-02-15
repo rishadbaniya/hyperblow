@@ -12,10 +12,11 @@
 
 #![allow(unused_must_use)]
 #![allow(non_camel_case_types)]
+#![allow(dead_code)]
 
 use super::Block;
 use byteorder::{BigEndian, ReadBytesExt};
-use bytes::{buf, BufMut, BytesMut};
+use bytes::{BufMut, BytesMut};
 use serde_derive::{Deserialize, Serialize};
 
 /// Messages sent to the peer and recieved form the peer takes the following forms

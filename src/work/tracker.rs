@@ -6,6 +6,9 @@
 // }
 //
 
+#![allow(unused_must_use)]
+#![allow(dead_code)]
+
 use crate::Result;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};

@@ -2,7 +2,7 @@
 #![allow(unused_must_use)]
 #![allow(dead_code)]
 
-use super::{start::__Details, Bitfield, Block, Extended, Handshake, Have, Interested, Message, Unchoke};
+use super::{start::__Details, Bitfield, Block, Extended, Handshake, Have, Interested, Message, Request, Unchoke};
 use crate::Result;
 use bytes::BytesMut;
 use futures::{select, FutureExt};
@@ -16,7 +16,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, timeout};
 
-/// Current relationship with the Peer
+/// Current state of the relationship with the Peer
 #[derive(Debug, Clone)]
 pub enum PeerStatus {
     NOT_CONNECTED,
@@ -123,10 +123,9 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
     const CONNECTION_FAILED_TRY_AGAIN_AFTER: u64 = 120;
     const MAX_BUFFER_CAPACITY: u32 = 16384;
 
-    let PIECE_LENGTH = details.lock().await.piece_length.unwrap() as u32;
-
     loop {
-        let peer = std::sync::Arc::new(tokio::sync::RwLock::new(Peer::new(socket_adr, details.clone())));
+        let peer = Arc::new(RwLock::new(Peer::new(socket_adr, details.clone())));
+
         let mut write_peer = peer.write().await;
         match write_peer.try_connect().await {
             Some(((mut tcp_sender, mut tcp_receiver), channel_sender)) => {
@@ -142,7 +141,6 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                     }
                 };
 
-                let read_peer = peer.read().await;
                 let write = async move {
                     let mut messages: Vec<Message> = Vec::new();
 
@@ -156,9 +154,9 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
 
                     // Sends UNCHOKE message
                     tcp_sender.sendUnchokeMessage();
-
                     println!("{:?}", messages);
-                    drop(read_peer);
+
+                    let p = tcp_sender.reqeust_piece(0).await;
                 };
 
                 // End both the future as soon as one gets completed
@@ -172,44 +170,6 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
 
         sleep(Duration::from_secs(260)).await;
     }
-
-    //                     let peer_details = PeerDetails::from(&mut messages);
-
-    //                     for piece_index in peer_details.pieces_have {
-    //                         let mut byte_index: u32 = 0;
-    //                         let mut blocks: Vec<Block> = Vec::new();
-
-    //                         let x = Instant::now();
-    //                         loop {
-    //                             if PIECE_LENGTH != byte_index {
-    //                                 let length = {
-    //                                     if PIECE_LENGTH - byte_index < MAX_BUFFER_CAPACITY {
-    //                                         PIECE_LENGTH - byte_index
-    //                                     } else {
-    //                                         MAX_BUFFER_CAPACITY
-    //                                     }
-    //                                 };
-
-    //                                 tcp_sender.write_half.write_all(&Request::build_message(piece_index, byte_index, length)).await;
-
-    //                                 if let Some(msg) = tcp_sender.receiver.recv().await {
-    //                                     if let Message::PIECE(block) = &msg[0] {
-    //                                         blocks.push(block.clone());
-    //                                         byte_index = block.byte_index + block.raw_block.len() as u32;
-    //                                     }
-    //                                 }
-    //                             } else {
-    //                                 println!(
-    //                                     "DOWNLOADED total {} blocks of index {} in {:?}",
-    //                                     blocks.len(),
-    //                                     piece_index,
-    //                                     Instant::now().duration_since(x),
-    //                                 );
-    //                                 break;
-    //                             }
-    //                         }
-    //                     }
-    //                 };
 }
 
 ///impl PeerDetails {
@@ -429,5 +389,54 @@ impl TcpSender {
     /// Writes UNCHOKE message on the TCPStream
     pub async fn sendUnchokeMessage(&mut self) {
         self.write_half.write_all(&Unchoke::build_message()).await;
+    }
+
+    pub async fn reqeust_piece(&mut self, piece_index: u32) -> Option<Message> {
+        // Maximum size of block we can request
+        const MAX_BLOCK_SIZE: u32 = 16384;
+
+        // Length of piece
+        let piece_length = self.details.lock().await.piece_length.unwrap() as u32;
+
+        // Stores all the blocks that we got from the peer
+        let mut blocks: Vec<Block> = Vec::new();
+
+        // Zero based index of the byte we're gonna request within the piece
+        let mut byte_index = 0;
+        loop {
+            // As we go on downloading blocks, at last a condition will come where the byte index
+            // of next block we are trying to request is same as length of the piece, it means we
+            // have downloaded all the blocks before that byte index, so we have downloaded all the
+            // blocks necessary to build a piece
+            //
+            // TODO : This compares last byte index to be requested with the size of
+            // PIECE_LENGTH to determine whether the blocks needed to build the piece downloaded or not,
+            // which might not work for the last piece, coz its length is different. So, fix this shit!
+            if piece_length != byte_index {
+                let length_to_request = {
+                    if piece_length - byte_index < MAX_BLOCK_SIZE {
+                        piece_length - byte_index
+                    } else {
+                        MAX_BLOCK_SIZE
+                    }
+                };
+
+                self.write_half
+                    .write_all(&Request::build_message(piece_index, byte_index, length_to_request))
+                    .await;
+
+                if let Some(msg) = self.receiver.recv().await {
+                    if let Message::PIECE(block) = &msg[0] {
+                        byte_index = block.byte_index + block.raw_block.len() as u32;
+                        blocks.push(block.clone());
+                    }
+                }
+            } else {
+                println!("DOWNLOADED PIECE {} AND {} blocks", piece_index, blocks.len());
+                break;
+            }
+        }
+
+        return Some(Message::UNCHOKE);
     }
 }
