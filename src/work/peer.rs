@@ -4,8 +4,9 @@
 
 use super::{start::__Details, Bitfield, Block, Extended, Handshake, Have, Interested, Message, Request, Unchoke};
 use crate::Result;
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use futures::{select, FutureExt};
+use sha1::{Digest, Sha1};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -156,7 +157,7 @@ pub async fn peer_request(socket_adr: SocketAddr, details: __Details) {
                     tcp_sender.sendUnchokeMessage();
                     println!("{:?}", messages);
 
-                    let p = tcp_sender.reqeust_piece(0).await;
+                    let p = tcp_sender.request_piece(0).await;
                 };
 
                 // End both the future as soon as one gets completed
@@ -391,7 +392,7 @@ impl TcpSender {
         self.write_half.write_all(&Unchoke::build_message()).await;
     }
 
-    pub async fn reqeust_piece(&mut self, piece_index: u32) -> Option<Message> {
+    pub async fn request_piece(&mut self, piece_index: u32) -> Option<Message> {
         // Maximum size of block we can request
         const MAX_BLOCK_SIZE: u32 = 16384;
 
@@ -438,5 +439,47 @@ impl TcpSender {
         }
 
         return Some(Message::UNCHOKE);
+    }
+}
+
+/// Holds all the raw data of a piece and the piece's metadata
+pub struct Piece {
+    /// Zero based index of the piece
+    index: u32,
+    /// Raw data of the piece
+    data: BytesMut,
+    /// Computed Hash of the piece
+    hash: Vec<u8>,
+}
+
+impl Piece {
+    /// Creates a Piece from all the blocks provided
+    /// We're gonna assume the blocks are in order
+    pub fn from_blocks(blocks: Vec<Block>) -> Self {
+        let mut data = BytesMut::new();
+
+        //Takes one of the block from blocks and gets the piece index
+        let index = blocks[0].piece_index;
+        for block in blocks {
+            data.put_slice(&block.raw_block);
+        }
+
+        let mut hasher = Sha1::new();
+        hasher.update(&data);
+        let hash: Vec<u8> = hasher.finalize().into_iter().collect();
+
+        Self { index, data, hash }
+    }
+
+    /// Checks the validity of the piece by tallying it with the hash provided, usually
+    /// we take hash of the piece from the ".torrent" and then pass the hash here into the
+    /// function and this function checks whether the hash mentioned in the ".torrent" file is
+    /// equal to the computed hash of the piece data
+    pub fn is_piece_valid(&self, hash: Vec<u8>) -> bool {
+        if hash == self.hash {
+            true
+        } else {
+            false
+        }
     }
 }
