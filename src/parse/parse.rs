@@ -127,7 +127,10 @@ pub fn parsing_thread_main(
 
     lock_details.pieces_hash.append(&mut get_pieces_hash(&file_meta));
 
-    let set = println!("Got all the socket address ----- [{:?}] ", Instant::now().duration_since(t));
+    // Total of of hash is same as total of pieces
+    lock_details.total_pieces = lock_details.pieces_hash.len() as u32;
+
+    let set = println!("Resolving all the trackers socket address ----- [{:?}] ", Instant::now().duration_since(t));
 }
 
 fn get_pieces_hash(file_meta: &FileMeta) -> Vec<[u8; 20]> {

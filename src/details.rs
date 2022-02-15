@@ -9,7 +9,7 @@ pub struct Details {
     /// Info hash of the torrent
     pub info_hash: Option<Vec<u8>>,
     /// Total no of pieces
-    pub total_pieces: Option<u32>,
+    pub total_pieces: u32,
     pub piece_length: Option<i64>,
     pub total_bytes: Option<i64>,
     pub downloaded_bytes: Option<u64>,
@@ -30,7 +30,7 @@ impl Default for Details {
             total_bytes: None,
             downloaded_bytes: None,
             piece_length: None,
-            total_pieces: None,
+            total_pieces: 0,
             pieces_hash,
             pieces_downloaded: HashSet::new(),
             pieces_requested: HashSet::new(),
