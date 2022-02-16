@@ -21,18 +21,18 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex as TokioMutex;
 
 const TRACKER_ERROR: &str = "There is something wrong with the torrent file you provided \n Couldn't parse one of the tracker URL";
-//
-// Struct to handle the message to be sent to "Connect" on the UDP Tracker
-// Used to create a "16 byte" buffer to make "Connect Request"
-//
-// Connect Request Bytes Structure:
-//
-// Offset  Size            Name            Value
-// 0       64-bit integer  protocol_id     0x41727101980 // magic constant
-// 8       32-bit integer  action          0 // connect
-// 12      32-bit integer  transaction_id
-// 16
-//
+
+/// Struct to handle the message to be sent to "Connect" on the UDP Tracker
+/// Used to create a "16 byte" buffer to make "Connect Request"
+///
+/// Connect Request Bytes Structure:
+///
+/// Offset  Size            Name            Value
+/// 0       64-bit integer  protocol_id     0x41727101980 // magic constant
+/// 8       32-bit integer  action          0 // connect
+/// 12      32-bit integer  transaction_id
+/// 16
+///
 #[derive(Debug, Clone)]
 pub struct ConnectRequest {
     pub protocol_id: i64,
@@ -62,15 +62,15 @@ impl ConnectRequest {
     }
 }
 
-// Struct to handle response message from "Connect" request to the UDP Tracker
-// Used to create an instance of AnnounceRequest
-// Connect Response Bytes Structure from the UDP Tracker Protocol :
-//
-// Offset  Size            Name            Value
-// 0       32-bit integer  action          0 // connect
-// 4       32-bit integer  transaction_id
-// 8       64-bit integer  connection_id
-// 16
+/// Struct to handle response message from "Connect" request to the UDP Tracker
+/// Used to create an instance of AnnounceRequest
+/// Connect Response Bytes Structure from the UDP Tracker Protocol :
+///
+/// Offset  Size            Name            Value
+/// 0       32-bit integer  action          0 // connect
+/// 4       32-bit integer  transaction_id
+/// 8       64-bit integer  connection_id
+/// 16
 #[derive(Debug, Clone)]
 pub struct ConnectResponse {
     pub action: i32,
@@ -94,26 +94,26 @@ impl ConnectResponse {
     }
 }
 
-// Struct to handle "Announce" request message
-// Used to create a "98 byte" buffer to make "Announce Request"
-// Reference : http://www.bittorrent.org/beps/bep_0015.html
-//
-// IPv4 announce request Bytes Structure:
-// Offset  Size    Name    Value
-// 0       64-bit integer  connection_id   The connection id acquired from establishing the connection.
-// 8       32-bit integer  action          Action. in this case, 1 for announce. See : https://www.rasterbar.com/products/libtorrent/udp_tracker_protocol.html#actions
-// 12      32-bit integer  transaction_id  Randomized by client
-// 16      20-byte string  info_hash       The info-hash of the torrent you want announce yourself in.
-// 36      20-byte string  peer_id         Your peer id. (Peer ID Convention : https://www.bittorrent.org/beps/bep_0020.html)
-// 56      64-bit integer  downloaded      The number of byte you've downloaded in this session.
-// 64      64-bit integer  left            The number of bytes you have left to download until you're finished.
-// 72      64-bit integer  uploaded        The number of bytes you have uploaded in this session.
-// 80      32-bit integer  event           0 // 0: none; 1: completed; 2: started; 3: stopped
-// 84      32-bit integer  IP address      Your ip address. Set to 0 if you want the tracker to use the sender of this UDP packet.u
-// 88      32-bit integer  key             A unique key that is randomized by the client.
-// 92      32-bit integer  num_want        The maximum number of peers you want in the reply. Use -1 for default.
-// 96      16-bit integer  port            The port you're listening on.
-// 98
+/// Struct to handle "Announce" request message
+/// Used to create a "98 byte" buffer to make "Announce Request"
+/// Reference : http://www.bittorrent.org/beps/bep_0015.html
+///
+/// IPv4 announce request Bytes Structure:
+/// Offset  Size    Name    Value
+/// 0       64-bit integer  connection_id   The connection id acquired from establishing the connection.
+/// 8       32-bit integer  action          Action. in this case, 1 for announce. See : https://www.rasterbar.com/products/libtorrent/udp_tracker_protocol.html#actions
+/// 12      32-bit integer  transaction_id  Randomized by client
+/// 16      20-byte string  info_hash       The info-hash of the torrent you want announce yourself in.
+/// 36      20-byte string  peer_id         Your peer id. (Peer ID Convention : https://www.bittorrent.org/beps/bep_0020.html)
+/// 56      64-bit integer  downloaded      The number of byte you've downloaded in this session.
+/// 64      64-bit integer  left            The number of bytes you have left to download until you're finished.
+/// 72      64-bit integer  uploaded        The number of bytes you have uploaded in this session.
+/// 80      32-bit integer  event           0 // 0: none; 1: completed; 2: started; 3: stopped
+/// 84      32-bit integer  IP address      Your ip address. Set to 0 if you want the tracker to use the sender of this UDP packet.u
+/// 88      32-bit integer  key             A unique key that is randomized by the client.
+/// 92      32-bit integer  num_want        The maximum number of peers you want in the reply. Use -1 for default.
+/// 96      16-bit integer  port            The port you're listening on.
+/// 98
 #[derive(Debug, Clone)]
 pub struct AnnounceRequest {
     connection_id: Option<i64>,
@@ -273,13 +273,13 @@ impl AnnounceResponse {
         })
     }
 }
+
 // Offset          Size            Name            Value
 // 0               64-bit integer  connection_id
 // 8               32-bit integer  action          2 // scrape
 // 12              32-bit integer  transaction_id
 // 16 + 20 * n     20-byte string  info_hash
 // 16 + 20 * N
-//
 struct ScrapeRequest {
     connection_id: Option<i64>,
     action: i32,
@@ -383,7 +383,7 @@ impl Tracker {
 
     /// Create list of "Tracker" from data in the
     /// announce and announce_list field of "FileMeta"
-    pub fn getTrackers(announce: &String, announce_list: &Vec<Vec<String>>) -> Vec<Arc<TokioMutex<RefCell<Tracker>>>> {
+    pub fn getTrackers(announce: &String, announce_list: &Vec<Vec<String>>) -> Vec<Arc<TokioMutex<Tracker>>> {
         let mut trackers: Vec<_> = Vec::new();
 
         // TODO : Find difference between Announce and Announce List coz i found Announce duplicate
@@ -391,22 +391,21 @@ impl Tracker {
         //trackers.push(Arc::new(sync::Mutex::new(RefCell::new(Tracker::new(announce)))));
 
         for tracker_url in announce_list {
-            trackers.push(Arc::new(TokioMutex::new(RefCell::new(Tracker::new(&tracker_url[0])))));
+            trackers.push(Arc::new(TokioMutex::new(Tracker::new(&tracker_url[0]))));
         }
         trackers
     }
 }
 
 // To be called at the first step of communicating with the UDP Tracker Servera
-pub async fn connect_request(transaction_id: i32, socket: &UdpSocket, to: &SocketAddr, tracker: Arc<TokioMutex<RefCell<Tracker>>>) -> Result<()> {
-    let tracker_lock = tracker.lock().await;
-    let mut tracker_borrow_mut = tracker_lock.borrow_mut();
+pub async fn connect_request(transaction_id: i32, socket: &UdpSocket, to: &SocketAddr, tracker: Arc<TokioMutex<Tracker>>) -> Result<()> {
+    let mut guard_tracker = tracker.lock().await;
     let mut connect_request = ConnectRequest::empty();
     connect_request.set_transaction_id(transaction_id);
-    tracker_borrow_mut.connect_request = Some(connect_request.clone());
+    guard_tracker.connect_request = Some(connect_request.clone());
     let buf = connect_request.getBytesMut();
     socket.send_to(&buf, to).await?;
-    tracker_borrow_mut.connect_request = Some(connect_request);
+    guard_tracker.connect_request = Some(connect_request);
     Ok(())
 }
 
@@ -417,14 +416,13 @@ pub async fn annnounce_request(
     socket: &UdpSocket,
     to: &SocketAddr,
     details: Arc<TokioMutex<Details>>,
-    tracker: Arc<TokioMutex<RefCell<Tracker>>>,
+    tracker: Arc<TokioMutex<Tracker>>,
 ) -> Result<()> {
     // NOTE : The message received after sending "Announce Request" is kinda dynamic in a sense that
     // it has unknown amount of peers ip addresses and ports
     // Buffer to store the response
-    let lock_tracker = tracker.lock().await;
+
     let lock_details = details.lock().await;
-    let mut tracker_borrow_mut = lock_tracker.borrow_mut();
     let mut announce_request = AnnounceRequest::empty();
     announce_request.set_connection_id(connect_response.connection_id);
     announce_request.set_transaction_id(connect_response.transaction_id);
@@ -436,7 +434,9 @@ pub async fn annnounce_request(
     announce_request.set_port(8001);
     announce_request.set_key(20);
     socket.send_to(&announce_request.getBytesMut(), to).await?;
-    tracker_borrow_mut.announce_request = Some(announce_request);
+
+    let mut lock_tracker = tracker.lock().await;
+    lock_tracker.announce_request = Some(announce_request);
     //let (_, _) = timeout(Duration::from_secs(4), socket.recv_from(&mut response)).await??;
     //let announce_response = AnnounceResponse::new(&response);
     Ok(())
@@ -481,12 +481,12 @@ pub async fn scrape_request(
 // to the respective Tracker through "Sender"
 //
 
-pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>>>, trackers: Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>) {
+pub async fn udp_socket_recv(udp_socket: &UdpSocket, senders: Vec<Sender<Vec<u8>>>, trackers: Arc<TokioMutex<Vec<Arc<TokioMutex<Tracker>>>>>) {
     let socket_adresses = {
         let trackers_lock = trackers.lock().await;
         let mut socket_adresses = Vec::new();
         for tracker in &(*trackers_lock) {
-            if let Some(s) = &tracker.lock().await.borrow().socket_adr {
+            if let Some(s) = &tracker.lock().await.socket_adr {
                 socket_adresses.push(format!("{}:{}", s.ip(), s.port()));
             } else {
                 socket_adresses.push(String::from(""))
@@ -531,7 +531,7 @@ use tokio::time::{sleep, timeout};
 // 1. Sends a Connect Request to the Tracker
 // If this connect request arrives within
 pub async fn tracker_request(
-    tracker: Arc<TokioMutex<RefCell<Tracker>>>,
+    tracker: Arc<TokioMutex<Tracker>>,
     udp_socket: &UdpSocket,
     details: Arc<TokioMutex<Details>>,
     receiver: Rc<RefCell<Receiver<Vec<u8>>>>,
@@ -542,12 +542,10 @@ pub async fn tracker_request(
 
     loop {
         let tracker_lock = tracker.lock().await;
-        let tracker_borrow = tracker_lock.borrow();
-        let socket_adr = &tracker_borrow.socket_adr.unwrap();
-        drop(tracker_borrow);
+        let socket_adr = tracker_lock.socket_adr.unwrap();
         drop(tracker_lock);
         let mut receiver_borrow_mut = receiver.borrow_mut();
-        if let Ok(_) = connect_request(TRANS_ID, &udp_socket, socket_adr, tracker.clone()).await {
+        if let Ok(_) = connect_request(TRANS_ID, &udp_socket, &socket_adr, tracker.clone()).await {
             //
             // Waits for 15 * 2 ^ n seconds, where n is from 0 to 8 => (3840 seconds), for Connect Response to come
             //
