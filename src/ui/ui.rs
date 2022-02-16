@@ -16,11 +16,11 @@ use tui::widgets::{Block, Borders, Gauge};
 
 use crate::details::Details;
 use crate::{details, Result};
-use std::sync::{Arc, Mutex};
-use tokio::sync::Mutex as TokioMutex;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 // Function that represents the start of the UI rendering of hyperblow
-pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>, details: Arc<TokioMutex<Details>>) -> Result<()> {
+pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>, details: Arc<Mutex<Details>>) -> Result<()> {
     // Note : Any try to invoke println! or any other method related to stdout "fd" won't work after enabling raw mode
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -41,7 +41,7 @@ pub fn draw_ui(fileState: Arc<Mutex<files::FilesState>>, details: Arc<TokioMutex
     Ok(())
 }
 
-pub fn draw<B>(terminal: &mut Terminal<B>, filesState: Arc<Mutex<files::FilesState>>, details: Arc<TokioMutex<Details>>) -> Result<()>
+pub fn draw<B>(terminal: &mut Terminal<B>, filesState: Arc<Mutex<files::FilesState>>, details: Arc<Mutex<Details>>) -> Result<()>
 where
     B: Backend,
 {
@@ -49,7 +49,7 @@ where
 
     loop {
         terminal.draw(|frame| {
-            let mut filesState = filesState.lock().unwrap();
+            let mut filesState = filesState.blocking_lock();
 
             // Divide the Rect of Frame vertically in 60% and 30% of the total height
             let chunks = Layout::default()
@@ -91,7 +91,7 @@ where
                     _ => {}
                 },
                 Event::Mouse(mouse) => {
-                    let mut filesState = filesState.lock().unwrap();
+                    let mut filesState = filesState.blocking_lock();
                     match mouse.kind {
                         MouseEventKind::Down(btn) => {
                             if btn == MouseButton::Left {
@@ -117,7 +117,7 @@ where
 use tui::terminal::Frame;
 
 // Draws Details section
-pub fn draw_details<B: Backend>(frame: &mut Frame<B>, size: Rect, details: Arc<TokioMutex<Details>>) {
+pub fn draw_details<B: Backend>(frame: &mut Frame<B>, size: Rect, details: Arc<Mutex<Details>>) {
     let details_lock = details.blocking_lock();
     let info_hash = details_lock.info_hash.as_ref().unwrap().clone();
     let name = details_lock.name.as_ref().unwrap().clone();

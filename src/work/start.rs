@@ -6,7 +6,7 @@ use futures::future::join_all;
 use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use super::peer::peer_request;
 use tokio::join;
@@ -14,12 +14,12 @@ use tokio::net::UdpSocket;
 use tokio::sync::{
     mpsc,
     mpsc::{Receiver, Sender},
-    Mutex as TokioMutex,
+    Mutex,
 };
 use tokio::task;
 
-pub type __Trackers = Arc<TokioMutex<Vec<Arc<TokioMutex<Tracker>>>>>;
-pub type __Details = Arc<TokioMutex<Details>>;
+pub type __Trackers = Arc<Mutex<Vec<Arc<Mutex<Tracker>>>>>;
+pub type __Details = Arc<Mutex<Details>>;
 pub type __FileState = Arc<Mutex<FilesState>>;
 
 // Starting Point for the "Working" thread

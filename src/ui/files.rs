@@ -2,7 +2,8 @@
 
 use crate::work::file::{File, FileType};
 use std::cell;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
+use tokio::sync::{Mutex, MutexGuard};
 use tui::text;
 use tui::widgets::{Block, Borders};
 use tui::{
@@ -127,9 +128,8 @@ impl FilesState {
             let index = (self.get_top_index() + (offset_y - (self.rect.y + 3))) as usize;
 
             // Change the current should_download state of the File
-            self.file.lock().unwrap().inner_files.as_ref().unwrap()[index]
-                .lock()
-                .unwrap()
+            self.file.blocking_lock().inner_files.as_ref().unwrap()[index]
+                .blocking_lock()
                 .changeShouldDownload();
         }
     }
@@ -149,7 +149,7 @@ pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &mut Mut
     // TODO : Way to re evaluate the bottom index when the screen resizes and size of the Files Tab
     // changes
     if scroll.get_top_index() == 0 && scroll.get_bottom_index() == 0 {
-        let maxIndexOfRootFiles = scroll.file.lock().unwrap().inner_files.as_ref().unwrap().len() as u16;
+        let maxIndexOfRootFiles = scroll.file.blocking_lock().inner_files.as_ref().unwrap().len() as u16;
         let index = if maxIndexOfRootFiles < size.height - 4 {
             maxIndexOfRootFiles
         } else {
@@ -172,7 +172,7 @@ pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &mut Mut
     } else if scroll.get_scroll_state_previous() < scroll.get_scroll_state_current() {
         // Scroll UP only when bottom index is greater than total availaible rows
         let root_file = scroll.file.clone();
-        if let Some(files) = &root_file.lock().unwrap().inner_files {
+        if let Some(files) = &root_file.blocking_lock().inner_files {
             if scroll.get_bottom_index() < files.len() as u16 {
                 scroll.set_top_index(scroll.get_top_index() + 1);
                 scroll.set_bottom_index(scroll.get_bottom_index() + 1);
@@ -181,15 +181,15 @@ pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &mut Mut
     }
 
     let createTableRow = |f: Arc<Mutex<File>>| -> Row {
-        let name = { f.lock().unwrap().name.clone() };
+        let name = { f.blocking_lock().name.clone() };
         let file_type = {
-            match f.lock().unwrap().file_type {
+            match f.blocking_lock().file_type {
                 FileType::REGULAR => String::from("File"),
                 FileType::DIRECTORY => String::from("Folder"),
             }
         };
 
-        let should_download = f.lock().unwrap().should_download;
+        let should_download = f.blocking_lock().should_download;
 
         Row::new(vec![
             Cell::from(name),
@@ -202,7 +202,7 @@ pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &mut Mut
     // Create the table rows to render
     let mut table_rows = vec![header_row.clone(), blank_row.clone()];
     for i in scroll.get_top_index()..scroll.get_bottom_index() {
-        let file = scroll.file.lock().unwrap().inner_files.as_ref().unwrap()[i as usize].clone();
+        let file = scroll.file.blocking_lock().inner_files.as_ref().unwrap()[i as usize].clone();
         table_rows.push(createTableRow(file));
     }
 
