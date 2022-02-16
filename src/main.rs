@@ -11,13 +11,8 @@ mod ui;
 mod work;
 
 use details::Details;
-use std::{
-    env,
-    error::Error,
-    sync::{Arc, Mutex},
-    thread,
-};
-use tokio::sync::Mutex as TokioMutex;
+use std::{env, error::Error, sync::Arc, thread};
+use tokio::sync::Mutex;
 use ui::files::FilesState;
 use work::{start::start, tracker::Tracker};
 
@@ -29,10 +24,10 @@ fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
 
     // Global States that are shared across threads
-    let trackers: Vec<Arc<TokioMutex<Tracker>>> = Vec::new();
-    let details = Arc::new(TokioMutex::new(Details::default()));
+    let trackers: Vec<Arc<Mutex<Tracker>>> = Vec::new();
+    let details = Arc::new(Mutex::new(Details::default()));
     let file_state = Arc::new(Mutex::new(FilesState::new()));
-    let trackers = Arc::new(TokioMutex::new(trackers));
+    let trackers = Arc::new(Mutex::new(trackers));
 
     // Spawn and run the parsing thread to "completion", blocking the "main thread" in order to
     // 1. Parse the torrent file

@@ -1,5 +1,6 @@
 use crate::parse::torrent_parser::File as MetaFile;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Debug)]
 pub enum FileType {
@@ -36,7 +37,7 @@ impl File {
         let mut doesExist = false;
         if let Some(files) = &self.inner_files {
             for (i, x) in files.iter().enumerate() {
-                if (**x).lock().unwrap().name == *fileName {
+                if (**x).blocking_lock().name == *fileName {
                     index = Some(i);
                     doesExist = true;
                 }
@@ -67,10 +68,10 @@ impl File {
         for file in files {
             let mut working_file = root_file.clone();
             for x in 0..file.path.len() {
-                let (mut idx, doesContain) = (*working_file).lock().unwrap().contains(&file.path[x]);
+                let (mut idx, doesContain) = (*working_file).blocking_lock().contains(&file.path[x]);
                 if !doesContain {
                     let last_path_index = file.path.len() - 1;
-                    idx = Some((*working_file).lock().unwrap().add_file(File {
+                    idx = Some((*working_file).blocking_lock().add_file(File {
                         name: String::from(&file.path[x]),
                         file_type: if x == last_path_index { FileType::REGULAR } else { FileType::DIRECTORY },
                         inner_files: if x == last_path_index { None } else { Some(vec![]) },
@@ -78,7 +79,7 @@ impl File {
                         should_download: true,
                     }));
                 }
-                if let Some(f) = &(*working_file.clone()).lock().unwrap().inner_files {
+                if let Some(f) = &(*working_file.clone()).blocking_lock().inner_files {
                     working_file = (*f)[idx.unwrap()].clone();
                 };
             }
@@ -92,7 +93,7 @@ impl File {
         if let Some(files) = &self.inner_files {
             size += self.size;
             for file in files {
-                size += file.lock().unwrap().size();
+                size += file.blocking_lock().size();
             }
         } else {
             size += self.size;

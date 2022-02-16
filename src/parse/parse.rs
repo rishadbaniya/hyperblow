@@ -4,23 +4,22 @@ use crate::ui::files::FilesState;
 use crate::work::file::{File, FileType};
 use crate::work::tracker::Tracker;
 use crate::Details;
-use std::cell::RefCell;
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::Mutex;
 
 // Starting point for the parsing thread
 pub fn parsing_thread_main(
     file_state: Arc<Mutex<FilesState>>,
     torrent_file_path: String,
-    trackers: Arc<TokioMutex<Vec<Arc<TokioMutex<Tracker>>>>>,
-    details: Arc<TokioMutex<Details>>,
+    trackers: Arc<Mutex<Vec<Arc<Mutex<Tracker>>>>>,
+    details: Arc<Mutex<Details>>,
 ) {
     let t = Instant::now();
 
     // Gets the lock of all the Mutex
-    let mut lock_file_state = file_state.lock().unwrap();
+    let mut lock_file_state = file_state.blocking_lock();
     let mut lock_trackers = trackers.blocking_lock();
     let mut lock_details = details.blocking_lock();
 
@@ -54,7 +53,7 @@ pub fn parsing_thread_main(
         File::createFileTree(lock_file_state.file.clone(), x);
     } else {
         // Single file mode
-        lock_file_state.file.lock().unwrap().inner_files = Some(vec![Arc::new(Mutex::new(File {
+        lock_file_state.file.blocking_lock().inner_files = Some(vec![Arc::new(Mutex::new(File {
             name: file_meta.info.name.as_ref().unwrap().clone(),
             file_type: FileType::REGULAR,
             inner_files: None,
@@ -84,7 +83,7 @@ pub fn parsing_thread_main(
         .iter()
         .filter(|v| v.blocking_lock().socket_adr != None)
         .map(|v| v.clone())
-        .collect::<Vec<Arc<TokioMutex<Tracker>>>>();
+        .collect::<Vec<Arc<Mutex<Tracker>>>>();
 
     // For some unknown reason, two trackers had some Socket Address, it caused a lot of issues.
     // So, to solve this issue of having same socket address by keeping one of them only
