@@ -11,7 +11,6 @@ mod ui;
 mod work;
 
 use details::Details;
-use std::cell::RefCell;
 use std::{
     env,
     error::Error,
@@ -30,7 +29,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
 
     // Global States that are shared across threads
-    let trackers: Vec<Arc<TokioMutex<RefCell<Tracker>>>> = Vec::new();
+    let trackers: Vec<Arc<TokioMutex<Tracker>>> = Vec::new();
     let details = Arc::new(TokioMutex::new(Details::default()));
     let file_state = Arc::new(Mutex::new(FilesState::new()));
     let trackers = Arc::new(TokioMutex::new(trackers));

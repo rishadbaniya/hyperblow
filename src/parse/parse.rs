@@ -14,7 +14,7 @@ use tokio::sync::Mutex as TokioMutex;
 pub fn parsing_thread_main(
     file_state: Arc<Mutex<FilesState>>,
     torrent_file_path: String,
-    trackers: Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>,
+    trackers: Arc<TokioMutex<Vec<Arc<TokioMutex<Tracker>>>>>,
     details: Arc<TokioMutex<Details>>,
 ) {
     let t = Instant::now();
@@ -73,19 +73,18 @@ pub fn parsing_thread_main(
     let announce_list: &Vec<Vec<String>> = file_meta.announce_list.as_ref().unwrap();
     *lock_trackers = Tracker::getTrackers(&file_meta.announce, announce_list);
     for tracker in &(*lock_trackers) {
-        let tracker_lock = tracker.blocking_lock();
-        let mut tracker_borrow_mut = tracker_lock.borrow_mut();
-        if let Ok(addrs) = tracker_borrow_mut.url.socket_addrs(|| None) {
-            tracker_borrow_mut.socket_adr = Some(addrs[0]);
+        let mut tracker_lock = tracker.blocking_lock();
+        if let Ok(addrs) = tracker_lock.url.socket_addrs(|| None) {
+            tracker_lock.socket_adr = Some(addrs[0]);
         }
     }
 
     //Remove all the trackers, whose Socket Address is "None"
     *lock_trackers = (*lock_trackers)
         .iter()
-        .filter(|v| v.blocking_lock().borrow().socket_adr != None)
+        .filter(|v| v.blocking_lock().socket_adr != None)
         .map(|v| v.clone())
-        .collect::<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>();
+        .collect::<Vec<Arc<TokioMutex<Tracker>>>>();
 
     // For some unknown reason, two trackers had some Socket Address, it caused a lot of issues.
     // So, to solve this issue of having same socket address by keeping one of them only
@@ -95,9 +94,9 @@ pub fn parsing_thread_main(
     let mut y: Vec<HashSet<usize>> = Vec::new();
     for (i, tracker_1) in (lock_trackers).iter().enumerate() {
         let mut set: HashSet<usize> = HashSet::new();
-        let socket_1 = tracker_1.blocking_lock().borrow().socket_adr.unwrap().clone();
+        let socket_1 = tracker_1.blocking_lock().socket_adr.unwrap().clone();
         for (j, tracker_2) in (lock_trackers).iter().enumerate() {
-            let socket_2 = tracker_2.blocking_lock().borrow().socket_adr.unwrap().clone();
+            let socket_2 = tracker_2.blocking_lock().socket_adr.unwrap().clone();
             if socket_1 == socket_2 && i != j {
                 set.insert(i);
                 set.insert(j);

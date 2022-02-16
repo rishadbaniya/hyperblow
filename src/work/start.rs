@@ -18,7 +18,7 @@ use tokio::sync::{
 };
 use tokio::task;
 
-pub type __Trackers = Arc<TokioMutex<Vec<Arc<TokioMutex<RefCell<Tracker>>>>>>;
+pub type __Trackers = Arc<TokioMutex<Vec<Arc<TokioMutex<Tracker>>>>>;
 pub type __Details = Arc<TokioMutex<Details>>;
 pub type __FileState = Arc<Mutex<FilesState>>;
 
@@ -118,9 +118,8 @@ async fn trackers_request(
     let mut futures: Vec<_> = vec![];
 
     for (index, tracker) in (*lock_trackers).iter().enumerate() {
-        let tracker_lock = tracker.lock().await;
-        let tracker_borrow = tracker_lock.borrow();
-        if tracker_borrow.protocol == TrackerProtocol::UDP && tracker_borrow.socket_adr != None {
+        let tracker_guard = tracker.lock().await;
+        if tracker_guard.protocol == TrackerProtocol::UDP && tracker_guard.socket_adr != None {
             futures.push(tracker_request(
                 tracker.clone(),
                 udp_socket,
