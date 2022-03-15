@@ -53,8 +53,9 @@ fn main() -> Result<()> {
             parsing_thread_details,
         )
     });
-    parsing_thread.join().unwrap();
 
+    parsing_thread.join().unwrap();
+    println!("This parsing staged is completed");
     // Spawn worker thread
     let working_thread_trackers = trackers.clone();
     let working_thread_details = details.clone();

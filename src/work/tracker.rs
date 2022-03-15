@@ -426,11 +426,11 @@ pub async fn annnounce_request(
     let mut announce_request = AnnounceRequest::empty();
     announce_request.set_connection_id(connect_response.connection_id);
     announce_request.set_transaction_id(connect_response.transaction_id);
-    announce_request.set_info_hash(lock_details.info_hash.as_ref().unwrap().clone());
+    announce_request.set_info_hash(lock_details.info_hash.as_ref().unwrap().clone().to_vec());
     announce_request.set_downloaded(0);
     announce_request.set_uploaded(0);
     announce_request.set_uploaded(0);
-    announce_request.set_left(lock_details.total_bytes.unwrap());
+    announce_request.set_left(lock_details.total_bytes);
     announce_request.set_port(8001);
     announce_request.set_key(20);
     socket.send_to(&announce_request.getBytesMut(), to).await?;

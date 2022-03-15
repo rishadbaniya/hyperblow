@@ -8,7 +8,7 @@ pub struct Details {
     /// Name of the torrent
     pub name: Option<String>,
     /// Info hash of the torrent
-    pub info_hash: Option<[u8; 20]>,
+    pub info_hash: Option<Vec<u8>>,
     /// Total no of pieces
     pub total_pieces: u32,
     pub piece_length: Option<i64>,

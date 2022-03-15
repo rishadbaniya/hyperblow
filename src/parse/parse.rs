@@ -62,7 +62,7 @@ pub fn parsing_thread_main(
         }))])
     }
 
-    lock_details.total_bytes = Some(1000);
+    lock_details.total_bytes = 1000;
 
     println!("Generated File Tree ----- [{:?}]", Instant::now().duration_since(t));
     println!("Getting all the trackers socket address........");
