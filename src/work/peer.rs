@@ -387,7 +387,7 @@ impl TcpSender {
         let mut handshake_msg = Handshake::default();
         let lock_details = self.details.lock().await;
         let info_hash = lock_details.info_hash.as_ref().unwrap().clone();
-        handshake_msg.set_info_hash(info_hash);
+        handshake_msg.set_info_hash(info_hash.to_vec());
         drop(lock_details);
 
         // Writes the HANDSHAKE message on the TCPStream
