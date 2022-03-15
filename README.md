@@ -14,3 +14,7 @@ It's gonna take time, good things does take time
 - ☐ Implements Fast Extension
 - ☐ Implements extension for partial seeds
 - ☐ Implements Extension Protocol
+
+Supported BEP's:
+
+- ✅ [BEP15](http://www.bittorrent.org/beps/bep_0015.html) : UDP Tracker Protocol (Implements partially, except scrape req and res)
