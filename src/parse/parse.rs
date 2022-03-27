@@ -3,19 +3,20 @@ use super::FileMeta;
 use crate::ui::files::FilesState;
 use crate::work::file::{File, FileType};
 use crate::work::tracker::Tracker;
+use crate::ArcMutex;
 use crate::Details;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
 
-// Starting point for the parsing thread
-pub fn parsing_thread_main(
-    file_state: Arc<Mutex<FilesState>>,
-    torrent_file_path: String,
-    trackers: Arc<Mutex<Vec<Arc<Mutex<Tracker>>>>>,
-    details: Arc<Mutex<Details>>,
-) {
+type _FileState = Arc<Mutex<FilesState>>;
+type _Trackers = Arc<Mutex<Vec<Arc<Mutex<Tracker>>>>>;
+type _Details = Arc<Mutex<Details>>;
+
+// Entry point for the parsing thread
+pub fn parsing_thread_main(file_state: _FileState, torrent_file_path: String, trackers: _Trackers, details: _Details) {
+    // Sets the start of the  measuring time for parsing
     let t = Instant::now();
 
     // Gets the lock of all the Mutex
@@ -26,26 +27,23 @@ pub fn parsing_thread_main(
     // Gets the metadata from the torrent file and info_hash of the torrent
     let (file_meta, info_hash) = parse_file(&torrent_file_path);
     lock_details.info_hash = Some(info_hash);
-    lock_details.piece_length = file_meta.info.piece_length.clone();
+    lock_details.piece_length = file_meta.info.piece_length;
 
+    // Prints the time take to parse the torrent file
     println!(
-        "Parsed torrent file : \"{}\" ----- [{:?}]",
+        "Parsed torrent file : \"{}\" ----- [Time taken : {:?}]",
         &torrent_file_path,
         Instant::now().duration_since(t)
     );
 
+    // Sets new start of the measuring time for file tree
     let t = Instant::now();
-    // Sets the name of the torrent file for the UI
-    lock_details.name = Some(file_meta.info.name.as_ref().unwrap().clone());
 
-    // Root of the File Tree
-    lock_file_state.file = Arc::new(Mutex::new(File {
-        name: String::from("/"),
-        file_type: FileType::DIRECTORY,
-        inner_files: Some(Vec::new()),
-        size: 0,
-        should_download: true,
-    }));
+    // Sets the root of the file tree
+    lock_file_state.file = File::createRoot();
+
+    // Sets the root name of the torrent file for the UI
+    lock_details.name = file_meta.info.name.clone();
 
     // Creates file tree
     if let Some(x) = file_meta.info.files.as_ref() {
@@ -53,23 +51,25 @@ pub fn parsing_thread_main(
         File::createFileTree(lock_file_state.file.clone(), x);
     } else {
         // Single file mode
-        lock_file_state.file.blocking_lock().inner_files = Some(vec![Arc::new(Mutex::new(File {
+        lock_file_state.file.blocking_lock().inner_files = Some(vec![ArcMutex! { File {
             name: file_meta.info.name.as_ref().unwrap().clone(),
             file_type: FileType::REGULAR,
             inner_files: None,
             size: file_meta.info.length.unwrap(),
             should_download: true,
-        }))])
+        }}])
     }
 
-    lock_details.total_bytes = 1000;
+    // Sets the total size of the torrent in bytes
+    lock_details.total_bytes = lock_file_state.file.blocking_lock().size();
 
-    println!("Generated File Tree ----- [{:?}]", Instant::now().duration_since(t));
-    println!("Getting all the trackers socket address........");
-    let t = Instant::now();
+    println!("Generated File Tree ----- [Time take : {:?}]", Instant::now().duration_since(t));
+    println!("Resolving socket address");
+    // TODO : Show a horizontal bar for every socket address being resolved
 
-    // Gets the socket address of all the Trackers
+    // Try to Resolve the socket address of all the Trackers
     let announce_list: &Vec<Vec<String>> = file_meta.announce_list.as_ref().unwrap();
+
     *lock_trackers = Tracker::getTrackers(&file_meta.announce, announce_list);
     for tracker in &(*lock_trackers) {
         let mut tracker_lock = tracker.blocking_lock();
@@ -127,8 +127,6 @@ pub fn parsing_thread_main(
 
     // Total of of hash is same as total of pieces
     lock_details.total_pieces = lock_details.pieces_hash.len() as u32;
-
-    let set = println!("Resolving all the trackers socket address ----- [{:?}] ", Instant::now().duration_since(t));
 }
 
 fn get_pieces_hash(file_meta: &FileMeta) -> Vec<[u8; 20]> {

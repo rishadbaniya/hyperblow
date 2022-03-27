@@ -14,7 +14,7 @@ use std::fs;
 ///
 /// {
 /// #[serde(alias = "your name")]
-/// your_name : String
+///     your_name : String
 /// }
 ///
 /// which means "hey, the value of the field that has name "your name" in the
@@ -53,7 +53,7 @@ pub struct File {
     pub md5sum: Option<String>,
 }
 
-pub fn parse_file(filePath: &str) -> (FileMeta, Vec<u8>) {
+pub fn parse_file(filePath: &String) -> (FileMeta, [u8; 20]) {
     // Declared to store all bytes from torrent file
     let torrentFile: Vec<u8>;
 
@@ -78,8 +78,10 @@ pub fn parse_file(filePath: &str) -> (FileMeta, Vec<u8>) {
     (decoded, info_hash)
 }
 
-fn generateInfoHash(infoByte: Vec<u8>) -> Vec<u8> {
+// Takes all the byetes that's in the info field and generates a hash out of it,
+// called "info hash"
+fn generateInfoHash(info_byte: impl AsRef<[u8]>) -> [u8; 20] {
     let mut hasher = Sha1::new();
-    hasher.update(infoByte);
-    hasher.finalize().into_iter().collect()
+    hasher.update(info_byte);
+    hasher.finalize().into()
 }

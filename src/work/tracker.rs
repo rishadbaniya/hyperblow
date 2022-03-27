@@ -348,14 +348,24 @@ pub enum TrackerProtocol {
 /// Holds information about the tracker
 #[derive(Debug, Clone)]
 pub struct Tracker {
-    pub url: Url,                                    // Url of the Tracker
-    pub protocol: TrackerProtocol,                   // Protocol Used by the tracker
-    pub socket_adr: Option<SocketAddr>,              // Socket Address of the remote URL
-    pub didItResolve: bool,                          // If the tracker communicated as desired or not
-    pub connect_request: Option<ConnectRequest>,     // Data to make connect request
-    pub connect_response: Option<ConnectResponse>,   // Data received from connect request as response
-    pub announce_request: Option<AnnounceRequest>,   // Data to make announce request
-    pub announce_response: Option<AnnounceResponse>, // Data received from announce request as response
+    /// Url of the Tracker
+    pub url: Url,
+    /// Protocol Used by the tracker
+    pub protocol: TrackerProtocol,
+    /// Socket Address of the remote URL
+    pub socket_adr: Option<SocketAddr>,
+    /// If the tracker communicated as desired or not
+    /// TODO : Remove didItResolve and replace it's usage with Some or None option of socket_adr
+    /// address, coz it's basically wheter the socket_adr address option is Some or None
+    pub didItResolve: bool,
+    /// Data to make connect request
+    pub connect_request: Option<ConnectRequest>,
+    /// Data received from connect request as response
+    pub connect_response: Option<ConnectResponse>,
+    /// Data to make announce request
+    pub announce_request: Option<AnnounceRequest>,
+    /// Data received from announce request as response
+    pub announce_response: Option<AnnounceResponse>,
 }
 
 impl Tracker {
@@ -381,8 +391,7 @@ impl Tracker {
         }
     }
 
-    /// Create list of "Tracker" from data in the
-    /// announce and announce_list field of "FileMeta"
+    /// Create list of "Tracker" from data in the announce and announce_list field of "FileMeta"
     pub fn getTrackers(announce: &String, announce_list: &Vec<Vec<String>>) -> Vec<Arc<TokioMutex<Tracker>>> {
         let mut trackers: Vec<_> = Vec::new();
 
