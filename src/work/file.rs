@@ -1,4 +1,5 @@
 use crate::parse::torrent_parser::File as MetaFile;
+use crate::ArcMutex;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -25,6 +26,25 @@ pub struct File {
 }
 
 impl File {
+    /// We'll have one root file (type : Directory), which will have root size of 0, it's only
+    /// purpose is to nest the file/s to be downloaded, nothing else, it's basically initial wrapper
+    /// around the files to be downloaded
+    ///
+    /// Sets the root of the File Tree
+    ///
+    /// "/" means its the root file and anything to be downloaded will be under it
+    ///
+    /// It's size is set to 0, coz it's just a file made to nest other files, it doesn't exist and
+    /// doesn't have any intrinsic size
+    pub fn createRoot() -> Arc<Mutex<Self>> {
+        ArcMutex! {File {
+         name: String::from("/"),
+         file_type: FileType::DIRECTORY,
+         inner_files: Some(Vec::new()),
+         size: 0,
+         should_download: true,
+        }}
+    }
     // Checks if the File Node contains file with given name, upto just 1 level depth
     //
     //    X     -> Root File Node on which the method is called

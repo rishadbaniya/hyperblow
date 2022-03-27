@@ -8,11 +8,14 @@ pub struct Details {
     /// Name of the torrent
     pub name: Option<String>,
     /// Info hash of the torrent
-    pub info_hash: Option<Vec<u8>>,
+    pub info_hash: Option<[u8; 20]>,
     /// Total no of pieces
     pub total_pieces: u32,
+    /// Length of each piece
     pub piece_length: Option<i64>,
+    /// Total size in bytes
     pub total_bytes: i64,
+    /// Total bytes that has been downloaded
     pub downloaded_bytes: i64,
     /// Hash of all the pieces in same index as piece index
     pub pieces_hash: Vec<[u8; 20]>,
@@ -25,7 +28,6 @@ pub struct Details {
 impl Default for Details {
     fn default() -> Self {
         let pieces_hash = Vec::new();
-
         Self {
             name: None,
             info_hash: None,
