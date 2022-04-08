@@ -22,4 +22,4 @@ Supported BEP's:
 
 **Current Status of the Project :**
 
-I had taken a long break, long enough to get confused by my own code. Now that i'm trying to get back, it's gonna take me a week to refactor the code and understand what i was thinking back then
+Re reading my own code and refactoring it
