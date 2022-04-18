@@ -18,3 +18,8 @@ It's gonna take time, good things does take time
 Supported BEP's:
 
 - ✅ [BEP15](http://www.bittorrent.org/beps/bep_0015.html) : UDP Tracker Protocol (Implements partially, except scrape req and res)
+
+
+**Current Status of the Project :**
+
+Re reading my own code and refactoring it
