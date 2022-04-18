@@ -22,4 +22,4 @@ Supported BEP's:
 
 **Current Status of the Project :**
 
-Re reading my own code and refactoring it
+Trying re understand this implementation of BitTorrent Protocol
