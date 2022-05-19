@@ -20,6 +20,7 @@ Supported BEP's:
 - ✅ [BEP15](http://www.bittorrent.org/beps/bep_0015.html) : UDP Tracker Protocol (Implements partially, except scrape req and res)
 
 
-**Current Status of the Project :**
+TODO : 
 
-Trying re understand this implementation of BitTorrent Protocol
+Make use of Crossbeam crate's Concurrency Primitives
+
