@@ -27,6 +27,10 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 // Main thread to work on UI rendering
 fn main() -> Result<()> {
     // Gets all the arguments
+    //
+    // TODO : Use clap-rs for parsing args
+    // TODO : Add a support for magnet link as an arg
+    // As of right now, it just gets the path to the ".torrent" file
     let args: Vec<String> = env::args().skip(1).collect();
 
     // Global States that are shared across threads
