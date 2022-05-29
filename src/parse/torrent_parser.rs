@@ -3,10 +3,8 @@ use serde_derive::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::fs;
 
-/// DataStructure that maps all the data inside of bencode
-/// encoded .torrent file into something rust program can use
-///
-/// Option<T> allows me to give None when the field is not present
+/// DataStructure that maps all the data inside of bencode encoded ".torrent" file into something rust program can use.
+/// Option<T> allows us to give None when the field is not present
 ///
 /// #serde[rename] attribute lets me deserialize from the given name in that attribute
 /// Eg. if the name in the field inside of torrent file is "your name", which cannot be possibly used inside a Struct
@@ -17,7 +15,7 @@ use std::fs;
 ///     your_name : String
 /// }
 ///
-/// which means "hey, the value of the field that has name "your name" in the
+/// which means "hey, the value of the field that has key "your name" in the
 /// torrent file, map its value to the struct field below"
 ///
 #[derive(Debug, Deserialize)]
