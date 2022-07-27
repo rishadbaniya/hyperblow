@@ -20,4 +20,3 @@ byteorder = "1.4.3"
 futures = "0.3.19"
 clap = "3.0.14"
 rand = "0.8.5"
-metadata_parser = {path = "metadata_parser"}
