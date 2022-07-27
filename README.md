@@ -6,7 +6,8 @@
 It's gonna take time, good things do take time
 
 ## Features checklist :
-
+- ✅ Accepts torrent file as input
+- ☐ Accepts magnet uri as input
 - ✅ Support for UDP Trackers
 - ☐ Support for HTTP Trackers
 - ☐ Has rare piece first algorithm
