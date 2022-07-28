@@ -1,0 +1,23 @@
+[package]
+name = "hyperblow"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde_bencode = "0.2.3"
+serde = "^1.0.0"
+serde_derive = "^1.0.0"
+serde_bytes = "0.11.5"
+sha-1 = "0.10.0"
+percent-encoding = "2.1.0"
+hyper = {version = "0.14.13", features = ["full"]}
+tokio = { version = "1.16.1", features = ["full"] }
+crossterm = "0.23.0"
+tui = "0.17.0"
+reqwest = "0.11.9"
+bytes = "1.1.0"
+byteorder = "1.4.3"
+futures = "0.3.19"
+clap = "3.0.14"
+rand = "0.8.5"
+parser = { path = "../parser" }
