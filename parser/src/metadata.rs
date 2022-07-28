@@ -1,9 +1,9 @@
 #![allow(non_snake_case, dead_code)]
 
+use magnet_uri::MagnetURI;
 use serde_derive::{Deserialize, Serialize};
-
 use sha1::{Digest, Sha1};
-use std::fs;
+use std::{fs, str::FromStr};
 
 /// TODO : Add a parsing method for "magnet links"
 ///
@@ -57,6 +57,7 @@ pub struct File {
 }
 
 impl FileMeta {
+    // PARSING TORRENT FILE
     // Just pass in your path to the torrent file, it will return a
     // DataStructure[FileMeta] that contains all the metadata that was within the ".torrent" file
     pub fn parseTorrentFile(file_path: &String) -> FileMeta {
@@ -69,7 +70,7 @@ impl FileMeta {
                 torrent_file = bytes;
             }
             Err(_) => {
-                println!("Sorry, i could not find a file \"{}\"", *file_path);
+                println!("Sorry, could not locate \"{}\"", *file_path);
                 std::process::exit(0);
             }
         }
@@ -79,18 +80,27 @@ impl FileMeta {
         let meta_data: FileMeta = serde_bencode::de::from_bytes(&torrent_file).unwrap();
 
         return meta_data;
-
-        // TODO : Find a way to parse magnet link
-        pub fn parseMagnetLink(_magnet_link: &String) -> () {}
     }
 
+    // TODO : Find a way to parse magnet link
+    pub fn parseMagnetLink(magnet_link: &String) -> () {
+        // TODO : MAKE IT USABLE | AS OF RIGHT NOW IT"S NOT USABLE
+        match MagnetURI::from_str(&magnet_link.as_ref()) {
+            Ok(data) => {}
+            Err(_) => {
+                // Throws you some kind of error when the magnet link isn't valid
+                println!("Enter a valid magnet link!");
+            }
+        }
+    }
+
+    // PARSING MAGNET LINK
     // Gets you the Info Hash
     fn get_info_hash(&self) -> [u8; 20] {
         // Serialize the info section of FileMeta and get all bytes in info field of a torrent file
         // i.e Converts the data of info field to "bytes", to generate Info Hash
         let info_byte = serde_bencode::ser::to_bytes(&self.info).unwrap();
 
-        // Finds the SHA1 hash of the bytes of the info section,
         // which is eventually called "Info Hash"
         let mut hasher = Sha1::new();
         hasher.update(info_byte);
