@@ -1,9 +1,8 @@
 #![allow(non_snake_case, dead_code)]
 
-use magnet_uri::MagnetURI;
 use serde_derive::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
-use std::{fs, str::FromStr};
+use std::fs;
 
 /// TODO : Add a parsing method for "magnet links"
 ///
@@ -82,21 +81,21 @@ impl FileMeta {
         return meta_data;
     }
 
-    // TODO : Find a way to parse magnet link
-    pub fn parseMagnetLink(magnet_link: &String) -> () {
-        // TODO : MAKE IT USABLE | AS OF RIGHT NOW IT"S NOT USABLE
-        match MagnetURI::from_str(&magnet_link.as_ref()) {
-            Ok(data) => {}
-            Err(_) => {
-                // Throws you some kind of error when the magnet link isn't valid
-                println!("Enter a valid magnet link!");
-            }
-        }
-    }
+    /// / TODO : Find a way to parse magnet link
+    ///pub fn parseMagnetLink(magnet_link: &String) -> () {
+    ///    // TODO : MAKE IT USABLE | AS OF RIGHT NOW IT"S NOT USABLE
+    ///    match MagnetURI::from_str(&magnet_link.as_ref()) {
+    ///        Ok(data) => {}
+    ///        Err(_) => {
+    ///            // Throws you some kind of error when the magnet link isn't valid
+    ///            println!("Enter a valid magnet link!");
+    ///        }
+    ///    }
+    ///}
 
     // PARSING MAGNET LINK
     // Gets you the Info Hash
-    fn get_info_hash(&self) -> [u8; 20] {
+    pub fn get_info_hash(&self) -> [u8; 20] {
         // Serialize the info section of FileMeta and get all bytes in info field of a torrent file
         // i.e Converts the data of info field to "bytes", to generate Info Hash
         let info_byte = serde_bencode::ser::to_bytes(&self.info).unwrap();

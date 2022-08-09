@@ -1,1 +1,1 @@
-mod metadata;
+pub mod metadata;
