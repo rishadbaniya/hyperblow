@@ -1,10 +1,10 @@
 use super::torrent_parser::parse_file;
-use super::FileMeta;
 use crate::ui::files::FilesState;
 use crate::work::file::{File, FileType};
 use crate::work::tracker::Tracker;
 use crate::ArcMutex;
 use crate::Details;
+use parser::metadata::FileMeta;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
@@ -25,7 +25,9 @@ pub fn parsing_thread_main(file_state: _FileState, torrent_file_path: String, tr
     let mut lock_details = details.blocking_lock();
 
     // Gets the metadata from the torrent file and info_hash of the torrent
-    let (file_meta, info_hash) = parse_file(&torrent_file_path);
+    let file_meta = FileMeta::parseTorrentFile(&torrent_file_path);
+    let info_hash = file_meta.get_info_hash();
+
     lock_details.info_hash = Some(info_hash);
     lock_details.piece_length = file_meta.info.piece_length;
 

@@ -1,5 +1,5 @@
-use crate::parse::torrent_parser::File as MetaFile;
 use crate::ArcMutex;
+use parser::metadata::File as MetaFile;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
