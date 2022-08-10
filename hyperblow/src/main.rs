@@ -63,18 +63,19 @@ fn main() -> Result<()> {
         )
     });
 
+    println!("This parsing staged is completed");
+
     parsing_thread.join().unwrap();
 
-    //    //println!("This parsing staged is completed");
-    //
-    //    //    // Spawn worker thread
-    //    //    //let working_thread_trackers = trackers.clone();
-    //    //    //let working_thread_details = details.clone();
-    //    //    //let working_thread_file_state = file_state.clone();
-    //    //    //let working_thread = thread::spawn(move || start(working_thread_file_state, working_thread_trackers, working_thread_details));
-    //    //    //working_thread.join().unwrap();
-    //    //    // Draw the UI
-    //    //    //ui::ui::draw_ui(file_state, details)?;
+    // Spawn worker thread
+    let working_thread_trackers = trackers.clone();
+    let working_thread_details = details.clone();
+    let working_thread_file_state = file_state.clone();
+    //let working_thread = thread::spawn(move || start(working_thread_file_state, working_thread_trackers, working_thread_details));
+    //working_thread.join().unwrap();
+
+    //Draw the UI
+    //ui::ui::draw_ui(file_state, details)?;
     Ok(())
 }
 
