@@ -98,18 +98,6 @@ impl FileMeta {
         }
     }
 
-    // TODO : Add a parsing method for "magnet links"
-    // / TODO : Find a way to parse magnet link
-    //pub fn parseMagnetLink(magnet_link: &String) -> () {
-    //    // TODO : MAKE IT USABLE | AS OF RIGHT NOW IT"S NOT USABLE
-    //    match MagnetURI::from_str(&magnet_link.as_ref()) {
-    //        Ok(data) => {}
-    //        Err(_) => {
-    //            // Throws you some kind of error when the magnet link isn't valid
-    //            println!("Enter a valid magnet link!");
-    //        }
-    //    }
-    //}
     /// InfoHash is the SHA1 hash of all the fields within the "info" field of bencode encoded
     /// torrent file
     /// Generates and gives you the info hash of the

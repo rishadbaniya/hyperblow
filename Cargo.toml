@@ -2,5 +2,5 @@
 
 members = [
     "hyperblow",
-    "parser"
+    "libs/hyperblow_parser"
 ]
