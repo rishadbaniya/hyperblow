@@ -22,6 +22,8 @@ Supported BEP's:
 
 
 TODO : 
-
-Make use of Crossbeam crate's Concurrency Primitives
+- ✅ Implement the ".torrent" file parser
+- ☐ Implement the MagnetURI verifier and parser
+- ☐ Handle redundancy of both the tracker URL's in "announce" and "announce-list" field
+- ☐ Make use of Crossbeam crate's Concurrency Primitives
 
