@@ -1,5 +1,5 @@
 [package]
-name = "parser"
+name = "hyperblow_parser"
 version = "0.0.1"
 edition = "2021"
 
@@ -11,4 +11,4 @@ sha-1 = "0.10.0"
 serde = "^1.0.0"
 serde_bytes = "0.11.5"
 serde_bencode = "0.2.3"
-magnet-uri = "0.2.0"
+magnet-url = "2.0.0"
