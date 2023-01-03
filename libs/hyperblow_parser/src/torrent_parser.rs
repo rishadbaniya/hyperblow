@@ -62,6 +62,10 @@ pub struct FileMeta {
     /// **(Optional)** String indicating the name and version of the software that was used to create the torrent file
     #[serde(rename = "created by")]
     pub created_by: Option<String>,
+
+    /// **(Optional)** As "as" is a reserved keyword in rust, acceptable_source as in whole word is
+    /// written, which Refers to a direct download from a web server. It's URL encoded
+    pub acceptable_source: Option<String>,
 }
 
 /// The fields within the Info DataStructure are used to build "info hash", so it must the required
