@@ -3,7 +3,7 @@
 use serde_bencode;
 use serde_derive::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
-use std::{fs, io};
+use std::{error, fmt, fs, io};
 
 /// Error types while using FileMeta DataStructure
 #[derive(Debug)]
@@ -17,6 +17,22 @@ pub enum FileMetaError {
         error: Option<serde_bencode::Error>,
     },
 }
+
+impl fmt::Display for FileMetaError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FileMetaError::FileError { path, cause } => {
+                write!(f, "FileError - Path : {path:?}, Cause : {cause:?}",)?;
+            }
+            FileMetaError::InvalidEncoding { encoding, data: _, error } => {
+                write!(f, "InvalidEncoding - {encoding:?}, error : {error:?}",)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl error::Error for FileMetaError {}
 
 /// DataStructure that maps all the data inside of bencode encoded ".torrent" file
 /// into something rust program can use.
@@ -70,8 +86,7 @@ pub struct File {
 }
 
 impl FileMeta {
-    /// Just pass in your path to the torrent file, it will try to return a
-    /// DataStructure[FileMeta] that contains all the metadata that was within the ".torrent" file
+    /// Just pass in your path to the torrent file, it will try to return [FileMeta], with all the metadata that was within the ".torrent" file
     /// Example :
     ///
     /// ```
