@@ -1,15 +1,21 @@
 #![allow(non_snake_case, dead_code)]
 
+use serde_bencode;
 use serde_derive::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
-use std::fs;
+use std::{fs, io};
 
 /// Error types while using FileMeta DataStructure
+#[derive(Debug)]
 pub enum FileMetaError {
     /// Error thrown when there is some issue while reading the file path provided
-    FileError(String),
+    FileError { path: String, cause: Option<io::Error> },
     /// Error thrown when deserializing the ".torrent" bencode encoded data into FileMeta struct
-    DataError(String),
+    InvalidEncoding {
+        encoding: String,
+        data: Vec<u8>,
+        error: Option<serde_bencode::Error>,
+    },
 }
 
 /// DataStructure that maps all the data inside of bencode encoded ".torrent" file
@@ -66,35 +72,68 @@ pub struct File {
 impl FileMeta {
     /// Just pass in your path to the torrent file, it will try to return a
     /// DataStructure[FileMeta] that contains all the metadata that was within the ".torrent" file
-    /// Eg.
+    /// Example :
+    ///
     /// ```
-    /// let meta : FileMeta = FileMeta::fromTorrenFile("x/y/z/zz.torrent")
+    /// use hyperblow_parser::torrent_parser::FileMeta;
+    ///
+    /// let torrent_file_path = String::from("x/y/z/zz.torrent");
+    /// let meta : FileMeta;
+    /// match FileMeta::fromTorrentFile(&torrent_file_path){
+    ///     Ok(d) => {
+    ///        meta = d;
+    ///     },
+    ///     Err(_) => {
+    ///         // Some error occurred here
+    ///     }
+    /// }
     ///
     /// ```
     ///
-    pub fn fromTorrenFile(&self, file_path: &String) -> Result<FileMeta, FileMetaError> {
+    pub fn fromTorrentFile(file_path: &String) -> Result<FileMeta, FileMetaError> {
         // Creates a buffer to store the bytes of the file
         match fs::read(file_path) {
-            Ok(bytes) => match self.fromRawTorrentFile(bytes) {
+            Ok(bytes) => match Self::fromRawTorrentFile(bytes) {
                 Ok(meta) => Ok(meta),
                 Err(err) => Err(err),
             },
-            Err(err) => Err(FileMetaError::DataError(err.to_string())),
+            Err(err) => Err(FileMetaError::FileError {
+                path: file_path.to_string(),
+                cause: Some(err),
+            }),
         }
     }
 
     /// Passing the bytes of the ".torrent" file will try to generate a DataStructure[FileMeta] from the given bencode encoded data
     /// Eg.
     /// ```
-    /// let torrentFile: Vec<u8> = fs::read("x/y/z/zz.torrent").unwrap();
-    /// let meta: FileMeta = FileMeta::fromRawTorrenFile(torrentFile);
+    ///
+    /// use hyperblow_parser::torrent_parser::FileMeta;
+    /// use std::fs;
+    ///
+    /// // Assume there is a binary data of torrent file inside this vector
+    /// let torrent_file_data : Vec<u8> = vec!{};
+    ///
+    /// let meta : FileMeta;
+    /// match FileMeta::fromRawTorrentFile(torrent_file_data){
+    ///     Ok(d) => {
+    ///         meta = d;
+    ///     },
+    ///     Err(_) => {
+    ///         // Some error occured here
+    ///     }
+    /// }
     ///
     /// ```
     ///
-    pub fn fromRawTorrentFile(&self, file: Vec<u8>) -> Result<FileMeta, FileMetaError> {
+    pub fn fromRawTorrentFile(file: Vec<u8>) -> Result<FileMeta, FileMetaError> {
         match serde_bencode::de::from_bytes::<FileMeta>(&file) {
             Ok(d) => Ok(d),
-            Err(err) => Err(FileMetaError::DataError(err.to_string())),
+            Err(err) => Err(FileMetaError::InvalidEncoding {
+                encoding: "Bencode".to_string(),
+                data: file,
+                error: Some(err),
+            }),
         }
     }
 
@@ -104,9 +143,21 @@ impl FileMeta {
     /// Eg.
     ///
     /// ```
-    ///   
-    /// let meta : FileMeta = FileMeta::fromTorrenFile("x/y/z/zz.torrent");
-    /// let info_hash : Vec<u8> = meta.generateInfoHash();
+    /// use hyperblow_parser::torrent_parser::FileMeta;
+    ///
+    /// let torrent_file_path = String::from("x/y/z/zz.torrent");
+    /// let meta : FileMeta;
+    /// match FileMeta::fromTorrentFile(&torrent_file_path){
+    ///     Ok(d) => {
+    ///        meta = d;
+    ///        let info_hash : Vec<u8> = meta.generateInfoHash();
+    ///     },
+    ///     Err(_) => {
+    ///         // Some error occurred here
+    ///     }
+    /// }
+    ///
+
     ///
     /// ```
     /// Gets you the Info Hash
