@@ -1,21 +1,16 @@
-use super::torrent_parser::parse_file;
-use crate::ui::files::FilesState;
-use crate::work::file::{File, FileType};
-use crate::work::tracker::Tracker;
-use crate::ArcMutex;
-use crate::Details;
-use parser::metadata::FileMeta;
-use std::collections::HashSet;
-use std::sync::Arc;
-use std::time::Instant;
-use tokio::sync::Mutex;
-
-type _FileState = Arc<Mutex<FilesState>>;
-type _Trackers = Arc<Mutex<Vec<Arc<Mutex<Tracker>>>>>;
-type _Details = Arc<Mutex<Details>>;
+//use crate::ArcMutex;
+//use std::collections::HashSet;
+//use std::sync::Arc;
+//use std::time::Instant;
+//use tokio::sync::Mutex;
+//
+//type _FileState = Arc<Mutex<FilesState>>;
+////type _Trackers = Arc<Mutex<Vec<Arc<Mutex<Tracker>>>>>;
+//type _Details = Arc<Mutex<Details>>;
+use hyperblow_parser::torrent_parser::FileMeta;
 
 // Entry point for the parsing thread
-pub fn parsing_thread_main(file_state: _FileState, torrent_file_path: String, trackers: _Trackers, details: _Details) {
+//pub fn parsing_thread_main(file_state: _FileState, torrent_file_path: String, trackers: _Trackers, details: _Details) {
     // Sets the start of the  measuring time for parsing
     let t = Instant::now();
 
