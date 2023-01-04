@@ -9,10 +9,10 @@
 //type _Details = Arc<Mutex<Details>>;
 use hyperblow_parser::torrent_parser::FileMeta;
 use std::rc::Rc;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+//use std::sync::Arc;
+//use tokio::sync::Mutex;
 
-use crate::ArcMutex;
+//use crate::ArcMutex;
 
 /// Enum that denotes the type of file
 enum FileType {
@@ -33,6 +33,12 @@ struct File {
     should_download: bool,
 }
 
+// TODO : Figure out a way to find which piece index and its data falls under a certain file or
+// folder we want to download and how should one approach to download that shit
+// TODO : Create a file tree generated from reading the torrent file
+// TODO : Add Global State, by global state i mean add those values that change during the runtime
+// and is crucial to show to the user as well, such as downloaded pieces, their index, trackers and
+// their iformations and all other data related to it
 #[derive(Debug)]
 pub struct TorrentFile {
     /// Path of the torrent file
@@ -44,13 +50,22 @@ pub struct TorrentFile {
     /// Make use of file tree for both single and multi file download,
     /// in Single File mode, there won't be any nodes whereas in Multi file mode, there
     /// can be multiple nodes
-    //    fileTree: Arc<Mutex<File>>,
+    //fileTree: Arc<Mutex<File>>,
 
     /// DataStructure that holds metadata about the date encoded inside of ".torrent" file
     pub meta_info: FileMeta,
     // Global State of the torrent being downloaded
     //    state :
-    //
+    /// Stores the hash of each piece by its exact index extracted out of bencode encoded ".torrent" file
+    pub pieces_hash: Vec<[u8; 20]>,
+
+    /// Stores the total no of pieces
+    pub pieces: usize,
+
+    /// Stores the size of the piece in bytes
+    pub pieceSize: usize,
+
+    pub totalSize: usize,
 }
 
 impl TorrentFile {
@@ -59,11 +74,20 @@ impl TorrentFile {
     /// from the Torrent file
     pub fn new(path: &String) -> Option<TorrentFile> {
         match FileMeta::fromTorrentFile(&path) {
-            Ok(meta_info) => Some(TorrentFile {
-                path: path.to_string(),
-                info_hash: meta_info.generateInfoHash(),
-                meta_info,
-            }),
+            Ok(meta_info) => {
+                let info_hash = meta_info.generateInfoHash();
+                let pieces_hash = meta_info.getPiecesHash();
+
+                Some(TorrentFile {
+                    path: path.to_string(),
+                    info_hash,
+                    pieces: pieces_hash.len(),
+                    pieces_hash,
+                    meta_info,
+                    pieceSize: 0, // TODO : Replace it with actual calculation of piece size
+                    totalSize: 0, // TODO : Replace it with actual total size of the torrent
+                })
+            }
             _ => None,
         }
     }
@@ -196,13 +220,3 @@ pub fn parsing_thread_main() {
     //    // Total of of hash is same as total of pieces
     //    lock_details.total_pieces = lock_details.pieces_hash.len() as u32;
 }
-
-//fn get_pieces_hash(file_meta: &FileMeta) -> Vec<[u8; 20]> {
-//    let mut pieces_hash: Vec<[u8; 20]> = Vec::new();
-//
-//    for (i, _) in file_meta.info.pieces.iter().enumerate().step_by(20) {
-//        let hash: [u8; 20] = file_meta.info.pieces[i..i + 20].try_into().unwrap();
-//        pieces_hash.push(hash);
-//    }
-//    pieces_hash
-//}

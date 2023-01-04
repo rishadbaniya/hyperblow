@@ -188,4 +188,18 @@ impl FileMeta {
         hasher.update(info_byte);
         hasher.finalize().into_iter().collect()
     }
+
+    /// Gets all the hash of the pieces stored in the bencode encoded ".torrent" file's
+    /// "pieces" field
+    pub fn getPiecesHash(&self) -> Vec<[u8; 20]> {
+        let mut pieces_hash: Vec<[u8; 20]> = Vec::new();
+
+        // Extract the hash of each piece
+        // Jump 20 steps ahead to extract the entire hash of each piece
+        for (i, _) in self.info.pieces.iter().enumerate().step_by(20) {
+            let hash: [u8; 20] = self.info.pieces[i..i + 20].try_into().unwrap();
+            pieces_hash.push(hash);
+        }
+        pieces_hash
+    }
 }
