@@ -7,8 +7,7 @@
 mod parse;
 
 use clap::Parser;
-use hyperblow_parser;
-use parse::
+use parse::parse::TorrentFile;
 
 //use std::{env, error::Error, sync::Arc, thread, time::Instant};
 //use tokio::sync::Mutex;
@@ -52,6 +51,12 @@ macro_rules! ArcMutex {
 
 fn main() {
     let args = Arguments::parse();
+    if let Some(ref path) = args.torrent_file {
+        let x = TorrentFile::new(path);
+    }
+
+    // As of right now i'll consider that we're using this application to handle
+    // just one torrent download and not mutiple
 
     // Global States that are shared across threads
 
