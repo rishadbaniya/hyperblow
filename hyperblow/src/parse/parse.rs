@@ -9,8 +9,8 @@
 //type _Details = Arc<Mutex<Details>>;
 use hyperblow_parser::torrent_parser::FileMeta;
 use std::rc::Rc;
-//use std::sync::Arc;
-//use tokio::sync::Mutex;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 //use crate::ArcMutex;
 
@@ -24,13 +24,36 @@ enum FileType {
 struct File {
     /// Type of file, either a regular file or directory
     file_type: FileType,
+
     /// Inner files, if it has some, in case of (file_type as FileType::Regular), then inner_files
     /// will be empty vec
     inner_files: Vec<Rc<File>>,
+
     /// Size of the entire file in bytes
     size: u64,
+
     /// Denotes whether to download the file or not
     should_download: bool,
+
+    /// Denotes the progress in percentage
+    progressPerc: f32,
+}
+
+// There is a chance that this DataStructure is going to be accessed many times per seconds, so its
+// better that its field will be access and mutated rather than locking the entire data structure
+// in a Mutex
+//
+// It contains the filetree that will be constructed on resume and even starting of the download
+// phase, and will be constantly updated on each file information
+//
+// TODO : Make sure the learning i did was correct
+struct TorrentFileState {
+    pub downloadedPieces: Arc<Mutex<usize>>,
+
+    /// Make use of file tree for both single and multi file download,
+    /// in Single File mode, there won't be any nodes whereas in Multi file mode, there
+    /// can be multiple nodes
+    fileTree: Arc<Mutex<File>>,
 }
 
 // TODO : Figure out a way to find which piece index and its data falls under a certain file or
@@ -39,6 +62,8 @@ struct File {
 // TODO : Add Global State, by global state i mean add those values that change during the runtime
 // and is crucial to show to the user as well, such as downloaded pieces, their index, trackers and
 // their iformations and all other data related to it
+// TODO : Find the folder to save the data
+// TODO : Create the DataStructure in such a way that it could resume the download later on as well
 #[derive(Debug)]
 pub struct TorrentFile {
     /// Path of the torrent file
@@ -47,23 +72,17 @@ pub struct TorrentFile {
     /// Info hash of the torrent
     pub info_hash: Vec<u8>,
 
-    /// Make use of file tree for both single and multi file download,
-    /// in Single File mode, there won't be any nodes whereas in Multi file mode, there
-    /// can be multiple nodes
-    //fileTree: Arc<Mutex<File>>,
-
     /// DataStructure that holds metadata about the date encoded inside of ".torrent" file
     pub meta_info: FileMeta,
+
     // Global State of the torrent being downloaded
-    //    state :
+    //pub state : TorrentFileState
+    //
     /// Stores the hash of each piece by its exact index extracted out of bencode encoded ".torrent" file
     pub pieces_hash: Vec<[u8; 20]>,
 
     /// Stores the total no of pieces
-    pub pieces: usize,
-
-    /// Stores the size of the piece in bytes
-    pub pieceSize: usize,
+    pub piecesCount: usize,
 
     pub totalSize: usize,
 }
@@ -81,10 +100,9 @@ impl TorrentFile {
                 Some(TorrentFile {
                     path: path.to_string(),
                     info_hash,
-                    pieces: pieces_hash.len(),
+                    piecesCount: pieces_hash.len(),
                     pieces_hash,
                     meta_info,
-                    pieceSize: 0, // TODO : Replace it with actual calculation of piece size
                     totalSize: 0, // TODO : Replace it with actual total size of the torrent
                 })
             }
@@ -116,19 +134,7 @@ struct MagnetURI {
 // Entry point for the parsing thread
 //pub fn parsing_thread_main(file_state: _FileState, torrent_file_path: String, trackers: _Trackers, details: _Details) {
 pub fn parsing_thread_main() {
-    // Sets the start of the  measuring time for parsing
-    //let t = Instant::now();
 
-    // Gets the lock of all the Mutex
-    //let mut lock_file_state = file_state.blocking_lock();
-    //let mut lock_trackers = trackers.blocking_lock();
-    //let mut lock_details = details.blocking_lock();
-
-    // Gets the metadata from the torrent file and info_hash of the torrent
-    //let file_meta = FileMeta::parseTorrentFile(&torrent_file_path);
-    //let info_hash = file_meta.get_info_hash();
-
-    //lock_details.info_hash = Some(info_hash);
     //lock_details.piece_length = file_meta.info.piece_length;
 
     // Sets the root of the file tree
