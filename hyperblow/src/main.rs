@@ -53,6 +53,9 @@ fn main() {
     let args = Arguments::parse();
     if let Some(ref path) = args.torrent_file {
         let x = TorrentFile::new(path);
+        if let Some(d) = x {
+            println!("{:?}", d.pieces_hash.len());
+        }
     }
 
     // As of right now i'll consider that we're using this application to handle
