@@ -1,5 +1,7 @@
 # Hyperblow - A torrent client that throws real left blow
 
+**Currently this project is in a complete rewrite**
+
 [![dependency status](https://deps.rs/repo/github/rishadbaniya/hyperblow/status.svg)](https://deps.rs/repo/github/rishadbaniya/hyperblow)
 
 
