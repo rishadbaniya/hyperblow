@@ -7,9 +7,14 @@
 
 It's gonna take time, good things do take time
 
+✅ Denotes work is fully done
+☑️ Means work is partially done
+☐ Means the work is far from done
+
 ## Features checklist :
 - ✅ Accepts torrent file as input
-- ☐ Accepts magnet uri as input
+- ✅ Accepts magnet uri as input
+- ☑️ Support for partial download, that is checking the items we want to download
 - ✅ Support for UDP Trackers
 - ☐ Support for HTTP Trackers
 - ☐ Has rare piece first algorithm
