@@ -54,7 +54,7 @@ fn main() {
     if let Some(ref path) = args.torrent_file {
         let x = TorrentFile::new(path);
         if let Some(d) = x {
-            println!("{:?}", d.pieces_hash.len());
+            println!("{:#?}", d.fileTree);
         }
     }
 
