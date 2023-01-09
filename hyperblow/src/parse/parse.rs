@@ -8,6 +8,9 @@
 ////type _Trackers = Arc<Mutex<Vec<Arc<Mutex<Tracker>>>>>;
 //type _Details = Arc<Mutex<Details>>;
 use hyperblow_parser::torrent_parser::FileMeta;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
+use reqwest::Url;
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::ops::Deref;
@@ -161,13 +164,29 @@ impl File {
 // phase, and will be constantly updated on each file information
 //
 // TODO : Make sure the learning i did was correct
-struct TorrentFileState {
-    pub downloadedPieces: Arc<Mutex<usize>>,
+use std::net::SocketAddr;
+#[derive(Debug)]
+pub struct Tracker {
+    address: Url,
+    /// A single domain can have multiple socket address, i.e it can resolve to multiple ip address
+    socketAddrs: Option<Vec<SocketAddr>>,
+}
 
-    /// Make use of file tree for both single and multi file download,
-    /// in Single File mode, there won't be any nodes whereas in Multi file mode, there
-    /// can be multiple nodes
-    fileTree: Arc<Mutex<File>>,
+impl Tracker {
+    /// Tries to create a Tracker instance by parsing the given url
+    fn new(address: &String) -> Result<Tracker, Box<dyn std::error::Error>> {
+        let address = Url::parse(address)?;
+        Ok(Tracker { address, socketAddrs: None })
+    }
+
+    fn resolveSocketAddr(&mut self) -> bool {
+        if let Ok(addrs) = self.address.socket_addrs(|| None) {
+            self.socketAddrs = Some(addrs);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 // TODO : Figure out a way to find which piece index and its data falls under a certain file or
@@ -189,9 +208,6 @@ pub struct TorrentFile {
     /// DataStructure that holds metadata about the date encoded inside of ".torrent" file
     pub meta_info: FileMeta,
 
-    // Global State of the torrent being downloaded
-    //pub state : TorrentFileState
-    //
     /// Stores the hash of each piece by its exact index extracted out of bencode encoded ".torrent" file
     pub pieces_hash: Vec<[u8; 20]>,
 
@@ -201,8 +217,11 @@ pub struct TorrentFile {
     pub totalSize: usize,
 
     pub fileTree: Arc<Mutex<File>>,
+
+    pub trackers: Arc<Mutex<Vec<Vec<Tracker>>>>,
 }
 
+/// TODO: Implement DHT(Distributed Hash Table) as well
 impl TorrentFile {
     // TODO : Return error on error generated rather than this Option<T>
     /// It will try to parse the given the path of the torrent file and create a new data structure
@@ -219,11 +238,49 @@ impl TorrentFile {
                     piecesCount: pieces_hash.len(),
                     pieces_hash,
                     fileTree: TorrentFile::generateFileTree(&meta_info),
+                    trackers: ArcMutex!(vec![]),
                     meta_info,
                     totalSize: 0, // TODO : Replace it with actual total size of the torrent
                 })
             }
             _ => None,
+        }
+    }
+
+    /// Creates objects of [Tracker] by extracting out all the Trackers from "announce" and "announce-list" field
+    /// and then resolves their address through DNS lookup
+    pub fn resolveTrackers(&self) {
+        // According to BEP12, if announce_list field is present then the client will have to
+        // ignore the announce field as the URL in the announce field is already present in the
+        // announce_list
+        //
+        //
+        // Step -1 :
+        //
+        // Create a Tracker instance, parse the given string and then resolve the socket
+        // address for both cases, when there is only announce field and when there is
+        // announce_list field as well
+        if let Some(ref d) = self.meta_info.announce_list {
+            for i in d {
+                let x: Vec<Tracker> = {
+                    let mut trackers = vec![];
+                    for addrs in i {
+                        // This tries to parse the given URL and if it parses successfully then
+                        // signals to resolve the socket address
+                        if let Ok(mut tracker) = Tracker::new(addrs) {
+                            tracker.resolveSocketAddr();
+                            trackers.push(tracker);
+                        }
+                    }
+                    trackers
+                };
+                self.trackers.blocking_lock().push(x);
+            }
+        } else {
+            if let Ok(mut tracker) = Tracker::new(&self.meta_info.announce) {
+                tracker.resolveSocketAddr();
+                self.trackers.blocking_lock().push(vec![tracker]);
+            }
         }
     }
 
@@ -256,33 +313,6 @@ struct MagnetURI {
 //pub fn parsing_thread_main(file_state: _FileState, torrent_file_path: String, trackers: _Trackers, details: _Details) {
 pub fn parsing_thread_main() {
 
-    //lock_details.piece_length = file_meta.info.piece_length;
-
-    // Sets the root of the file tree
-    //    lock_file_state.file = File::createRoot();
-
-    // Sets the root name of the torrent file for the UI
-    //   lock_details.name = file_meta.info.name.clone();
-
-    // Creates file tree
-    //if let Some(x) = file_meta.info.files.as_ref() {
-    // Multi file mode
-    //     //   File::createFileTree(lock_file_state.file.clone(), x);
-    //    } else {
-    //        // Single file mode
-    //        lock_file_state.file.blocking_lock().inner_files = Some(vec![ArcMutex! { File {
-    //            name: file_meta.info.name.as_ref().unwrap().clone(),
-    //            file_type: FileType::REGULAR,
-    //            inner_files: None,
-    //            size: file_meta.info.length.unwrap(),
-    //            should_download: true,
-    //        }}])
-    //    }
-    //
-    //    // Sets the total size of the torrent in bytes
-    //    lock_details.total_bytes = lock_file_state.file.blocking_lock().size();
-    //
-    //    println!("Generated File Tree ----- [Time take : {:?}]", Instant::now().duration_since(t));
     //    println!("Resolving socket address");
     //    // TODO : Show a horizontal bar for every socket address being resolved
     //
