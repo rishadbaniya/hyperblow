@@ -55,6 +55,8 @@ fn main() {
         let x = TorrentFile::new(path);
         if let Some(d) = x {
             println!("{:#?}", d.fileTree);
+            d.resolveTrackers();
+            println!("{:#?}", d.trackers);
         }
     }
 
