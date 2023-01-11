@@ -390,6 +390,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "hyperblow_parser",
+ "percent-encoding",
  "rand",
  "reqwest",
  "tokio",
