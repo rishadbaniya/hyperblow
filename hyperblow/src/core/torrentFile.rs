@@ -1,6 +1,7 @@
+use crate::core::state::{DownState, State};
 use crate::core::tracker::Tracker;
 use crate::core::File;
-
+use crate::ArcMutex;
 use hyperblow_parser::torrent_parser::FileMeta;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -15,18 +16,6 @@ use tokio::task::JoinHandle;
 
 // TODO : Find the folder to save the data
 // TODO : Create the DataStructure in such a way that it could resume the download later on as well
-
-/// A thread shareable state of the torrent being downloaded.
-///
-/// Data that can be showed to the user is stored in [State]
-#[derive(Debug)]
-pub struct State {
-    /// The entire file tree of the torrent files to be downloaded
-    pub file_tree: Arc<Mutex<File>>,
-
-    /// The trackers of the torrent file
-    pub trackers: Arc<Mutex<Vec<Vec<Tracker>>>>,
-}
 
 #[derive(Debug)]
 pub struct TorrentFile {
@@ -53,7 +42,7 @@ pub struct TorrentFile {
     ///
     /// For eg. A UI library is keeping track of the changes in "state" every 2 seconds and displaying the UI,
     /// here we are making changes in the state field continuosly
-    pub state: Arc<Option<State>>,
+    pub state: Arc<State>,
 }
 
 /// TODO: Implement DHT(Distributed Hash Table) as well
@@ -66,6 +55,11 @@ impl TorrentFile {
             Ok(meta_info) => {
                 let info_hash = meta_info.generateInfoHash();
                 let pieces_hash = meta_info.getPiecesHash();
+                let state = Arc::new(State {
+                    d_state: DownState::Unknown,
+                    file_tree: Some(TorrentFile::generateFileTree(&meta_info)),
+                    trackers: None,
+                });
 
                 Some(TorrentFile {
                     path: path.to_string(),
@@ -73,7 +67,7 @@ impl TorrentFile {
                     piecesCount: pieces_hash.len(),
                     pieces_hash,
                     meta_info,
-                    state: Arc::new(None),
+                    state,
                     totalSize: 0, // TODO : Replace it with actual total size of the torrent
                 })
             }
@@ -82,11 +76,9 @@ impl TorrentFile {
     }
 
     /// Creates objects of [Tracker] by extracting out all the Trackers from "announce" and "announce-list" field
-
     /// and then resolves their address through DNS lookup
-
-    // pub fn resolveTrackers(&self) {
-    //     // According to BEP12, if announce_list field is present then the client will have to
+    //pub fn resolveTrackers(&self) {
+    // According to BEP12, if announce_list field is present then the client will have to
 
     //     // ignore the announce field as the URL in the announce field is already present in the
     //     // announce_list
@@ -122,21 +114,21 @@ impl TorrentFile {
     //     }
     // }
 
-    //    pub fn generateFileTree(meta: &FileMeta) -> Arc<Mutex<File>> {
-    //             File::new(meta, &"root".to_owned()).unwrap()
-    //         }
-    //
-    //        //   fn generateFileTree(meta: FileMeta) -> Arc<Mutex<File>> {
-    //        //       //ArcMutex!(File { file_type: , inner_files: (), size: (), should_download: () })
-    //    }
-    //
+    pub fn generateFileTree(meta: &FileMeta) -> Arc<Mutex<File>> {
+        // We'll consider the root file to be named "."
+        File::new(meta, &".".to_owned()).unwrap()
+    }
 
     /// Starts to download the torrent, it will keep on mutating the "state" field as it
-    /// makes progress
+    /// makes progress, and if the torrent needs to be pause or started, one can use the method on
+    /// that State instance
     ///
     /// NOTE : While using this method, one must clone and keep a Arc pointer of "state" field,
     /// so that they can use it later on to display the UI or the data changed
     fn download(torrentFile: TorrentFile) -> JoinHandle<()> {
-        tokio::spawn(async move {})
+        let rt = async move {
+            // All the task goes here
+        };
+        tokio::spawn(rt)
     }
 }

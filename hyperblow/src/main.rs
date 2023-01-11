@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 
 mod core;
+
+use crate::core::TorrentFile;
 use clap::Parser;
 
 //use std::{env, error::Error, sync::Arc, thread, time::Instant};
@@ -18,15 +20,16 @@ struct Arguments {
     magnet_uri: Option<String>,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Arguments::parse();
 
-    //    if let Some(ref path) = args.torrent_file {
-    //        let x = TorrentFile::new(path);
-    //        if let Some(d) = x {
-    //            println!("{:#?}", d.fileTree);
-    //            d.resolveTrackers();
-    //            println!("{:#?}", d.trackers);
-    //        }
-    //    }
+    if let Some(ref path) = args.torrent_file {
+        let x = TorrentFile::new(path);
+        //        if let Some(d) = x {
+        //            println!("{:#?}", d.fileTree);
+        //            d.resolveTrackers();
+        //            println!("{:#?}", d.trackers);
+        //        }
+    }
 }
