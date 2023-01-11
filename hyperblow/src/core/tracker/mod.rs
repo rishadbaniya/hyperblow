@@ -3,8 +3,8 @@
 mod announceReqRes;
 mod connectReqRes;
 
-use announceReqRes::{AnnounceRequest, AnnounceResponse};
-use connectReqRes::{ConnectRequest, ConnectResponse};
+//use announceReqRes::{AnnounceRequest, AnnounceResponse};
+//use connectReqRes::{ConnectRequest, ConnectResponse};
 use reqwest::Url;
 use std::net::SocketAddr;
 
@@ -32,18 +32,17 @@ pub struct Tracker {
     /// A "None" in the socketAddrs means that the DNS wasn't resolved for the given domain of
     /// Tracker
     pub socketAddrs: Option<Vec<SocketAddr>>,
-
-    /// Data to make connect request
-    pub connect_request: Option<ConnectRequest>,
-
-    /// Data received from connect request as response
-    pub connect_response: Option<ConnectResponse>,
-
-    /// Data to make announce request
-    pub announce_request: Option<AnnounceRequest>,
-
-    /// Data received from announce request as response
-    pub announce_response: Option<AnnounceResponse>,
+    //    /// Data to make connect request
+    //    pub connect_request: Option<ConnectRequest>,
+    //
+    //    /// Data received from connect request as response
+    //    pub connect_response: Option<ConnectResponse>,
+    //
+    //    /// Data to make announce request
+    //    pub announce_request: Option<AnnounceRequest>,
+    //
+    //    /// Data received from announce request as response
+    //    pub announce_response: Option<AnnounceResponse>,
 }
 
 impl Tracker {
@@ -55,10 +54,10 @@ impl Tracker {
             address,
             socketAddrs: None,
             protocol: TrackerProtocol::UDP,
-            connect_request: None,
-            connect_response: None,
-            announce_request: None,
-            announce_response: None,
+            //           connect_request: None,
+            //           connect_response: None,
+            //           announce_request: None,
+            //           announce_response: None,
         })
     }
 
