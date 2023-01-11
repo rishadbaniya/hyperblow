@@ -9,7 +9,7 @@ edition = "2021"
 #serde_derive = "^1.0.0"
 #serde_bytes = "0.11.5"
 #sha-1 = "0.10.0"
-#percent-encoding = "2.1.0"
+
 #hyper = {version = "0.14.13", features = ["full"]}
 #crossterm = "0.23.0"
 #tui = "0.17.0"
@@ -17,6 +17,7 @@ edition = "2021"
 #byteorder = "1.4.3"
 #futures = "0.3.19"
 reqwest = "0.11.13"
+percent-encoding = "2.2.0"
 clap = { version = "4.0.32", features = ["derive"]}
 hyperblow_parser = { path = "../libs/hyperblow_parser" }
 tokio = { version = "1.23.0", features = ["full"] }
