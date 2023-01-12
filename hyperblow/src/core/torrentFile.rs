@@ -4,8 +4,14 @@ use crate::core::File;
 use crate::ArcMutex;
 use hyperblow_parser::torrent_parser::FileMeta;
 use std::sync::Arc;
+use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+
+#[derive(Debug)]
+pub enum TError {
+    NoTrackerResolved,
+}
 
 // TODO : Figure out a way to find which piece index and its data falls under a certain file or
 // folder we want to download and how should one approach to download that shit
@@ -58,7 +64,9 @@ impl TorrentFile {
                 let state = Arc::new(State {
                     d_state: DownState::Unknown,
                     file_tree: Some(TorrentFile::generateFileTree(&meta_info)),
-                    trackers: None,
+                    trackers: ArcMutex!(vec![]),
+                    udp_ports: ArcMutex!(Vec::new()),
+                    tcp_ports: ArcMutex!(Vec::new()),
                 });
 
                 Some(TorrentFile {
@@ -75,49 +83,93 @@ impl TorrentFile {
         }
     }
 
+    // NOTE : This function is assumed to be called once in the download session
     /// Creates objects of [Tracker] by extracting out all the Trackers from "announce" and "announce-list" field
     /// and then resolves their address through DNS lookup
-    //pub fn resolveTrackers(&self) {
-    // According to BEP12, if announce_list field is present then the client will have to
+    async fn resolveTrackers(&self) -> Result<(), TError> {
+        let trackers = self.state.trackers.clone(); // Pointer to store the trackers
+        let mut tracker_s: Vec<Vec<Tracker>> = Vec::new(); // Stores the resolved trackers
 
-    //     // ignore the announce field as the URL in the announce field is already present in the
-    //     // announce_list
-    //     //
-    //     //
-    //     // Step -1 :
-    //     //
-    //     // Create a Tracker instance, parse the given string and then resolve the socket
-    //     // address for both cases, when there is only announce field and when there is
-    //     // announce_list field as well
-    //     if let Some(ref d) = self.meta_info.announce_list {
-    //         for i in d {
-    //             let x: Vec<Tracker> = {
-    //                 let mut trackers = vec![];
-    //                 for addrs in i {
-    //                     // This tries to parse the given URL and if it parses successfully then
-    //                     // signals to resolve the socket address
-    //                     if let Ok(mut tracker) = Tracker::new(addrs) {
-    //                         tracker.resolveSocketAddr();
-    //                         trackers.push(tracker);
-    //                     }
-    //                 }
-    //                 trackers
-    //             };
+        // According to BEP12, if announce_list field is present then the client will have to
 
-    //             self.trackers.blocking_lock().push(x);
-    //         }
-    //     } else {
-    //         if let Ok(mut tracker) = Tracker::new(&self.meta_info.announce) {
-    //             tracker.resolveSocketAddr();
-    //             self.trackers.blocking_lock().push(vec![tracker]);
-    //         }
-    //     }
-    // }
+        // ignore the announce field as the URL in the announce field is already present in the
+        // announce_list
+        //
+        //
+        // Step -1 :
+        //
+        // Create a Tracker instance, parse the given string and then resolve the socket
+        // address for both cases, when there is only announce field and when there is
+        // announce_list field as well
+        if let Some(ref d) = self.meta_info.announce_list {
+            for i in d {
+                let x: Vec<Tracker> = {
+                    let mut trackers = vec![];
+                    for addrs in i {
+                        // This tries to parse the given URL and if it parses successfully then
+                        // signals to resolve the socket address
+                        if let Ok(mut tracker) = Tracker::new(addrs) {
+                            // TODO : Figure out what to do to those trackers who DNS wasn't
+                            // resolved, whether to try after a certain time or what
+                            if tracker.resolveSocketAddr() {
+                                trackers.push(tracker);
+                            }
+                        }
+                    }
+                    trackers
+                };
+                tracker_s.push(x);
+            }
+        } else {
+            if let Ok(mut tracker) = Tracker::new(&self.meta_info.announce) {
+                if tracker.resolveSocketAddr() {
+                    tracker_s.push(vec![tracker]);
+                }
+            }
+        }
+
+        return if tracker_s.len() == 0 {
+            Err(TError::NoTrackerResolved)
+        } else {
+            *(trackers.lock().await) = tracker_s;
+            return Ok(());
+        };
+    }
 
     pub fn generateFileTree(meta: &FileMeta) -> Arc<Mutex<File>> {
         // We'll consider the root file to be named "."
         File::new(meta, &".".to_owned()).unwrap()
     }
+
+    pub async fn getUDPSocket(&mut self) -> Arc<UdpSocket> {
+        // TODO : Currently this function exhaustively checks for each port and tries to
+        // give one of the ports incrementing from 6881
+        let mut port = 6881;
+        // TODO: Get a list of all the ports used by the entire application as well,
+        // i.e store a global use  of entire sockets somewhere in a global state
+        //
+        // Gets a port that is not used by the application
+        loop {
+            match UdpSocket::bind("0.0.0.0:{port}").await {
+                Ok(socket) => {
+                    let mut udp_ports = self.state.udp_ports.lock().await;
+                    udp_ports.push(port);
+                    return Arc::new(socket);
+                }
+                Err(_) => {
+                    port += 1;
+                }
+            }
+        }
+    }
+
+    /// Starts all the trackers parallel with each other
+    // TODO : Handle the case for support of TCP Trackers as well
+    pub async fn runTrackers(&self, sockets: Arc<UdpSocket>) {
+        let trackers = self.state.trackers.clone();
+    }
+
+    pub async fn runDownload(&self) {}
 
     /// Starts to download the torrent, it will keep on mutating the "state" field as it
     /// makes progress, and if the torrent needs to be pause or started, one can use the method on
@@ -125,8 +177,20 @@ impl TorrentFile {
     ///
     /// NOTE : While using this method, one must clone and keep a Arc pointer of "state" field,
     /// so that they can use it later on to display the UI or the data changed
-    fn download(torrentFile: TorrentFile) -> JoinHandle<()> {
+    pub fn run(mut torrent: TorrentFile) -> JoinHandle<()> {
         let rt = async move {
+            let trackers_udp_socket = torrent.getUDPSocket().await;
+            // Collects all the tasks
+            // 1. Running the trackers
+            // 2. Running the download process
+            //
+            // At last run them in parallel, through some ways such as join or FuturesUnordered
+            let mut tasks = vec![];
+            if let Ok(_) = torrent.resolveTrackers().await {
+                tasks.push(torrent.runTrackers(trackers_udp_socket.clone()));
+            } else {
+                // Handle happens when none of the trackers DNS are resolved
+            }
             // All the task goes here
         };
         tokio::spawn(rt)
