@@ -25,6 +25,6 @@ async fn main() {
     let args = Arguments::parse();
 
     if let Some(ref path) = args.torrent_file {
-        let x = TorrentFile::new(path);
+        let x = TorrentFile::new(path).await;
     }
 }

@@ -53,12 +53,15 @@ pub struct File {
 impl File {
     // TODO : Generate file tree based on the data inside of ".torrent" file and the resumable data
     // as well
+    // TODO : Find a possible replacement for the use of Mutex, it seems to consume lot of
+    // resources
+    //
     // Generates a file tree based on the data inside of ".torrent" file
     // meta => It's the File Meta that has all the informations about the torrent file
     // directory => The download directory of the data i.e the absolute path of the directory
     // where we want the contents to go to
     //
-    pub fn new(meta: &FileMeta, directory: &String) -> Result<Arc<Mutex<File>>, Box<dyn std::error::Error>> {
+    pub async fn new(meta: &FileMeta, directory: &String) -> Result<Arc<Mutex<File>>, Box<dyn std::error::Error>> {
         // Create file tree in single file mode
         let mut rootFile = File {
             name: directory.to_owned(),
@@ -82,15 +85,21 @@ impl File {
                 // The eventual path of the file, will also include the directory
                 let ref path_s = f.path;
                 for (ind, path) in path_s.into_iter().enumerate() {
-                    let containsAtDepthOne = { currentFile.blocking_lock().containsAtDepthOne(path) };
+                    let containsAtDepthOne = {
+                        let current_file = currentFile.lock().await;
+                        current_file.containsAtDepthOne(path).await
+                    };
                     match containsAtDepthOne {
                         Some(i) => {
-                            let curFile = { currentFile.blocking_lock().inner_files.as_ref().unwrap().get(i).unwrap().clone() };
+                            let curFile = {
+                                let current_file = currentFile.lock().await;
+                                current_file.inner_files.as_ref().unwrap().get(i).unwrap().clone()
+                            };
                             currentFile = curFile;
                         }
                         None => {
                             let curFile = {
-                                let mut currentFileLock = currentFile.blocking_lock();
+                                let mut currentFileLock = currentFile.lock().await;
                                 let file_type = if (path_s.len() - 1) == ind || path_s.len() == 1 {
                                     FileType::Regular
                                 } else {
@@ -132,10 +141,10 @@ impl File {
         }
     }
 
-    fn containsAtDepthOne(&self, fileOrFolderName: &String) -> Option<usize> {
+    async fn containsAtDepthOne(&self, fileOrFolderName: &String) -> Option<usize> {
         if let Some(ref inner_files) = self.inner_files {
             for (i, file) in inner_files.into_iter().enumerate() {
-                let name = { file.blocking_lock().name.clone() };
+                let name = { file.lock().await.name.clone() };
                 if name == *fileOrFolderName {
                     return Some(i);
                 }

@@ -22,3 +22,4 @@ clap = { version = "4.0.32", features = ["derive"]}
 hyperblow_parser = { path = "../libs/hyperblow_parser" }
 tokio = { version = "1.23.0", features = ["full"] }
 rand = "0.8.5"
+futures = "0.3.25"
