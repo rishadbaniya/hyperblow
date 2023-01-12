@@ -23,8 +23,9 @@ struct Arguments {
 #[tokio::main]
 async fn main() {
     let args = Arguments::parse();
-
     if let Some(ref path) = args.torrent_file {
-        let x = TorrentFile::new(path).await;
+        if let Some(torrent) = TorrentFile::new(path).await {
+            TorrentFile::run(torrent).await;
+        }
     }
 }
