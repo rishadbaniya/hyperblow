@@ -1,7 +1,6 @@
 // TODO: Implement DHT
 
-mod announceReqRes;
-mod connectReqRes;
+mod announce_req_res;
 
 //use announceReqRes::{AnnounceRequest, AnnounceResponse};
 //use connectReqRes::{ConnectRequest, ConnectResponse};
