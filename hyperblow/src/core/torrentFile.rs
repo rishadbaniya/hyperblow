@@ -3,6 +3,7 @@ use crate::core::tracker::Tracker;
 use crate::core::File;
 use crate::ArcMutex;
 use futures::future::join_all;
+use futures::join;
 use hyperblow_parser::torrent_parser::FileMeta;
 use std::sync::Arc;
 use tokio::{net::UdpSocket, sync::Mutex, task::JoinHandle};
@@ -150,14 +151,16 @@ impl TorrentFile {
         //
         // Gets a port that is not used by the application
         loop {
-            match UdpSocket::bind("0.0.0.0:{port}").await {
+            let adr = format!("0.0.0.0:{port}");
+            match UdpSocket::bind(adr).await {
                 Ok(socket) => {
                     let mut udp_ports = self.state.udp_ports.lock().await;
                     udp_ports.push(port);
                     return Arc::new(socket);
                 }
-                Err(_) => {
-                    port += 1;
+                Err(e) => {
+                    println!("{:?}", e.to_string());
+                    port = port + 1;
                 }
             }
         }
@@ -167,38 +170,40 @@ impl TorrentFile {
     // TODO : Handle the case for support of TCP Trackers as well
     pub async fn runTrackers(&self, sockets: Arc<UdpSocket>) {
         let trackers = self.state.trackers.clone();
+        println!("RAN USING TRACKERS AT RANDOM ORDER");
     }
 
-    pub async fn runDownload(&self) {}
+    pub async fn runDownload(&self) {
+        println!("RAN DOWNLOADE AT RANDOM ORDER");
+    }
 
     // TODO : Add examples for the rust docs
-    /// Starts to download the torrent, it will keep on mutating the "state" field as it
-    /// makes progress, and if the torrent needs to be pause or started, one can use the method on
-    /// that State instance
-    ///
-    /// NOTE : While using this method, one must clone and keep a Arc pointer of "state" field,
-    /// so that they can use it later on to display the UI or the data changed
+    // /// Starts to download the torrent, it will keep on mutating the "state" field as it
+    // /// makes progress, and if the torrent needs to be pause or started, one can use the method on
+    // /// that State instance
+    // ///
+    // /// NOTE : While using this method, one must clone and keep a Arc pointer of "state" field,
+    // /// so that they can use it later on to display the UI or the data changed
     pub fn run(mut torrent: TorrentFile) -> JoinHandle<()> {
         let rt = async move {
-            //     let trackers_udp_socket = torrent.getUDPSocket().await;
+            println!("HEY THERE");
 
-            //     // Collects all the tasks
-            //     // 1. Running the trackers
-            //     // 2. Running the download process
-            //     //
-            //     // At last run them in parallel, through some ways such as join_all(Uses abstraction
-            //     // upon FuturesUnordered) or FuturesUnordered directly
-            //     //let mut tasks = vec![];
-            //     if let Ok(_) = torrent.resolveTrackers().await {
-            //         let run_trackers = torrent.runTrackers(trackers_udp_socket.clone());
-            //         let run_download = torrent.runDownload();
+            // A UDP socket for Trackers, not just a single tracker
+            let t_udp_socket = torrent.getUDPSocket().await;
 
-            //         //run_trackers.await;
-            //         //   join_all(tasks).await;
-            //     } else {
-            //         // Handle happens when none of the trackers DNS are resolved
-            //     }
-            //     // All the task goes here
+            //let tasks = vec![];
+            // Collects all the tasks
+            // 1. Running the trackers
+            // 2. Running the download process
+            //
+            // At last run them in parallel, through some ways such as join_all(Uses abstraction upon FuturesUnordered) or FuturesUnordered directly
+
+            if let Ok(_) = torrent.resolveTrackers().await {
+                let run_trackers = torrent.runTrackers(t_udp_socket.clone());
+                let run_download = torrent.runDownload();
+            } else {
+                // Handle what happens when none of the trackers DNS are resolved
+            }
         };
         tokio::spawn(rt)
     }
