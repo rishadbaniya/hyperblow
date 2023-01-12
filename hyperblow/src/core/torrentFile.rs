@@ -2,11 +2,10 @@ use crate::core::state::{DownState, State};
 use crate::core::tracker::Tracker;
 use crate::core::File;
 use crate::ArcMutex;
+use futures::future::join_all;
 use hyperblow_parser::torrent_parser::FileMeta;
 use std::sync::Arc;
-use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
+use tokio::{net::UdpSocket, sync::Mutex, task::JoinHandle};
 
 #[derive(Debug)]
 pub enum TError {
@@ -56,14 +55,15 @@ impl TorrentFile {
     // TODO : Return error on error generated rather than this Option<T>
     /// It will try to parse the given the path of the torrent file and create a new data structure
     /// from the Torrent file
-    pub fn new(path: &String) -> Option<TorrentFile> {
+    pub async fn new(path: &String) -> Option<TorrentFile> {
         match FileMeta::fromTorrentFile(&path) {
             Ok(meta_info) => {
                 let info_hash = meta_info.generateInfoHash();
                 let pieces_hash = meta_info.getPiecesHash();
+
                 let state = Arc::new(State {
                     d_state: DownState::Unknown,
-                    file_tree: Some(TorrentFile::generateFileTree(&meta_info)),
+                    file_tree: Some(TorrentFile::generateFileTree(&meta_info).await),
                     trackers: ArcMutex!(vec![]),
                     udp_ports: ArcMutex!(Vec::new()),
                     tcp_ports: ArcMutex!(Vec::new()),
@@ -136,9 +136,9 @@ impl TorrentFile {
         };
     }
 
-    pub fn generateFileTree(meta: &FileMeta) -> Arc<Mutex<File>> {
+    pub async fn generateFileTree(meta: &FileMeta) -> Arc<Mutex<File>> {
         // We'll consider the root file to be named "."
-        File::new(meta, &".".to_owned()).unwrap()
+        File::new(meta, &".".to_owned()).await.unwrap()
     }
 
     pub async fn getUDPSocket(&mut self) -> Arc<UdpSocket> {
@@ -171,6 +171,7 @@ impl TorrentFile {
 
     pub async fn runDownload(&self) {}
 
+    // TODO : Add examples for the rust docs
     /// Starts to download the torrent, it will keep on mutating the "state" field as it
     /// makes progress, and if the torrent needs to be pause or started, one can use the method on
     /// that State instance
@@ -179,19 +180,25 @@ impl TorrentFile {
     /// so that they can use it later on to display the UI or the data changed
     pub fn run(mut torrent: TorrentFile) -> JoinHandle<()> {
         let rt = async move {
-            let trackers_udp_socket = torrent.getUDPSocket().await;
-            // Collects all the tasks
-            // 1. Running the trackers
-            // 2. Running the download process
-            //
-            // At last run them in parallel, through some ways such as join or FuturesUnordered
-            let mut tasks = vec![];
-            if let Ok(_) = torrent.resolveTrackers().await {
-                tasks.push(torrent.runTrackers(trackers_udp_socket.clone()));
-            } else {
-                // Handle happens when none of the trackers DNS are resolved
-            }
-            // All the task goes here
+            //     let trackers_udp_socket = torrent.getUDPSocket().await;
+
+            //     // Collects all the tasks
+            //     // 1. Running the trackers
+            //     // 2. Running the download process
+            //     //
+            //     // At last run them in parallel, through some ways such as join_all(Uses abstraction
+            //     // upon FuturesUnordered) or FuturesUnordered directly
+            //     //let mut tasks = vec![];
+            //     if let Ok(_) = torrent.resolveTrackers().await {
+            //         let run_trackers = torrent.runTrackers(trackers_udp_socket.clone());
+            //         let run_download = torrent.runDownload();
+
+            //         //run_trackers.await;
+            //         //   join_all(tasks).await;
+            //     } else {
+            //         // Handle happens when none of the trackers DNS are resolved
+            //     }
+            //     // All the task goes here
         };
         tokio::spawn(rt)
     }
