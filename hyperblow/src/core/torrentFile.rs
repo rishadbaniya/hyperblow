@@ -189,22 +189,22 @@ impl TorrentFile {
         //join!(self.receiveTrackersResponse(socket, channels_sd));
     }
 
-    async fn receiveTrackersResponse(&self, socket: Arc<UdpSocket>, senders: Vec<Sender<((usize, usize), Vec<u8>)>>) {
+    async fn receiveTrackersResponse(&self, socket: Arc<UdpSocket>) {
         loop {
             // Replace this vector with bytes mutj
             let mut buf: Vec<u8> = Vec::new();
             match socket.recv_from(&mut buf).await {
-                Ok((len, ref s_addrs)) => {
+                Ok((_len, ref s_addrs)) => {
                     // NOTE : I could've stored all trackers in the top scope of this
                     // receiveTrackersResponse function, so that i don't have to await. But, the
                     // problem is of BEP12, where i have to constantly arrange the Trackers, this
                     // changes the index in the self.state.trackers field
-                    let mut trackers = self.state.trackers.lock().await;
-                    for trackers in trackers.iter_mut() {
+                    let trackers = self.state.trackers.lock().await;
+                    for trackers in trackers.iter() {
                         for tracker in trackers {
                             if tracker.isEqualTo(s_addrs) {
-                                if let Some((ref mut sd, _)) = tracker.udp_channel {
-                                    sd.is_closed();
+                                if let Some((ref sd, _)) = tracker.udp_channel {
+                                    sd.send(buf.clone());
                                 }
                             }
                         }
