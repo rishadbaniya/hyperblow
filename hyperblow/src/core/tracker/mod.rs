@@ -5,7 +5,10 @@ mod announce_req_res;
 //use announceReqRes::{AnnounceRequest, AnnounceResponse};
 //use connectReqRes::{ConnectRequest, ConnectResponse};
 use reqwest::Url;
+use std::cmp::{Eq, PartialEq};
 use std::net::SocketAddr;
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::{Receiver, Sender};
 
 ///Type of protocol used to connect to the tracker
 #[derive(PartialEq, Debug, Clone)]
@@ -42,17 +45,23 @@ pub struct Tracker {
     //
     //    /// Data received from announce request as response
     //    pub announce_response: Option<AnnounceResponse>,
+    pub udp_channel: Option<(Sender<Vec<u8>>, Receiver<Vec<u8>>)>,
 }
 
 impl Tracker {
     /// Tries to create a Tracker instance by parsing the given url
     pub fn new(address: &String) -> Result<Tracker, Box<dyn std::error::Error>> {
         let address = Url::parse(address)?;
-        // TODO: Find out the protocol, if its TCP or UDP
+        let udp_channel = Some(oneshot::channel::<Vec<u8>>());
+
+        // TODO: Find out the protocol, if its TCP or UDP for the tracker
+        let protocol = TrackerProtocol::UDP;
+
         Ok(Tracker {
             address,
             socketAddrs: None,
-            protocol: TrackerProtocol::UDP,
+            protocol,
+            udp_channel,
             //           connect_request: None,
             //           connect_response: None,
             //           announce_request: None,
@@ -68,5 +77,17 @@ impl Tracker {
         } else {
             false
         }
+    }
+
+    // Compares given socket address to the trackers list of socket addresses,
+    // if it matches any one of it, then we can say that the given socket address belongs
+    // to the tracker i.e the socket address is equal to the Tracker
+    pub fn isEqualTo(&self, sAdr1: &SocketAddr) -> bool {
+        if let Some(ref sAdresses) = self.socketAddrs {
+            for sAdr2 in sAdresses {
+                return *sAdr1 == *sAdr2;
+            }
+        }
+        false
     }
 }

@@ -2,10 +2,12 @@ use crate::core::state::{DownState, State};
 use crate::core::tracker::Tracker;
 use crate::core::File;
 use crate::ArcMutex;
-use futures::future::join_all;
-use futures::join;
+use futures::future::join;
+use futures::stream::FuturesUnordered;
+use futures::{join, FutureExt, StreamExt};
 use hyperblow_parser::torrent_parser::FileMeta;
 use std::sync::Arc;
+use tokio::sync::oneshot::{self, Sender};
 use tokio::{net::UdpSocket, sync::Mutex, task::JoinHandle};
 
 #[derive(Debug)]
@@ -166,15 +168,64 @@ impl TorrentFile {
         }
     }
 
-    /// Starts all the trackers parallel with each other
     // TODO : Handle the case for support of TCP Trackers as well
-    pub async fn runTrackers(&self, sockets: Arc<UdpSocket>) {
-        let trackers = self.state.trackers.clone();
-        println!("RAN USING TRACKERS AT RANDOM ORDER");
+    // TorrentFile
+    //Currently, im assuming that, the index of trackers is constant in state field of
+    // Algorithm to run trackers;
+    // Count total trackers
+    pub async fn runTrackers(&self, socket: Arc<UdpSocket>) {
+        let total_trackers = { self.state.trackers.clone().lock().await.len() };
+
+        // The channels receiver is stored at the same index the trackers are indexed
+        //let mut channels_sd = Vec::new();
+        //let mut channels_rx = Vec::new();
+        // for _ in 1..=total_trackers {
+        //     // (usize, usize) => (index1, index2) is index of the socket address inside of the state.trackers field
+        //     // Vec<u8> => Its the buffer of data
+        //     let (sd, rx) = oneshot::channel::<Vec<u8>)>();
+        //     //channels_sd.push(sd);
+        //     //channels_rx.push(rx);
+        // }
+        //join!(self.receiveTrackersResponse(socket, channels_sd));
     }
 
+    async fn receiveTrackersResponse(&self, socket: Arc<UdpSocket>, senders: Vec<Sender<((usize, usize), Vec<u8>)>>) {
+        loop {
+            // Replace this vector with bytes mutj
+            let mut buf: Vec<u8> = Vec::new();
+            match socket.recv_from(&mut buf).await {
+                Ok((len, ref s_addrs)) => {
+                    // NOTE : I could've stored all trackers in the top scope of this
+                    // receiveTrackersResponse function, so that i don't have to await. But, the
+                    // problem is of BEP12, where i have to constantly arrange the Trackers, this
+                    // changes the index in the self.state.trackers field
+                    let mut trackers = self.state.trackers.lock().await;
+                    for trackers in trackers.iter_mut() {
+                        for tracker in trackers {
+                            if tracker.isEqualTo(s_addrs) {
+                                if let Some((ref mut sd, _)) = tracker.udp_channel {
+                                    sd.is_closed();
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    //async fn () {
+    //}
+
+    //async fn sendTra
+
     pub async fn runDownload(&self) {
-        println!("RAN DOWNLOADE AT RANDOM ORDER");
+        // TODO: Run in a loop, but never return anything
+        for i in 1..=20000000 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+            println!("Does the download stuff here");
+        }
     }
 
     // TODO : Add examples for the rust docs
@@ -197,10 +248,16 @@ impl TorrentFile {
             // 2. Running the download process
             //
             // At last run them in parallel, through some ways such as join_all(Uses abstraction upon FuturesUnordered) or FuturesUnordered directly
+            //let concurrent = FuturesUnordered::new();
 
             if let Ok(_) = torrent.resolveTrackers().await {
                 let run_trackers = torrent.runTrackers(t_udp_socket.clone());
                 let run_download = torrent.runDownload();
+
+                // Run both
+                // 1. Requesting and resolving the trackers
+                // 2. Downloading from the peers
+                join!(run_trackers, run_download);
             } else {
                 // Handle what happens when none of the trackers DNS are resolved
             }
