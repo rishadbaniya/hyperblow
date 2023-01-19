@@ -7,8 +7,8 @@ mod announce_req_res;
 use reqwest::Url;
 use std::cmp::{Eq, PartialEq};
 use std::net::SocketAddr;
-use tokio::sync::oneshot;
-use tokio::sync::oneshot::{Receiver, Sender};
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 ///Type of protocol used to connect to the tracker
 #[derive(PartialEq, Debug, Clone)]
@@ -34,6 +34,8 @@ pub struct Tracker {
     /// A "None" in the socketAddrs means that the DNS wasn't resolved for the given domain of
     /// Tracker
     pub socketAddrs: Option<Vec<SocketAddr>>,
+
+    pub udp_channel: Option<(UnboundedSender<Vec<u8>>, UnboundedReceiver<Vec<u8>>)>,
     //    /// Data to make connect request
     //    pub connect_request: Option<ConnectRequest>,
     //
@@ -45,14 +47,13 @@ pub struct Tracker {
     //
     //    /// Data received from announce request as response
     //    pub announce_response: Option<AnnounceResponse>,
-    pub udp_channel: Option<(Sender<Vec<u8>>, Receiver<Vec<u8>>)>,
 }
 
 impl Tracker {
     /// Tries to create a Tracker instance by parsing the given url
     pub fn new(address: &String) -> Result<Tracker, Box<dyn std::error::Error>> {
         let address = Url::parse(address)?;
-        let udp_channel = Some(oneshot::channel::<Vec<u8>>());
+        let udp_channel = Some(mpsc::unbounded_channel::<Vec<u8>>());
 
         // TODO: Find out the protocol, if its TCP or UDP for the tracker
         let protocol = TrackerProtocol::UDP;
