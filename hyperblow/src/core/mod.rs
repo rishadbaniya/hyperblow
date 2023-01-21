@@ -5,13 +5,20 @@ mod tracker;
 use hyperblow_parser::torrent_parser::FileMeta;
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 pub use torrentFile::TorrentFile;
 
 #[macro_export]
 macro_rules! ArcMutex {
     ($e : expr) => {
         Arc::new(Mutex::new($e))
+    };
+}
+
+#[macro_export]
+macro_rules! ArcRwLock {
+    ($e : expr) => {
+        Arc::new(RwLock::new($e))
     };
 }
 
