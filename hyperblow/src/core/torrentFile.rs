@@ -2,13 +2,18 @@ use crate::core::state::{DownState, State};
 use crate::core::tracker::Tracker;
 use crate::core::File;
 use crate::ArcMutex;
+use futures::channel::mpsc::UnboundedReceiver;
 use futures::future::join;
 use futures::stream::FuturesUnordered;
 use futures::{join, FutureExt, StreamExt};
 use hyperblow_parser::torrent_parser::FileMeta;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::oneshot::{self, Sender};
-use tokio::{net::UdpSocket, sync::Mutex, task::JoinHandle};
+use tokio::sync::RwLock;
+use tokio::{net::UdpSocket, sync::Mutex, task::JoinHandle, time::timeout};
+
+const TRANS_ID: i32 = 10;
 
 #[derive(Debug)]
 pub enum TError {
@@ -90,23 +95,19 @@ impl TorrentFile {
     /// Creates objects of [Tracker] by extracting out all the Trackers from "announce" and "announce-list" field
     /// and then resolves their address through DNS lookup
     async fn resolveTrackers(&self) -> Result<(), TError> {
-        let trackers = self.state.trackers.clone(); // Pointer to store the trackers
-        let mut tracker_s: Vec<Vec<Tracker>> = Vec::new(); // Stores the resolved trackers
+        let trackers = self.state.trackers.clone();
+        let mut tracker_s: Vec<Vec<Arc<RwLock<Tracker>>>> = Vec::new(); // Stores the resolved trackers
 
         // According to BEP12, if announce_list field is present then the client will have to
-
         // ignore the announce field as the URL in the announce field is already present in the
         // announce_list
         //
-        //
-        // Step -1 :
-        //
-        // Create a Tracker instance, parse the given string and then resolve the socket
-        // address for both cases, when there is only announce field and when there is
-        // announce_list field as well
+        // Inside this function resolveTrackers(...) only the initial step of extracting out the
+        // URLS from announce_list or announce field is considered and resolving the DNS of the URL
+        // is done
         if let Some(ref d) = self.meta_info.announce_list {
             for i in d {
-                let x: Vec<Tracker> = {
+                let x: Vec<Arc<RwLock<Tracker>>> = {
                     let mut trackers = vec![];
                     for addrs in i {
                         // This tries to parse the given URL and if it parses successfully then
@@ -115,7 +116,7 @@ impl TorrentFile {
                             // TODO : Figure out what to do to those trackers who DNS wasn't
                             // resolved, whether to try after a certain time or what
                             if tracker.resolveSocketAddr() {
-                                trackers.push(tracker);
+                                trackers.push(Arc::new(RwLock::new(tracker)));
                             }
                         }
                     }
@@ -126,7 +127,7 @@ impl TorrentFile {
         } else {
             if let Ok(mut tracker) = Tracker::new(&self.meta_info.announce) {
                 if tracker.resolveSocketAddr() {
-                    tracker_s.push(vec![tracker]);
+                    tracker_s.push(vec![Arc::new(RwLock::new(tracker))]);
                 }
             }
         }
@@ -174,21 +175,85 @@ impl TorrentFile {
     // Algorithm to run trackers;
     // Count total trackers
     pub async fn runTrackers(&self, socket: Arc<UdpSocket>) {
-        let total_trackers = { self.state.trackers.clone().lock().await.len() };
-
-        // The channels receiver is stored at the same index the trackers are indexed
-        //let mut channels_sd = Vec::new();
-        //let mut channels_rx = Vec::new();
-        // for _ in 1..=total_trackers {
-        //     // (usize, usize) => (index1, index2) is index of the socket address inside of the state.trackers field
-        //     // Vec<u8> => Its the buffer of data
-        //     let (sd, rx) = oneshot::channel::<Vec<u8>)>();
-        //     //channels_sd.push(sd);
-        //     //channels_rx.push(rx);
-        // }
-        //join!(self.receiveTrackersResponse(socket, channels_sd));
+        // Running of trackers is divided into two sub tasks
+        // 1. Sending trackers requests
+        // 2. Receiving trackers response
+        //
+        // One is, sending Trackers requests and other is
+        // If there are 'n' no of trackers, then
+        // In the first async task of 'req', it spawns 'n' no of tasks within itself, and these each task make a
+        // request and for every response that comes in the socket, its handled by second async
+        // task of 'res
+        let req = self.sendTrackersRequests(socket.clone());
+        let res = self.receiveTrackersResponse(socket);
+        join!(req, res);
     }
 
+    async fn sendTrackersRequests(&self, socket: Arc<UdpSocket>) {
+        // Sets the timeout duration for the requests
+        let timeout_duration = |n: u64| Duration::from_secs(15 + 2 ^ n);
+
+        //let tracker_rq = |tr: &Tracker| async {
+        //    let mut _no_of_times_connect_request_timeout = 0;
+        //    loop {
+        //        match timeout(timeout_duration(_no_of_times_connect_request_timeout), tr.sendConnectRequest(socket.clone())) {
+        //            _ => {}
+        //        }
+        //        //    match timeout(Duration::from_secs(15 + 2 ^ no_of_times_connect_request_timeout), receiver_borrow_mut.recv()).await {
+        //    }
+        //};
+
+        //        let tracker_lock = tracker.lock().await;
+        //        let socket_adr = tracker_lock.socket_adr.unwrap();
+        //        drop(tracker_lock);
+        //        let mut receiver_borrow_mut = receiver.borrow_mut();
+        //        if let Ok(_) = connect_request(TRANS_ID, &udp_socket, &socket_adr, tracker.clone()).await {
+        //            //
+        //            // Waits for 15 * 2 ^ n seconds, where n is from 0 to 8 => (3840 seconds), for Connect Response to come
+        //            //
+        //            match timeout(Duration::from_secs(15 + 2 ^ no_of_times_connect_request_timeout), receiver_borrow_mut.recv()).await {
+        //                //
+        //                Ok(v) => {
+        //                    no_of_times_connect_request_timeout = 0;
+        //                    let buf = v.unwrap();
+        //                    let mut action_bytes = &buf[0..=3];
+        //                    let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
+        //
+        //                    // Action = 0 means it's "Connect Response"
+        //                    if action == 0 {
+        //                        let connect_response = ConnectResponse::from(buf);
+        //                        if let Ok(_) = annnounce_request(connect_response, &udp_socket, &socket_adr, details.clone(), tracker.clone()).await {}
+        //                        match timeout(Duration::from_secs(10), receiver_borrow_mut.recv()).await {
+        //                            Ok(v) => {
+        //                                let announce_response = AnnounceResponse::new(v.as_ref().unwrap()).unwrap();
+        //                                peers_sender.send(announce_response.peersAddresses).await.unwrap();
+        //                                sleep(Duration::from_secs(announce_response.interval as u64)).await;
+        //                            }
+        //                            _ => {}
+        //                        }
+        //                    }
+        //                }
+        //                Err(_) => {
+        //                    no_of_times_connect_request_timeout += 1;
+        //                }
+        //            };
+        //        } else {
+        //            // This else portion runs when a Tracker Socket cant be reached, in this condition we
+        //            // will poll the tracker again after 15 * 2 ^ n
+        //            //
+        //            // Waits for  seconds, where n is from 0 to 8 => (3840 seconds), for Connect Response to come
+        //            // println!("Some error");
+        //            sleep(Duration::from_secs(14 + 2 ^ no_of_times_connect_request_timeout)).await;
+        //            if !no_of_times_connect_request_timeout == 8 {
+        //                no_of_times_connect_request_timeout += 1;
+        //            }
+        //        }
+        //        sleep(Duration::from_secs(1)).await;
+        //    }
+        //}
+    }
+
+    // NOTE : This function must run concurrently with sendTrackersRequests function and vice versa
     async fn receiveTrackersResponse(&self, socket: Arc<UdpSocket>) {
         loop {
             // Replace this vector with bytes mutj
@@ -203,7 +268,7 @@ impl TorrentFile {
                     for trackers in trackers.iter() {
                         for tracker in trackers {
                             if tracker.isEqualTo(s_addrs) {
-                                if let Some((ref sd, _)) = tracker.udp_channel {
+                                if let Some((ref sd, _)) = tracker.lock().await.udp_channel {
                                     sd.send(buf.clone());
                                 }
                             }
