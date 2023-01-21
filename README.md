@@ -27,7 +27,7 @@ Supported BEP's:
 
 - ✅ [BEP15](http://www.bittorrent.org/beps/bep_0015.html) : UDP Tracker Protocol (Implements partially, except scrape req and res)
 - ✅ [BEP12](http://bittorrent.org/beps/bep_0012.html) : MultiTracker Metadat Extension
-
+- ✅ [BEP20](https://www.bittorrent.org/beps/bep_0020.html) : Peer ID Convention
 
 TODO : 
 - ✅ Implement the ".torrent" file parser
