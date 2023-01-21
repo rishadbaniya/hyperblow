@@ -1,6 +1,6 @@
 use crate::core::{tracker::Tracker, File};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 #[derive(Debug)]
 pub enum DownState {
@@ -24,7 +24,7 @@ pub struct State {
     pub file_tree: Option<Arc<Mutex<File>>>,
 
     /// The trackers of the torrent file
-    pub trackers: Arc<Mutex<Vec<Vec<Tracker>>>>,
+    pub trackers: Arc<Mutex<Vec<Vec<Arc<RwLock<Tracker>>>>>>,
 
     /// A list of UDP ports being used by this torrent being downloaded
     pub udp_ports: Arc<Mutex<Vec<u16>>>,
