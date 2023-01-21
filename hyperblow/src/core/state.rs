@@ -24,7 +24,7 @@ pub struct State {
     pub file_tree: Option<Arc<Mutex<File>>>,
 
     /// The trackers of the torrent file
-    pub trackers: Arc<Mutex<Vec<Vec<Arc<RwLock<Tracker>>>>>>,
+    pub trackers: Arc<RwLock<Vec<Vec<Arc<Tracker>>>>>,
 
     /// A list of UDP ports being used by this torrent being downloaded
     pub udp_ports: Arc<Mutex<Vec<u16>>>,

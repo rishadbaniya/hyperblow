@@ -1,9 +1,11 @@
+#![allow(unused_must_use)]
+
 use crate::core::state::{DownState, State};
 use crate::core::tracker::Tracker;
 use crate::core::File;
-use crate::ArcMutex;
+use crate::{ArcMutex, ArcRwLock};
 use futures::channel::mpsc::UnboundedReceiver;
-use futures::future::join;
+use futures::future::{join, join_all};
 use futures::stream::FuturesUnordered;
 use futures::{join, FutureExt, StreamExt};
 use hyperblow_parser::torrent_parser::FileMeta;
@@ -72,7 +74,7 @@ impl TorrentFile {
                 let state = Arc::new(State {
                     d_state: DownState::Unknown,
                     file_tree: Some(TorrentFile::generateFileTree(&meta_info).await),
-                    trackers: ArcMutex!(vec![]),
+                    trackers: ArcRwLock!(vec![]),
                     udp_ports: ArcMutex!(Vec::new()),
                     tcp_ports: ArcMutex!(Vec::new()),
                 });
@@ -96,7 +98,7 @@ impl TorrentFile {
     /// and then resolves their address through DNS lookup
     async fn resolveTrackers(&self) -> Result<(), TError> {
         let trackers = self.state.trackers.clone();
-        let mut tracker_s: Vec<Vec<Arc<RwLock<Tracker>>>> = Vec::new(); // Stores the resolved trackers
+        let mut tracker_s: Vec<Vec<Arc<Tracker>>> = Vec::new(); // Stores the resolved trackers
 
         // According to BEP12, if announce_list field is present then the client will have to
         // ignore the announce field as the URL in the announce field is already present in the
@@ -107,7 +109,7 @@ impl TorrentFile {
         // is done
         if let Some(ref d) = self.meta_info.announce_list {
             for i in d {
-                let x: Vec<Arc<RwLock<Tracker>>> = {
+                let x: Vec<Arc<Tracker>> = {
                     let mut trackers = vec![];
                     for addrs in i {
                         // This tries to parse the given URL and if it parses successfully then
@@ -116,7 +118,7 @@ impl TorrentFile {
                             // TODO : Figure out what to do to those trackers who DNS wasn't
                             // resolved, whether to try after a certain time or what
                             if tracker.resolveSocketAddr() {
-                                trackers.push(Arc::new(RwLock::new(tracker)));
+                                trackers.push(Arc::new(tracker));
                             }
                         }
                     }
@@ -127,7 +129,7 @@ impl TorrentFile {
         } else {
             if let Ok(mut tracker) = Tracker::new(&self.meta_info.announce) {
                 if tracker.resolveSocketAddr() {
-                    tracker_s.push(vec![Arc::new(RwLock::new(tracker))]);
+                    tracker_s.push(vec![Arc::new(tracker)]);
                 }
             }
         }
@@ -135,7 +137,7 @@ impl TorrentFile {
         return if tracker_s.len() == 0 {
             Err(TError::NoTrackerResolved)
         } else {
-            *(trackers.lock().await) = tracker_s;
+            *(trackers.write().await) = tracker_s;
             return Ok(());
         };
     }
@@ -169,6 +171,58 @@ impl TorrentFile {
         }
     }
 
+    async fn sendTrackersRequests(&self, socket: Arc<UdpSocket>) {
+        // Runs i.e invokes the run() method of all the Trackers and then pushes the future
+        let mut all_trackers_task = Vec::new();
+
+        let trackers = self.state.trackers.read().await;
+        for trackers in trackers.iter() {
+            for tracker in trackers {
+                let _socket = socket.clone();
+                let _tracker = tracker.clone();
+                all_trackers_task.push(async move {
+                    println!("CALLED THE TASK");
+                    _tracker.run(_socket).await
+                });
+            }
+        }
+
+        // Polls all future to run them concurrently
+        join_all(all_trackers_task).await;
+    }
+
+    // NOTE : This function must run concurrently with sendTrackersRequests function and vice versa
+    async fn receiveTrackersResponse(&self, socket: Arc<UdpSocket>) {
+        loop {
+            // TODO : Replace this vector with BytesMut or something better if possible
+            let mut buf = bytes::BytesMut::new();
+            println!("JUST HERE TO RECEIVE SOME STUFF");
+            match socket.recv_from(&mut buf).await {
+                Ok((_len, ref s_addrs)) => {
+                    println!("The data i got is {:?} and from {:?}", buf, s_addrs);
+                    // NOTE : I could've stored all trackers in the top scope of this
+                    // receiveTrackersResponse function, so that i don't have to await. But, the
+                    // problem is of BEP12, where i have to constantly arrange the Trackers, this
+                    // changes the index in the self.state.trackers field
+                    let trackers = self.state.trackers.read().await;
+                    for trackers in trackers.iter() {
+                        for tracker in trackers {
+                            if tracker.isEqualTo(s_addrs) {
+                                if let Some((ref sd, _)) = tracker.udp_channel {
+                                    if !sd.is_closed() {
+                                        let x = buf.to_vec();
+                                        sd.send(x); // TODO : send() return Result<T>, might need to make use of Err ?. Figure out
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     // TODO : Handle the case for support of TCP Trackers as well
     // TorrentFile
     //Currently, im assuming that, the index of trackers is constant in state field of
@@ -189,108 +243,8 @@ impl TorrentFile {
         join!(req, res);
     }
 
-    async fn sendTrackersRequests(&self, socket: Arc<UdpSocket>) {
-        // Sets the timeout duration for the requests
-        let timeout_duration = |n: u64| Duration::from_secs(15 + 2 ^ n);
-
-        //let tracker_rq = |tr: &Tracker| async {
-        //    let mut _no_of_times_connect_request_timeout = 0;
-        //    loop {
-        //        match timeout(timeout_duration(_no_of_times_connect_request_timeout), tr.sendConnectRequest(socket.clone())) {
-        //            _ => {}
-        //        }
-        //        //    match timeout(Duration::from_secs(15 + 2 ^ no_of_times_connect_request_timeout), receiver_borrow_mut.recv()).await {
-        //    }
-        //};
-
-        //        let tracker_lock = tracker.lock().await;
-        //        let socket_adr = tracker_lock.socket_adr.unwrap();
-        //        drop(tracker_lock);
-        //        let mut receiver_borrow_mut = receiver.borrow_mut();
-        //        if let Ok(_) = connect_request(TRANS_ID, &udp_socket, &socket_adr, tracker.clone()).await {
-        //            //
-        //            // Waits for 15 * 2 ^ n seconds, where n is from 0 to 8 => (3840 seconds), for Connect Response to come
-        //            //
-        //            match timeout(Duration::from_secs(15 + 2 ^ no_of_times_connect_request_timeout), receiver_borrow_mut.recv()).await {
-        //                //
-        //                Ok(v) => {
-        //                    no_of_times_connect_request_timeout = 0;
-        //                    let buf = v.unwrap();
-        //                    let mut action_bytes = &buf[0..=3];
-        //                    let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes).unwrap();
-        //
-        //                    // Action = 0 means it's "Connect Response"
-        //                    if action == 0 {
-        //                        let connect_response = ConnectResponse::from(buf);
-        //                        if let Ok(_) = annnounce_request(connect_response, &udp_socket, &socket_adr, details.clone(), tracker.clone()).await {}
-        //                        match timeout(Duration::from_secs(10), receiver_borrow_mut.recv()).await {
-        //                            Ok(v) => {
-        //                                let announce_response = AnnounceResponse::new(v.as_ref().unwrap()).unwrap();
-        //                                peers_sender.send(announce_response.peersAddresses).await.unwrap();
-        //                                sleep(Duration::from_secs(announce_response.interval as u64)).await;
-        //                            }
-        //                            _ => {}
-        //                        }
-        //                    }
-        //                }
-        //                Err(_) => {
-        //                    no_of_times_connect_request_timeout += 1;
-        //                }
-        //            };
-        //        } else {
-        //            // This else portion runs when a Tracker Socket cant be reached, in this condition we
-        //            // will poll the tracker again after 15 * 2 ^ n
-        //            //
-        //            // Waits for  seconds, where n is from 0 to 8 => (3840 seconds), for Connect Response to come
-        //            // println!("Some error");
-        //            sleep(Duration::from_secs(14 + 2 ^ no_of_times_connect_request_timeout)).await;
-        //            if !no_of_times_connect_request_timeout == 8 {
-        //                no_of_times_connect_request_timeout += 1;
-        //            }
-        //        }
-        //        sleep(Duration::from_secs(1)).await;
-        //    }
-        //}
-    }
-
-    // NOTE : This function must run concurrently with sendTrackersRequests function and vice versa
-    async fn receiveTrackersResponse(&self, socket: Arc<UdpSocket>) {
-        loop {
-            // Replace this vector with bytes mutj
-            let mut buf: Vec<u8> = Vec::new();
-            match socket.recv_from(&mut buf).await {
-                Ok((_len, ref s_addrs)) => {
-                    // NOTE : I could've stored all trackers in the top scope of this
-                    // receiveTrackersResponse function, so that i don't have to await. But, the
-                    // problem is of BEP12, where i have to constantly arrange the Trackers, this
-                    // changes the index in the self.state.trackers field
-                    let trackers = self.state.trackers.lock().await;
-                    for trackers in trackers.iter() {
-                        for tracker in trackers {
-                            if tracker.isEqualTo(s_addrs) {
-                                if let Some((ref sd, _)) = tracker.lock().await.udp_channel {
-                                    sd.send(buf.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    //async fn () {
-    //}
-
-    //async fn sendTra
-
     pub async fn runDownload(&self) {
         // TODO: Run in a loop, but never return anything
-        for i in 1..=20000000 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-            println!("Does the download stuff here");
-        }
     }
 
     // TODO : Add examples for the rust docs
