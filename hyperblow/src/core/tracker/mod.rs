@@ -2,6 +2,7 @@
 
 mod announce_req_res;
 mod connect_req_res;
+mod error_res;
 
 //use announceReqRes::{AnnounceRequest, AnnounceResponse};
 //use connectReqRes::{ConnectRequest, ConnectResponse};
@@ -16,6 +17,8 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tokio::time::timeout;
+
+use self::connect_req_res::ConnectResponse;
 
 ///Type of protocol used to connect to the tracker
 #[derive(PartialEq, Debug, Clone)]
@@ -51,22 +54,22 @@ pub struct Tracker {
     pub udp_channel: Option<(UnboundedSender<Vec<u8>>, Arc<Mutex<UnboundedReceiver<Vec<u8>>>>)>,
 
     /// Data to make connect request
-    pub connect_request: Rc<RefCell<TrackerRequest>>,
+    pub connect_request: Arc<Mutex<TrackerRequest>>,
 
     /// Data received from connect request as response
-    pub connect_response: Rc<RefCell<TrackerResponse>>,
+    pub connect_response: Arc<Mutex<TrackerResponse>>,
 
     /// Data to make announce request
-    pub announce_request: Rc<RefCell<TrackerRequest>>,
+    pub announce_request: Arc<Mutex<TrackerRequest>>,
 
     /// Data received from announce request as response
-    pub announce_response: Rc<RefCell<TrackerResponse>>,
+    pub announce_response: Arc<Mutex<TrackerResponse>>,
 
     /// Data to make scrape request
-    pub scrape_request: Rc<RefCell<TrackerRequest>>,
+    pub scrape_request: Arc<Mutex<TrackerRequest>>,
 
     /// Data received from scrape request as response
-    pub scrape_response: Rc<RefCell<TrackerResponse>>,
+    pub scrape_response: Arc<Mutex<TrackerResponse>>,
 }
 
 impl Tracker {
@@ -74,14 +77,14 @@ impl Tracker {
     pub fn new(address: &String) -> Result<Tracker, Box<dyn std::error::Error>> {
         let address = Url::parse(address)?;
 
-        let connect_request = Rc::new(RefCell::new(TrackerRequest::None));
-        let connect_response = Rc::new(RefCell::new(TrackerResponse::None));
+        let connect_request = ArcMutex!(TrackerRequest::None);
+        let connect_response = ArcMutex!(TrackerResponse::None);
 
-        let announce_request = Rc::new(RefCell::new(TrackerRequest::None));
-        let announce_response = Rc::new(RefCell::new(TrackerResponse::None));
+        let announce_request = ArcMutex!(TrackerRequest::None);
+        let announce_response = ArcMutex!(TrackerResponse::None);
 
-        let scrape_request = Rc::new(RefCell::new(TrackerRequest::None));
-        let scrape_response = Rc::new(RefCell::new(TrackerResponse::None));
+        let scrape_request = ArcMutex!(TrackerRequest::None);
+        let scrape_response = ArcMutex!(TrackerResponse::None);
 
         // TODO: Find out the protocol, if its TCP or UDP for the tracker
         let protocol = TrackerProtocol::UDP;
@@ -132,26 +135,30 @@ impl Tracker {
     /// socket => Socket through which the tracker will send UDP request and receive UDP response
     pub async fn run(&self, socket: Arc<UdpSocket>) {
         let timeout_duration = |n: u64| Duration::from_secs(15 + 2 ^ n);
-
-        loop {
-            let mut no_of_times_connect_request_timeout = 0;
-            let sendConReq = self.sendConnectRequest(socket.clone());
-
-            match timeout(timeout_duration(no_of_times_connect_request_timeout), sendConReq).await {
-                Ok(v) => match v {
-                    Ok(_) => {}
-                    Err(e) => {
-                        // Error while sending ConnectRequest, probably some kind of socket issue
+        let mut no_of_times_connect_request_timeout = 0;
+        //loop {
+        let sendConReq = self.sendConnectRequest(socket.clone());
+        println!("CAME TO SEND REQUEST");
+        match timeout(timeout_duration(no_of_times_connect_request_timeout), sendConReq).await {
+            Ok(v) => match v {
+                Ok(_) => match self.getResponse().await {
+                    Some(res) => {
+                        println!("{:?}", res);
                     }
+                    None => {}
                 },
-                Err(_) => {
-                    // Connect Request timeout error
-                    if no_of_times_connect_request_timeout != 8 {
-                        no_of_times_connect_request_timeout += 1;
-                    }
+                Err(e) => {
+                    // Error while sending ConnectRequest, probably some kind of socket issue
+                }
+            },
+            Err(_) => {
+                // Connect Request timeout error
+                if no_of_times_connect_request_timeout != 8 {
+                    no_of_times_connect_request_timeout += 1;
                 }
             }
         }
+        //}
     }
 
     /// Creates a ConnectRequest instance and tries to send it through the given UDP Socket to the
@@ -183,7 +190,7 @@ impl Tracker {
         return match socket.send_to(connect_req_bytes.as_ref(), socketAddrs).await {
             Ok(_) => {
                 {
-                    let mut con_req = self.connect_request.borrow_mut();
+                    let mut con_req = self.connect_request.lock().await;
                     *con_req = TrackerRequest::ConnectRequest(connect_req);
                 }
                 Ok(())
@@ -199,17 +206,28 @@ impl Tracker {
         let (_, rx) = self.udp_channel.as_ref().unwrap();
         let mut rx = rx.lock().await;
 
-        match rx.recv().await {
-            Some(x) => {
+        return match rx.recv().await {
+            Some(d) => {
+                println!("{:?}", d);
                 // Check for ConnectResponse
+                if self.isConnectResponse(&d).await {
+                    return if let Ok(cr) = ConnectResponse::from(&d) {
+                        Some(TrackerResponse::ConnectResponse(cr))
+                    } else {
+                        Some(TrackerResponse::None)
+                    };
+                } else if self.isAnnounceResponse(&d).await {
+                    Some(TrackerResponse::None)
+                } else {
+                    Some(TrackerResponse::None)
+                }
             }
-            None => {}
+            None => None,
         };
-        None
     }
 
-    /// Checks from the given buffer, if it's a ConnectResponse or not
-    pub fn isConnectResponse(&self, d: &Vec<u8>) -> bool {
+    /// Checks from the given buffer, if the given response is a ConnectResponse or not
+    pub async fn isConnectResponse(&self, d: &[u8]) -> bool {
         // Check whether the packet is atleast 16 bytes
         if d.len() >= 16 {
             let mut action_bytes = &d[0..=3];
@@ -219,7 +237,7 @@ impl Tracker {
                     let mut transaction_id_bytes = &d[4..=7];
                     if let Ok(transaction_id) = ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes) {
                         let connect_req_transaction_id = {
-                            let connect_request = self.connect_request.borrow();
+                            let connect_request = self.connect_request.lock().await;
                             if let TrackerRequest::ConnectRequest(ref connect_request) = *connect_request {
                                 connect_request.transaction_id
                             } else {
@@ -243,15 +261,32 @@ impl Tracker {
         }
         return false;
     }
+
+    /// Checks from the given buffer, if it's a ConnectResponse or not
+    pub async fn isAnnounceResponse(&self, d: &[u8]) -> bool {
+        false // Dummy
+    }
+
+    pub async fn isScrapeResponse(&self, d: &[u8]) -> bool {
+        false // Dummy
+    }
+
+    /// Checks from the given buffer, if the given response is an Error or not
+    pub async fn isErrorResponse(&self, d: &[u8]) -> bool {
+        //let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes);
+        false //dummy
+    }
 }
 
 #[derive(Debug)]
-enum TrackerResponse {
+pub enum TrackerResponse {
+    ConnectResponse(ConnectResponse),
+    Error,
     None,
 }
 
 #[derive(Debug)]
-enum TrackerRequest {
+pub enum TrackerRequest {
     ConnectRequest(ConnectRequest),
     //AnnounceRequest(AnnounceRequest),
     None,
