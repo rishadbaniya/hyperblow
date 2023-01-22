@@ -28,7 +28,7 @@ use std::net::{IpAddr, Ipv4Addr};
 pub struct AnnounceRequest {
     connection_id: Option<i64>,
     action: i32,
-    transaction_id: Option<i32>,
+    pub transaction_id: Option<i32>,
     info_hash: Option<Vec<u8>>,
     peer_id: Option<[u8; 20]>,
     downloaded: Option<i64>,
@@ -43,8 +43,8 @@ pub struct AnnounceRequest {
 
 impl AnnounceRequest {
     // Creates an empty Announce instance
-    pub fn empty() -> Self {
-        let peer_id_slice = b"-HYBxxx-yyyyyyyyyyyy";
+    pub fn new() -> Self {
+        let peer_id_slice = b"-HBYxxx-QMAXYDGHQAHF";
         let mut peer_id = [0u8; 20];
         for (index, value) in peer_id_slice.iter().enumerate() {
             peer_id[index] = *value;
@@ -68,22 +68,22 @@ impl AnnounceRequest {
 
     // Consumes the Announce instance and gives you a Buffer of 98 bytes that you
     // can use to make Announce Request in UDP
-    pub fn getBytesMut(&self) -> BytesMut {
+    pub fn serialize_to_bytes(&self) -> Option<BytesMut> {
         let mut bytes = BytesMut::with_capacity(98);
-        bytes.put_i64(self.connection_id.unwrap());
+        bytes.put_i64(self.connection_id?);
         bytes.put_i32(self.action);
-        bytes.put_i32(self.transaction_id.unwrap());
-        bytes.put_slice(&self.info_hash.as_ref().unwrap()[..]);
-        bytes.put_slice(&self.peer_id.unwrap());
-        bytes.put_i64(self.downloaded.unwrap());
-        bytes.put_i64(self.left.unwrap());
-        bytes.put_i64(self.uploaded.unwrap());
-        bytes.put_i32(self.event.unwrap());
-        bytes.put_i32(self.ip_address.unwrap());
-        bytes.put_i32(self.key.unwrap());
+        bytes.put_i32(self.transaction_id?);
+        bytes.put_slice(&self.info_hash.as_ref()?[..]);
+        bytes.put_slice(&self.peer_id?);
+        bytes.put_i64(self.downloaded?);
+        bytes.put_i64(self.left?);
+        bytes.put_i64(self.uploaded?);
+        bytes.put_i32(self.event?);
+        bytes.put_i32(self.ip_address?);
+        bytes.put_i32(self.key?);
         bytes.put_i32(self.num_want);
-        bytes.put_i16(self.port.unwrap());
-        bytes
+        bytes.put_i16(self.port?);
+        Some(bytes)
     }
 
     pub fn set_connection_id(&mut self, v: i64) {
@@ -94,8 +94,8 @@ impl AnnounceRequest {
         self.transaction_id = Some(v);
     }
 
-    pub fn set_info_hash(&mut self, v: Vec<u8>) {
-        self.info_hash = Some(v);
+    pub fn set_info_hash(&mut self, v: &[u8]) {
+        self.info_hash = Some(v.to_vec());
     }
 
     pub fn set_downloaded(&mut self, v: i64) {
@@ -147,7 +147,7 @@ impl AnnounceResponse {
     ///
     /// The error produced here are the IO errors from parsing the given buffer bytes into
     /// respective types
-    pub fn new(v: &[u8]) -> Result<Self, std::io::Error> {
+    pub fn from(v: &[u8]) -> Result<Self, std::io::Error> {
         let mut action_bytes = &v[0..=3];
         let mut transaction_id_bytes = &v[4..=7];
         let mut interval_bytes = &v[8..=11];

@@ -4,16 +4,12 @@ use crate::core::state::{DownState, State};
 use crate::core::tracker::Tracker;
 use crate::core::File;
 use crate::{ArcMutex, ArcRwLock};
-use futures::channel::mpsc::UnboundedReceiver;
-use futures::future::{join, join_all};
-use futures::stream::FuturesUnordered;
-use futures::{join, FutureExt, StreamExt};
+use futures::future::join_all;
 use hyperblow_parser::torrent_parser::FileMeta;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::oneshot::{self, Sender};
+use tokio::join;
 use tokio::sync::RwLock;
-use tokio::{net::UdpSocket, sync::Mutex, task::JoinHandle, time::timeout};
+use tokio::{net::UdpSocket, sync::Mutex, task::JoinHandle};
 
 const TRANS_ID: i32 = 10;
 
@@ -37,20 +33,11 @@ pub struct TorrentFile {
     /// Path of the torrent file
     pub path: String,
 
-    /// Info hash of the torrent
-    pub info_hash: Vec<u8>,
-
     /// DataStructure that holds metadata about the date encoded inside of ".torrent" file
     pub meta_info: FileMeta,
 
-    /// Stores the hash of each piece by its exact index extracted out of bencode encoded ".torrent" file
-    pub pieces_hash: Vec<[u8; 20]>,
-
     /// Stores the total no of pieces
-    pub piecesCount: usize,
-
-    /// Total size of the entire torrent file in bytes
-    pub totalSize: usize,
+    pub pieces_count: usize,
 
     /// The data that changes during runtime and gets observed by other entity to display the
     /// progress.
@@ -70,23 +57,30 @@ impl TorrentFile {
             Ok(meta_info) => {
                 let info_hash = meta_info.generateInfoHash();
                 let pieces_hash = meta_info.getPiecesHash();
+                let pieces_count = pieces_hash.len();
+                let d_state = DownState::Unknown;
+                let file_tree = Some(TorrentFile::generateFileTree(&meta_info).await);
+                let trackers = ArcRwLock!(Vec::new());
+                let udp_ports = ArcMutex!(Vec::new());
+                let tcp_ports = ArcMutex!(Vec::new());
+                let total_size = 0; // TODO : Replace it with actual total size of the torrent
 
                 let state = Arc::new(State {
-                    d_state: DownState::Unknown,
-                    file_tree: Some(TorrentFile::generateFileTree(&meta_info).await),
-                    trackers: ArcRwLock!(vec![]),
-                    udp_ports: ArcMutex!(Vec::new()),
-                    tcp_ports: ArcMutex!(Vec::new()),
+                    d_state,
+                    file_tree,
+                    trackers,
+                    udp_ports,
+                    tcp_ports,
+                    info_hash,
+                    total_size,
+                    pieces_hash,
                 });
 
                 Some(TorrentFile {
                     path: path.to_string(),
-                    info_hash,
-                    piecesCount: pieces_hash.len(),
-                    pieces_hash,
+                    pieces_count,
                     meta_info,
                     state,
-                    totalSize: 0, // TODO : Replace it with actual total size of the torrent
                 })
             }
             _ => None,
@@ -114,7 +108,8 @@ impl TorrentFile {
                     for addrs in i {
                         // This tries to parse the given URL and if it parses successfully then
                         // signals to resolve the socket address
-                        if let Ok(mut tracker) = Tracker::new(addrs) {
+                        let torrent_state = self.state.clone();
+                        if let Ok(mut tracker) = Tracker::new(addrs, torrent_state) {
                             // TODO : Figure out what to do to those trackers who DNS wasn't
                             // resolved, whether to try after a certain time or what
                             if tracker.resolveSocketAddr() {
@@ -127,7 +122,9 @@ impl TorrentFile {
                 tracker_s.push(x);
             }
         } else {
-            if let Ok(mut tracker) = Tracker::new(&self.meta_info.announce) {
+            let ref addrs = self.meta_info.announce;
+            let torrent_state = self.state.clone();
+            if let Ok(mut tracker) = Tracker::new(addrs, torrent_state) {
                 if tracker.resolveSocketAddr() {
                     tracker_s.push(vec![Arc::new(tracker)]);
                 }
@@ -171,8 +168,11 @@ impl TorrentFile {
         }
     }
 
-    async fn sendTrackersRequests(&self, socket: Arc<UdpSocket>) {
-        // Runs i.e invokes the run() method of all the Trackers and then pushes the future
+    /// It runs all the trackers concurrently.
+    ///
+    /// This function must run concurrently with receive_trackers_response() function
+    async fn send_trackers_requests(&self, socket: Arc<UdpSocket>) {
+        // Run i.e invoke the run() method of all the Trackers and then push the future
         let mut all_trackers_task = Vec::new();
 
         let trackers = self.state.trackers.read().await;
@@ -180,10 +180,7 @@ impl TorrentFile {
             for tracker in trackers {
                 let _socket = socket.clone();
                 let _tracker = tracker.clone();
-                all_trackers_task.push(async move {
-                    println!("CALLED THE TASK");
-                    _tracker.run(_socket).await
-                });
+                all_trackers_task.push(async move { _tracker.run(_socket).await });
             }
         }
 
@@ -191,17 +188,20 @@ impl TorrentFile {
         join_all(all_trackers_task).await;
     }
 
-    // NOTE : This function must run concurrently with sendTrackersRequests function and vice versa
-    async fn receiveTrackersResponse(&self, socket: Arc<UdpSocket>) {
+    /// It simply waits on the UDP, socket. When some data arrives on the socket, it simply
+    /// reads that data, length, SocketAddr from which the data came and thereafter it sends the
+    /// data to the required channel of tracker that's waiting for data
+    ///
+    /// This function must run concurrently with send_trackers_requests() function
+    async fn receive_trackers_response(&self, socket: Arc<UdpSocket>) {
         loop {
-            // TODO : Replace this vector with BytesMut or something better if possible
-            let mut buf = bytes::BytesMut::new();
-            println!("JUST HERE TO RECEIVE SOME STUFF");
+            // A buffer of 4KiB capacity
+            let mut buf = [0; 4096];
             match socket.recv_from(&mut buf).await {
-                Ok((_len, ref s_addrs)) => {
-                    println!("The data i got is {:?} and from {:?}", buf, s_addrs);
+                Ok((len, ref s_addrs)) => {
+                    println!("{:?}", len);
                     // NOTE : I could've stored all trackers in the top scope of this
-                    // receiveTrackersResponse function, so that i don't have to await. But, the
+                    // receive_trackers_response() function, so that i don't have to await. But, the
                     // problem is of BEP12, where i have to constantly arrange the Trackers, this
                     // changes the index in the self.state.trackers field
                     let trackers = self.state.trackers.read().await;
@@ -210,8 +210,9 @@ impl TorrentFile {
                             if tracker.isEqualTo(s_addrs) {
                                 if let Some((ref sd, _)) = tracker.udp_channel {
                                     if !sd.is_closed() {
-                                        let x = buf.to_vec();
-                                        sd.send(x); // TODO : send() return Result<T>, might need to make use of Err ?. Figure out
+                                        let mut buf = buf.to_vec();
+                                        buf.truncate(len);
+                                        sd.send(buf); // TODO : send() return Result<T>, might need to make use of Err ?. Figure out
                                     }
                                 }
                             }
@@ -238,8 +239,8 @@ impl TorrentFile {
         // In the first async task of 'req', it spawns 'n' no of tasks within itself, and these each task make a
         // request and for every response that comes in the socket, its handled by second async
         // task of 'res
-        let req = self.sendTrackersRequests(socket.clone());
-        let res = self.receiveTrackersResponse(socket);
+        let req = self.send_trackers_requests(socket.clone());
+        let res = self.receive_trackers_response(socket);
         join!(req, res);
     }
 

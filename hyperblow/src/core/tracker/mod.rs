@@ -4,21 +4,22 @@ mod announce_req_res;
 mod connect_req_res;
 mod error_res;
 
-//use announceReqRes::{AnnounceRequest, AnnounceResponse};
-//use connectReqRes::{ConnectRequest, ConnectResponse};
+use crate::core::state::State;
 use crate::ArcMutex;
 use byteorder::{BigEndian, ReadBytesExt};
-use connect_req_res::ConnectRequest;
+use rand::{thread_rng, Rng};
 use reqwest::Url;
 use std::cmp::PartialEq;
-use std::{cell::RefCell, io, net::SocketAddr, rc::Rc, sync::Arc, time::Duration};
+use std::time::Instant;
+use std::{io, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
-use self::connect_req_res::ConnectResponse;
+use self::announce_req_res::{AnnounceRequest, AnnounceResponse};
+use self::connect_req_res::{ConnectRequest, ConnectResponse};
 
 ///Type of protocol used to connect to the tracker
 #[derive(PartialEq, Debug, Clone)]
@@ -39,6 +40,9 @@ pub enum TrackerProtocol {
 ///One way to avoid using Trackers is using DHT(Distributed Hash Table).
 #[derive(Debug)]
 pub struct Tracker {
+    /// The state of the torrent file
+    pub torrent_state: Arc<State>,
+
     /// A Url instance of reqwest crate, because it supports DNS resolving as well as distinctly parses the given string of URL
     pub address: Url,
 
@@ -70,11 +74,12 @@ pub struct Tracker {
 
     /// Data received from scrape request as response
     pub scrape_response: Arc<Mutex<TrackerResponse>>,
+    // TODO : Store UDP Socket here in the struct
 }
 
 impl Tracker {
     /// Tries to create a Tracker instance by parsing the given url
-    pub fn new(address: &String) -> Result<Tracker, Box<dyn std::error::Error>> {
+    pub fn new(address: &String, torrent_state: Arc<State>) -> Result<Tracker, Box<dyn std::error::Error>> {
         let address = Url::parse(address)?;
 
         let connect_request = ArcMutex!(TrackerRequest::None);
@@ -96,6 +101,7 @@ impl Tracker {
         };
 
         Ok(Tracker {
+            torrent_state,
             address,
             socketAddrs: None,
             protocol,
@@ -134,16 +140,72 @@ impl Tracker {
     /// Starts running the tracker
     /// socket => Socket through which the tracker will send UDP request and receive UDP response
     pub async fn run(&self, socket: Arc<UdpSocket>) {
+        // A timeout duration for all types of responses
         let timeout_duration = |n: u64| Duration::from_secs(15 + 2 ^ n);
+
         let mut no_of_times_connect_request_timeout = 0;
         //loop {
+
         let sendConReq = self.sendConnectRequest(socket.clone());
-        println!("CAME TO SEND REQUEST");
         match timeout(timeout_duration(no_of_times_connect_request_timeout), sendConReq).await {
             Ok(v) => match v {
+                // TODO : Replace with get_connect_response();
                 Ok(_) => match self.getResponse().await {
                     Some(res) => {
-                        println!("{:?}", res);
+                        // Save the received ConnectResponse in self.connect_response
+                        {
+                            let mut connect_response = self.connect_response.lock().await;
+                            *connect_response = res;
+                        }
+
+                        // According to BEP-15, client can use a Connection ID until one minute after it has received it.
+                        //
+                        // This means we can't use the connection_id stored inside of ConnectResponse after 1 minute
+                        let connection_id_timeout_duration = Duration::from_secs(60);
+                        let duration_since_connect_response = Instant::now();
+
+                        // loop {
+                        let now = Instant::now();
+                        let now = now.duration_since(duration_since_connect_response);
+
+                        let mut no_of_times_announce_request_timeout = 0;
+                        if now <= connection_id_timeout_duration {
+                            match timeout(
+                                timeout_duration(no_of_times_announce_request_timeout),
+                                self.send_announce_request(socket.clone()),
+                            )
+                            .await
+                            {
+                                Ok(vv) => {
+                                    match vv {
+                                        // TODO : Replace with get_announce_response();
+                                        Ok(_) => match self.getResponse().await {
+                                            Some(res) => {
+                                                // Save the received AnnounceResponse in self.announannounce_response
+                                                {
+                                                    let mut announce_response = self.announce_response.lock().await;
+                                                    *announce_response = res;
+                                                }
+                                            }
+                                            None => {
+                                                println!("GOT ERROR");
+                                            }
+                                        },
+                                        Err(_) => {
+                                            if no_of_times_announce_request_timeout <= 8 {
+                                                no_of_times_announce_request_timeout += 1;
+                                            }
+                                            // Error while sending Announce Request, prolly some
+                                            // sort of socket issue
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    // Announce Request timeout error
+                                }
+                            }
+                        }
+                        //}
                     }
                     None => {}
                 },
@@ -153,7 +215,7 @@ impl Tracker {
             },
             Err(_) => {
                 // Connect Request timeout error
-                if no_of_times_connect_request_timeout != 8 {
+                if no_of_times_connect_request_timeout <= 8 {
                     no_of_times_connect_request_timeout += 1;
                 }
             }
@@ -189,37 +251,81 @@ impl Tracker {
 
         return match socket.send_to(connect_req_bytes.as_ref(), socketAddrs).await {
             Ok(_) => {
-                {
-                    let mut con_req = self.connect_request.lock().await;
-                    *con_req = TrackerRequest::ConnectRequest(connect_req);
-                }
+                let mut con_req = self.connect_request.lock().await;
+                *con_req = TrackerRequest::ConnectRequest(connect_req);
                 Ok(())
             }
             Err(e) => Err(e),
         };
     }
 
-    //pub async fn getConnectResponse() -> Option<ConnectRequest> {}
+    pub async fn send_announce_request(&self, socket: Arc<UdpSocket>) -> Result<(), io::Error> {
+        let mut announce_req = AnnounceRequest::new();
+        {
+            let connect_response = self.connect_response.lock().await;
+            if let TrackerResponse::ConnectResponse(ref c_res) = *connect_response {
+                announce_req.set_connection_id(c_res.connection_id);
+                announce_req.set_transaction_id(c_res.transaction_id);
+                announce_req.set_info_hash(&self.torrent_state.info_hash);
+                announce_req.set_downloaded(1000); // TODO : Replace with actual downloaded bytes
+                announce_req.set_uploaded(1000); // TODO : Replace with actual uploaded bytes
+                announce_req.set_left(5000); // TODO : Replace with actual left bytes
+                {
+                    let ports = self.torrent_state.udp_ports.lock().await;
+                    if let Some(port) = ports.get(0) {
+                        announce_req.set_port(*port as i16);
+                    }
+                }
+                let mut rng = thread_rng();
+                announce_req.set_key(rng.gen());
+            }
+        }
+
+        if let Some(announce_req_bytes) = announce_req.serialize_to_bytes() {
+            let socketAddrs = self.socketAddrs.as_ref().unwrap().get(0).unwrap();
+            return match socket.send_to(&announce_req_bytes, socketAddrs).await {
+                Ok(_) => {
+                    let mut ann_req = self.announce_request.lock().await;
+                    *ann_req = TrackerRequest::AnnounceRequest(announce_req);
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            };
+        } else {
+            println!("Error in serializing to bytes");
+            // TODO : Write else case
+        }
+
+        Ok(())
+    }
 
     /// It will return "None", when the channel is closed
     pub async fn getResponse(&self) -> Option<TrackerResponse> {
+        let NONE = Some(TrackerResponse::None);
         let (_, rx) = self.udp_channel.as_ref().unwrap();
         let mut rx = rx.lock().await;
 
         return match rx.recv().await {
             Some(d) => {
-                println!("{:?}", d);
                 // Check for ConnectResponse
                 if self.isConnectResponse(&d).await {
+                    println!("GOT A CONNECT RESPONSE HERE");
+
                     return if let Ok(cr) = ConnectResponse::from(&d) {
                         Some(TrackerResponse::ConnectResponse(cr))
                     } else {
-                        Some(TrackerResponse::None)
+                        NONE
                     };
                 } else if self.isAnnounceResponse(&d).await {
-                    Some(TrackerResponse::None)
+                    println!("GOT ANNOUNCE RESPONSE");
+
+                    return if let Ok(ar) = AnnounceResponse::from(&d) {
+                        Some(TrackerResponse::AnnounceResponse(ar))
+                    } else {
+                        NONE
+                    };
                 } else {
-                    Some(TrackerResponse::None)
+                    NONE
                 }
             }
             None => None,
@@ -228,6 +334,8 @@ impl Tracker {
 
     /// Checks from the given buffer, if the given response is a ConnectResponse or not
     pub async fn isConnectResponse(&self, d: &[u8]) -> bool {
+        let mut IS_CONNECT_RESPONSE = false;
+
         // Check whether the packet is atleast 16 bytes
         if d.len() >= 16 {
             let mut action_bytes = &d[0..=3];
@@ -248,23 +356,45 @@ impl Tracker {
                                 0
                             }
                         };
-                        // Check whether the transaction_id matches with the ConnectRequest or not
-                        return connect_req_transaction_id == transaction_id;
-                    } else {
-                        return false;
+                        // Check whether the transaction_id in ConnectRequest matches with the ConnectResponse or not
+                        IS_CONNECT_RESPONSE = connect_req_transaction_id == transaction_id;
                     }
                 }
-            } else {
-                return false;
             }
-            return true;
         }
-        return false;
+        return IS_CONNECT_RESPONSE;
     }
 
     /// Checks from the given buffer, if it's a ConnectResponse or not
     pub async fn isAnnounceResponse(&self, d: &[u8]) -> bool {
-        false // Dummy
+        let mut IS_ANNOUNCE_RESPONSE = false;
+        // Check whether the packet is atleast 16 bytes
+        if d.len() >= 20 {
+            let mut action_bytes = &d[0..=3];
+            if let Ok(action) = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes) {
+                // Check whether the action is Announce i.e 1
+                if action == 1 {
+                    let mut transaction_id_bytes = &d[4..=7];
+                    if let Ok(transaction_id) = ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes) {
+                        let announce_req_transaction_id = {
+                            let announce_request = self.announce_request.lock().await;
+                            if let TrackerRequest::AnnounceRequest(ref announce_request) = *announce_request {
+                                announce_request.transaction_id.unwrap()
+                            } else {
+                                // Make sure that you store a AnnounceRequest in the place of "self.announce_request"
+                                //
+                                // A random number just to make the function false in the next
+                                // step i.e comparing the connect re
+                                0
+                            }
+                        };
+                        IS_ANNOUNCE_RESPONSE = announce_req_transaction_id == transaction_id;
+                    }
+                }
+            }
+        }
+
+        return IS_ANNOUNCE_RESPONSE;
     }
 
     pub async fn isScrapeResponse(&self, d: &[u8]) -> bool {
@@ -281,6 +411,7 @@ impl Tracker {
 #[derive(Debug)]
 pub enum TrackerResponse {
     ConnectResponse(ConnectResponse),
+    AnnounceResponse(AnnounceResponse),
     Error,
     None,
 }
@@ -288,6 +419,6 @@ pub enum TrackerResponse {
 #[derive(Debug)]
 pub enum TrackerRequest {
     ConnectRequest(ConnectRequest),
-    //AnnounceRequest(AnnounceRequest),
+    AnnounceRequest(AnnounceRequest),
     None,
 }
