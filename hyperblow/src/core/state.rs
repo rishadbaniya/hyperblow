@@ -27,10 +27,21 @@ pub struct State {
     pub trackers: Arc<RwLock<Vec<Vec<Arc<Tracker>>>>>,
 
     /// A list of UDP ports being used by this torrent being downloaded
+    ///
+    /// The port at index 0, is the port used for UDP Trackers and it always exists
     pub udp_ports: Arc<Mutex<Vec<u16>>>,
 
     /// A list of TCP ports being used by this torrent being downloaded
     pub tcp_ports: Arc<Mutex<Vec<u16>>>,
+
+    /// Info hash of the torrent
+    pub info_hash: Vec<u8>,
+
+    /// Total size of the entire torrent file in bytes
+    pub total_size: usize,
+
+    /// Stores the hash of each piece by its exact index extracted out of bencode encoded ".torrent" file
+    pub pieces_hash: Vec<[u8; 20]>,
 }
 
 impl State {
