@@ -35,7 +35,7 @@ pub struct AnnounceRequest {
     left: Option<i64>,
     uploaded: Option<i64>,
     event: Option<i32>,
-    ip_address: Option<i32>,
+    ip_address: i32,
     key: Option<i32>,
     num_want: i32,
     port: Option<i16>,
@@ -59,7 +59,7 @@ impl AnnounceRequest {
             left: None,
             uploaded: None,
             event: Some(1),
-            ip_address: Some(0),
+            ip_address: 0,
             key: None,
             num_want: -1,
             port: None,
@@ -79,7 +79,7 @@ impl AnnounceRequest {
         bytes.put_i64(self.left?);
         bytes.put_i64(self.uploaded?);
         bytes.put_i32(self.event?);
-        bytes.put_i32(self.ip_address?);
+        bytes.put_i32(self.ip_address);
         bytes.put_i32(self.key?);
         bytes.put_i32(self.num_want);
         bytes.put_i16(self.port?);
