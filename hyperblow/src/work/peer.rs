@@ -17,55 +17,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
 
-impl Peer {
-    /// Creates a new peer instance by storing the "SocketAddr" of the
-    /// peer and storing the "Details" of the torrent
-    pub fn new(socket_adr: SocketAddr, details: __Details) -> Self {
-        let info = Arc::new(Mutex::new(PeerInfo {
-            pieces_have: Vec::new(),
-            pieces_not_have: Vec::new(),
-            peer_type: PeerType::UNKNOWN,
-        }));
-
-        Self {
-            status: PeerStatus::NOT_CONNECTED,
-            info,
-            tcp_sender: None,
-            tcp_receiver: None,
-            socket_adr,
-            details,
-        }
-    }
-
-    /// Tries to connect to the peer until CONNECTION_TIMEOUT or until some ERROR occurs
-    ///
-    /// It'll return Error if trying to connect fails, on such condition we should try to connect
-    /// to the peer again after X seconds, where X is any time defined by Developer
-    pub async fn try_connect(&mut self) -> Option<(TcpSender, TcpReceiver, UnboundedSender<Vec<Message>>)> {
-        // Waits for 60 seconds for connection to happen
-        let CONNECTION_TIMEOUT = Duration::from_secs(60);
-
-        match timeout(CONNECTION_TIMEOUT, TcpStream::connect(self.socket_adr)).await {
-            Ok(Ok(tcp_stream)) => {
-                // Channel to share Bittorent Messags between Read and Write Half
-                let (channel_sender, channel_receiver) = unbounded_channel::<Vec<Message>>();
-                //
-                let (read, write) = tcp_stream.into_split();
-
-                let tcp_receiver = TcpReceiver::new(read);
-                let tcp_sender = TcpSender::new(write, self.details.clone(), channel_receiver);
-
-                // Changes the PeerStatus to CONNECTED
-                self.status = PeerStatus::CONNECTED;
-
-                return Some((tcp_sender, tcp_receiver, channel_sender));
-            }
-            _ => {
-                return None;
-            }
-        }
-    }
-
     pub async fn get_peer_info(&self, messages: &mut Vec<Message>) {
         let mut peer_details = self.info.lock().await;
 
@@ -256,14 +207,6 @@ async fn messageHandler(bytes: &mut BytesMut, receiver: &mut TcpReceiver) -> Opt
 /// In order to make sure we are reding a complete data, what we will do is whenever some
 /// response comes we'll see the length of the data using "len" and compare it with the length
 /// mentioned in the "length_prefix" of the data:w
-pub struct TcpReceiver {
-    read_half: OwnedReadHalf,
-}
-impl TcpReceiver {
-    /// Creates a new TCPReceiver instance
-    fn new(read_half: OwnedReadHalf) -> Self {
-        Self { read_half }
-    }
 
     /// Reads on the TCP socket until a Message is found
     /// NOTE : On error, drop the connection!
@@ -309,17 +252,6 @@ impl TcpReceiver {
     }
 }
 
-/// A wrapper around write half of the TCPStream :
-pub struct TcpSender {
-    write_half: OwnedWriteHalf,
-    details: __Details,
-    receiver: UnboundedReceiver<Vec<Message>>,
-}
-
-impl TcpSender {
-    /// Creates a new TCPSender instance
-    fn new(write_half: OwnedWriteHalf, details: __Details, receiver: UnboundedReceiver<Vec<Message>>) -> Self {
-        Self { write_half, details, receiver }
     }
 
     /// Creates a HANDSHAKE message and sends the Handshake Message to the peer
@@ -425,44 +357,3 @@ impl TcpSender {
     }
 }
 
-/// Holds all the raw data of a piece and the piece's metadata
-pub struct Piece {
-    /// Zero based index of the piece
-    index: u32,
-    /// Raw data of the piece
-    data: BytesMut,
-    /// Computed Hash of the piece
-    hash: [u8; 20],
-}
-
-impl Piece {
-    /// Creates a Piece from all the blocks provided
-    /// We're gonna assume the blocks are in order
-    pub fn from_blocks(blocks: Vec<Block>) -> Self {
-        let mut data = BytesMut::new();
-
-        //Takes one of the block from blocks and gets the piece index
-        let index = blocks[0].piece_index;
-        for block in blocks {
-            data.put_slice(&block.raw_block);
-        }
-
-        // Get the sha1 hash of the piece data
-        let mut hasher = Sha1::new();
-        hasher.update(&data);
-        let hash: [u8; 20] = hasher.finalize().into();
-
-        Self { index, data, hash }
-    }
-    /// Checks the validity of the piece by tallying it with the hash provided as parameter, usually
-    /// we take hash of the piece from the ".torrent" and then pass the hash here into the
-    /// function and this function checks whether the hash mentioned in the ".torrent" file is
-    /// equal to the computed hash of the piece data
-    pub fn is_valid_piece(&self, hash: [u8; 20]) -> bool {
-        if hash == self.hash {
-            true
-        } else {
-            false
-        }
-    }
-}
