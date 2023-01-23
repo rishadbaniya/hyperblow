@@ -1,3 +1,4 @@
+mod peer;
 mod state;
 mod torrentFile;
 mod tracker;
@@ -5,7 +6,7 @@ mod tracker;
 use hyperblow_parser::torrent_parser::FileMeta;
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 pub use torrentFile::TorrentFile;
 
 #[macro_export]
