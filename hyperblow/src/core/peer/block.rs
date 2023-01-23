@@ -5,7 +5,7 @@ use crate::Result;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::BytesMut;
 
-/// Stores Block sent by peer as a response to "Request" message
+/// Stores Block sent by peer as a response to REQUEST message
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     /// Length of the data that follows "length" field

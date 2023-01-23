@@ -21,6 +21,8 @@ use tokio::time::{sleep, timeout};
 use self::announce_req_res::{AnnounceRequest, AnnounceResponse};
 use self::connect_req_res::{ConnectRequest, ConnectResponse};
 
+use super::peer::Peer;
+
 ///Type of protocol used to connect to the tracker
 #[derive(PartialEq, Debug, Clone)]
 pub enum TrackerProtocol {
@@ -311,6 +313,27 @@ impl Tracker {
         }
 
         Ok(())
+    }
+
+    /// It pushes the peers achieved from Announce into the "peers" field of
+    /// the "state" field of [Tracker]
+    ///
+    /// It checks, if the Peer already exists in the list, if it does, then it simply
+    /// pushes a pointer of the [Tracker] into the "info" field of the "tracker" field
+    /// of the [Peer]
+    ///
+    /// socket_adr : Socket Address of the peer that is to be pushed
+    async fn push_to_peers(&self, peer_socket_adr: SocketAddr) {
+        let mut peers = self.torrent_state.peers.lock().await;
+        let mut DOES_PEER_ALREADY_EXIST = false;
+
+        for peer in &(*peers) {
+            DOES_PEER_ALREADY_EXIST = (peer.socket_adr == peer_socket_adr);
+        }
+
+        if !DOES_PEER_ALREADY_EXIST {
+            peers.push(Peer::new(peer_socket_adr, self.torrent_state.clone()));
+        }
     }
 
     /// It will return "None", when the channel is closed

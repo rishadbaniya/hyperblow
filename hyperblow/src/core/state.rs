@@ -1,4 +1,4 @@
-use crate::core::{tracker::Tracker, File};
+use crate::core::{peer::Peer, tracker::Tracker, File};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -42,6 +42,9 @@ pub struct State {
 
     /// Stores the hash of each piece by its exact index extracted out of bencode encoded ".torrent" file
     pub pieces_hash: Vec<[u8; 20]>,
+
+    /// All the peers of the current session
+    pub peers: Arc<Mutex<Vec<Peer>>>,
 }
 
 impl State {
