@@ -64,6 +64,7 @@ impl TorrentFile {
                 let udp_ports = ArcMutex!(Vec::new());
                 let tcp_ports = ArcMutex!(Vec::new());
                 let total_size = 0; // TODO : Replace it with actual total size of the torrent
+                let peers = ArcMutex!(Vec::new());
 
                 let state = Arc::new(State {
                     d_state,
@@ -74,6 +75,7 @@ impl TorrentFile {
                     info_hash,
                     total_size,
                     pieces_hash,
+                    peers,
                 });
 
                 Some(TorrentFile {

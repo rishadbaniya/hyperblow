@@ -1,6 +1,7 @@
 use crate::ArcMutex;
 
 use super::state::State;
+use super::tracker::Tracker;
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
@@ -71,16 +72,19 @@ pub struct PeerInfo {
 #[derive(Debug)]
 pub struct Peer {
     /// An Owned Read Split Half of the connected TcpStream
-    tcp_read_half: Arc<Mutex<OwnedReadHalf>>,
+    tcp_read_half: Arc<Mutex<Option<OwnedReadHalf>>>,
 
     /// An Owned Write Split Half of the connected TcpStream
-    tcp_write_half: Arc<Mutex<OwnedWriteHalf>>,
+    tcp_write_half: Arc<Mutex<Option<OwnedWriteHalf>>>,
 
     /// Holds the information and state of the Peer
-    info: Arc<Mutex<PeerInfo>>,
+    pub info: Arc<Mutex<PeerInfo>>,
 
     /// State of this torrent session
     state: Arc<State>,
+
+    /// The socket address of the peer
+    pub socket_adr: SocketAddr,
 }
 
 impl Peer {
@@ -88,22 +92,23 @@ impl Peer {
     ///
     /// socket_adr : The Socket Address of the peer we're trying to connect with
     /// state : The State of teh torrent session
-    async fn new(socket_adr: SocketAddr, state: Arc<State>) -> Self {
+    pub fn new(socket_adr: SocketAddr, state: Arc<State>) -> Self {
         let info = ArcMutex!(PeerInfo {
             pieces_have: Vec::new(),
             pieces_not_have: Vec::new(),
             peer_type: PeerType::Unknown,
-            peer_state: PeerState::NotConnected
+            peer_state: PeerState::NotConnected,
         });
-        let (tcp_read_half, tcp_write_half) = Self::connect(socket_adr).await;
-        let tcp_read_half = ArcMutex!(tcp_read_half);
-        let tcp_write_half = ArcMutex!(tcp_write_half);
+
+        let tcp_read_half = ArcMutex!(None);
+        let tcp_write_half = ArcMutex!(None);
 
         Self {
             tcp_read_half,
             tcp_write_half,
             info,
             state,
+            socket_adr,
         }
     }
 
@@ -119,14 +124,16 @@ impl Peer {
     /// reliable enough to exchange pieces with the peer.
     ///
     /// TODO : Figure out the sleep duration for connection timeout
-    async fn connect(socket_adr: SocketAddr) -> (OwnedReadHalf, OwnedWriteHalf) {
+    async fn connect(&self, socket_adr: SocketAddr) {
         let CONNECTION_TIMEOUT = Duration::from_secs(16);
 
         loop {
             match timeout(CONNECTION_TIMEOUT, TcpStream::connect(socket_adr)).await {
                 Ok(connection) => match connection {
                     Ok(tcp_stream) => {
-                        return tcp_stream.into_split();
+                        let (tcp_read_half, tcp_write_half) = tcp_stream.into_split();
+                        (*self.tcp_write_half.lock().await) = Some(tcp_write_half);
+                        (*self.tcp_read_half.lock().await) = Some(tcp_read_half);
                     }
                     Err(_) => {
                         // Err while trying to achieve a TCP Connection with the peer
