@@ -17,59 +17,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
 
-/// Current state of the relationship with the Peer
-#[derive(Debug, Clone)]
-pub enum PeerStatus {
-    NOT_CONNECTED,
-    CONNECTED,
-    HANDHSAKING,
-    REQUESTING_PIECE,
-    DOWNLOADING_PIECE,
-}
-
-/// Type of Peer
-#[derive(Debug, Clone)]
-pub enum PeerType {
-    /// One that doesnt have all pieces and wants more piece
-    LEECHER,
-    /// One that has all the needed pieces
-    SEEDER,
-    /// One that has downloaded required files and doesnt wanna download other files
-    PARTIAL_SEEDER,
-    /// PeerType not figured out
-    UNKNOWN,
-}
-
-/// PeerInfo holds crucial informations about the Peer such as
-/// the pieces the peer has or doesn't have, if the peer is a Seeder or a Leecher
-///
-/// It should be created when the peer sends us some messages like BITFIELD, EXTENDED or HAVE
-///
-#[derive(Debug, Clone)]
-pub struct PeerInfo {
-    /// Zero based index of the piece the peer has
-    pieces_have: Vec<u32>,
-    /// Zero based index of the piece the peer does not have
-    pieces_not_have: Vec<u32>,
-    /// Whether the peer is a Seeder or Leecher
-    peer_type: PeerType,
-}
-
-pub struct Peer {
-    /// Current state of relationship between us and the peer
-    status: PeerStatus,
-    /// Holds information needed to download pieces
-    info: Arc<Mutex<PeerInfo>>,
-    /// Wrapper around OwnedWriteHalf of the TcpStream to send certain Bittorent Message as raw bytes to the peer
-    tcp_sender: Option<TcpSender>,
-    /// Wrapper around OwnedReadHalf of the TcpStream to receive raw bytes as certain Bittorent Message from the peer
-    tcp_receiver: Option<TcpReceiver>,
-    /// Socket address of the Peer
-    socket_adr: SocketAddr,
-    /// Details of the torrent file
-    details: __Details,
-}
-
 impl Peer {
     /// Creates a new peer instance by storing the "SocketAddr" of the
     /// peer and storing the "Details" of the torrent
