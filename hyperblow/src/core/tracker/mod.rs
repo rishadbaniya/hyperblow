@@ -16,7 +16,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 use self::announce_req_res::{AnnounceRequest, AnnounceResponse};
 use self::connect_req_res::{ConnectRequest, ConnectResponse};
@@ -144,83 +144,97 @@ impl Tracker {
         let timeout_duration = |n: u64| Duration::from_secs(15 + 2 ^ n);
 
         let mut no_of_times_connect_request_timeout = 0;
-        //loop {
 
-        let sendConReq = self.sendConnectRequest(socket.clone());
-        match timeout(timeout_duration(no_of_times_connect_request_timeout), sendConReq).await {
-            Ok(v) => match v {
-                // TODO : Replace with get_connect_response();
-                Ok(_) => match self.getResponse().await {
-                    Some(res) => {
-                        // Save the received ConnectResponse in self.connect_response
-                        {
-                            let mut connect_response = self.connect_response.lock().await;
-                            *connect_response = res;
-                        }
-
-                        // According to BEP-15, client can use a Connection ID until one minute after it has received it.
-                        //
-                        // This means we can't use the connection_id stored inside of ConnectResponse after 1 minute
-                        let connection_id_timeout_duration = Duration::from_secs(60);
-                        let duration_since_connect_response = Instant::now();
-
-                        // loop {
-                        let now = Instant::now();
-                        let now = now.duration_since(duration_since_connect_response);
-
-                        let mut no_of_times_announce_request_timeout = 0;
-                        if now <= connection_id_timeout_duration {
-                            match timeout(
-                                timeout_duration(no_of_times_announce_request_timeout),
-                                self.send_announce_request(socket.clone()),
-                            )
-                            .await
+        loop {
+            let sendConReq = self.sendConnectRequest(socket.clone());
+            match timeout(timeout_duration(no_of_times_connect_request_timeout), sendConReq).await {
+                Ok(v) => match v {
+                    // TODO : Replace with get_connect_response();
+                    Ok(_) => match self.getResponse().await {
+                        Some(res) => {
+                            // Save the received ConnectResponse in self.connect_response
                             {
-                                Ok(vv) => {
-                                    match vv {
-                                        // TODO : Replace with get_announce_response();
-                                        Ok(_) => match self.getResponse().await {
-                                            Some(res) => {
-                                                // Save the received AnnounceResponse in self.announannounce_response
-                                                {
-                                                    let mut announce_response = self.announce_response.lock().await;
-                                                    *announce_response = res;
+                                let mut connect_response = self.connect_response.lock().await;
+                                *connect_response = res;
+                            }
+
+                            // According to BEP-15, client can use a Connection ID until one minute after it has received it.
+                            //
+                            // This means we can't use the connection_id stored inside of ConnectResponse after 1 minute
+                            let connection_id_timeout_duration = Duration::from_secs(60);
+                            let duration_since_connect_response = Instant::now();
+
+                            'announce: loop {
+                                let now = Instant::now();
+                                let now = now.duration_since(duration_since_connect_response);
+
+                                let mut no_of_times_announce_request_timeout = 0;
+                                if now <= connection_id_timeout_duration {
+                                    match timeout(
+                                        timeout_duration(no_of_times_announce_request_timeout),
+                                        self.send_announce_request(socket.clone()),
+                                    )
+                                    .await
+                                    {
+                                        Ok(vv) => {
+                                            match vv {
+                                                // TODO : Replace with get_announce_response();
+                                                Ok(_) => match self.getResponse().await {
+                                                    Some(res) => {
+                                                        if let TrackerResponse::AnnounceResponse(ref ar) = res {
+                                                            let sleep_duration = Duration::from_secs(ar.interval as u64);
+                                                            {
+                                                                let mut announce_response = self.announce_response.lock().await;
+                                                                *announce_response = res;
+                                                            }
+                                                            sleep(sleep_duration).await;
+                                                            break 'announce;
+                                                        }
+
+                                                        // Save the received AnnounceResponse in self.announannounce_response
+                                                    }
+                                                    None => {
+                                                        println!("GOT ERROR");
+                                                    }
+                                                },
+                                                Err(e) => {
+                                                    // Error while sending AnnounceRequest, probably some kind of socket issue
+                                                    println!("CONNECT REQUEST SOCKET ISSUE {:?}", e.to_string());
+                                                    sleep(Duration::from_secs(1000)).await;
+                                                    // TODO : Replace this with some actual solution rather than sleeping
                                                 }
                                             }
-                                            None => {
-                                                println!("GOT ERROR");
-                                            }
-                                        },
+                                        }
                                         Err(_) => {
                                             if no_of_times_announce_request_timeout <= 8 {
                                                 no_of_times_announce_request_timeout += 1;
                                             }
-                                            // Error while sending Announce Request, prolly some
-                                            // sort of socket issue
+                                            // Announce Request timeout error
                                         }
                                     }
                                 }
-                                Err(_) => {
-                                    // Announce Request timeout error
-                                }
                             }
                         }
-                        //}
+                        None => {}
+                    },
+                    Err(e) => {
+                        // Error while sending ConnectRequest, probably some kind of socket issue
+                        println!("CONNECT REQUEST SOCKET ISSUE {:?}", e.to_string());
+                        sleep(Duration::from_secs(1000)).await;
+
+                        // TODO : Replace this with some actual solution rather than sleeping
                     }
-                    None => {}
                 },
-                Err(e) => {
-                    // Error while sending ConnectRequest, probably some kind of socket issue
-                }
-            },
-            Err(_) => {
-                // Connect Request timeout error
-                if no_of_times_connect_request_timeout <= 8 {
-                    no_of_times_connect_request_timeout += 1;
+                Err(_) => {
+                    println!("GOT TIMEOUT ERROR FOR CONNECT RESPONSE");
+                    // Connect Request timeout error
+                    if no_of_times_connect_request_timeout <= 8 {
+                        no_of_times_connect_request_timeout += 1;
+                    }
                 }
             }
+            println!("ENDED PRETTY QUICK");
         }
-        //}
     }
 
     /// Creates a ConnectRequest instance and tries to send it through the given UDP Socket to the

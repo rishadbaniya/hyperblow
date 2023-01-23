@@ -199,7 +199,6 @@ impl TorrentFile {
             let mut buf = [0; 4096];
             match socket.recv_from(&mut buf).await {
                 Ok((len, ref s_addrs)) => {
-                    println!("{:?}", len);
                     // NOTE : I could've stored all trackers in the top scope of this
                     // receive_trackers_response() function, so that i don't have to await. But, the
                     // problem is of BEP12, where i have to constantly arrange the Trackers, this
