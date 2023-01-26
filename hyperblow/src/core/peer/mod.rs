@@ -1,9 +1,15 @@
-use crate::ArcMutex;
+mod block;
+mod messages;
+mod piece;
 
 use super::state::State;
-use super::tracker::Tracker;
+use crate::ArcMutex;
+use messages::Handshake;
+use messages::Message;
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::{
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -12,6 +18,7 @@ use tokio::{
     sync::Mutex,
     time::{sleep, timeout},
 };
+use tokio_util::codec::{Decoder, Encoder};
 
 /// PeerState denotes high level overview of the
 /// current state of relationship with the Peer
@@ -113,17 +120,17 @@ impl Peer {
     }
 
     /// It will run infinitely, non blockingly, until it gets a TCP connection with the given
-    ///
     /// socket address
     ///
-    /// A 16 seconds of connection timeout time is kept to make a reliable
-    /// TCP Connection with the peer.
+    /// A 16 seconds of connection timeout time is kept to make a reliable TCP Connection
+    /// with the peer.
     ///
-    /// A higher connection timeout time could be added too, but even if we get a
-    /// TCP Connection keeping the timeout higher, the connection won't be
-    /// reliable enough to exchange pieces with the peer.
+    /// A higher connection timeout time could be added too, but even if we get a TCP
+    /// Connection keeping the timeout higher, the connection won't be reliable enough
+    /// to exchange pieces with the peer.
     ///
-    /// TODO : Figure out the sleep duration for connection timeout
+    /// TODO : Figure out the sleep duration for connection timeout or socket error, i.e after a
+    /// socket error or connection timeout, figure out the time until next connection attempt
     async fn connect(&self, socket_adr: SocketAddr) {
         let CONNECTION_TIMEOUT = Duration::from_secs(16);
 
@@ -152,47 +159,68 @@ impl Peer {
         }
     }
 
-    /// Creates and sends a HANDSHAKE message to the peer and returns the
+    /// It's a required and first message sent to a peer after creating a TCP connection
+    /// with the peer
+    ///
+    /// A Handshake is (49 + len(pstr)) bytes long
+    ///
+    /// Creates and sends a Handshake message to the peer and returns the
     /// responses of that Handshake Message
     ///
-    /// TODO : Write some stuff about handshake message and its response
-    ///
-    /// NOTE : It drops the connection as soon as it sees CHOKE message as a response
-    /// of the HANDSHAKE message
-    ///
+    /// NOTE : This method should only be called after calling self.connect() method
+    /// i.e after successfully establishing a TCP Connection with the peer
     async fn send_handshake_message(&self) {
-        //const HANDSHAKE_RESPONSE_WAIT_TIME: u64 = 2;
+        // Steps :
+        //
+        // 1. Send the Handshake message to the peer
+        // 2. Wait for messages that the peer is gonna send to us
+        // 3. After receiving the messages
+        const HANDSHAKE_RESPONSE_WAIT_TIME: u64 = 2;
 
-        //// Creates a HANDSHAKE Message
-        //let mut handshake_msg = Handshake::default();
-        //let lock_details = self.details.lock().await;
-        //let info_hash = lock_details.info_hash.as_ref().unwrap().clone();
-        //handshake_msg.set_info_hash(info_hash.to_vec());
-        //drop(lock_details);
+        // Creates a Handshake Message
+        let handshake_message = Handshake::new(self.state.clone()).to_bytes();
 
-        //// Writes the HANDSHAKE message on the TCPStream
-        //self.write_half.write_all(&handshake_msg.getBytesMut()).await;
+        let mut read_half_lock = self.tcp_read_half.lock().await;
+        let mut write_half_lock = self.tcp_write_half.lock().await;
 
-        //// Waits for all the messages that peer is gonna send as response to the HANDSHAKE message we sent
+        let write_half = write_half_lock.as_mut().unwrap();
+        let read_half = read_half_lock.as_mut().unwrap();
+
+        write_half.write_all(&handshake_message);
+
+        // Waits for all the messages that peer is gonna send as response
+        // to the Handshake message we sent
+
+        // A 4 Kb buffer for the response of Handshake message
+        // TODO: Find the perfect buffer size
+        let mut buf = [0; 4096];
         //let mut messages = Vec::new();
-        //if let Some(mut msgs) = self.receiver.recv().await {
-        //    messages.append(&mut msgs);
-        //    // Store all responses sent after 2 seconds of receiving HANDSHAKE response, its usually BITFIELD/HAVE/EXTENDED
-        //    timeout(Duration::from_secs(HANDSHAKE_RESPONSE_WAIT_TIME), async {
-        //        loop {
-        //            if let Some(mut _msgs) = self.receiver.recv().await {
-        //                messages.append(&mut _msgs);
-        //            }
-        //        }
-        //    })
-        //    .await;
-        //}
+        if let Ok(d) = read_half.read(&mut buf).await {
+            //    messages.append(&mut msgs);
+            //    //    // Store all responses sent after 2 seconds of receiving HANDSHAKE response, its usually BITFIELD/HAVE/EXTENDED
+            //    //    timeout(Duration::from_secs(HANDSHAKE_RESPONSE_WAIT_TIME), async {
+            //    //        loop {
+            //    //            if let Some(mut _msgs) = self.receiver.recv().await {
+            //    //                messages.append(&mut _msgs);
+            //    //            }
+            //    //        }
+            //    //    })
+            //    //    .await;
+        }
 
         //// If the peer sends CHOKE, then we'll disconnect from that peer
         //if messages.contains(&Message::CHOKE) {
         //    self.write_half.shutdown();
         //}
         //Ok(messages)
+    }
+
+    async fn get_messages(&self) {
+        // It's the max amount of data we'll ever receive, which is the max size of block we're
+        // ever gonna request
+        const MAX_BUFFER_CAPACITY: usize = 16000;
+
+        let mut messages: Vec<Message> = Vec::new();
     }
 
     ///
@@ -205,3 +233,5 @@ impl Peer {
         // self.receiver.recv().await
     }
 }
+
+struct PeerMessageCodec {}
