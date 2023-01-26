@@ -28,6 +28,7 @@
 //use byteorder::{BigEndian, ReadBytesExt};
 //use bytes::{BufMut, BytesMut};
 use crate::core::state::State;
+use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use std::sync::Arc;
 //use serde_derive::{Deserialize, Serialize};
@@ -41,16 +42,59 @@ pub enum Message {
     Handshake(Handshake),
     //    BITFIELD(Bitfield),
     //    EXTENDED(Extended),
-    //    HAVE(Have),
-    //    PIECE(Block),
+    Have(Have),
+    //Piece(Block),
     KeepAlive,
     Choke,
     Unchoke,
     Interested,
     NotInterested,
     Request,
-    Cancel,
-    Port,
+    /// Cancel(index, begin, length), used to cancel block reques
+    /// TODO : Create Cancel Struct
+    Cancel(Cancel),
+    Port(u16),
+}
+
+/// Cancel :
+///
+/// It's a fixed length message and used to cancel block requests.
+/// The payload is identical to that of the "request" message
+/// It is typically used during "End Game".
+///
+/// Structure :
+///
+/// <len=0013><id=8><index><begin><length>
+///
+///  index - A u32 integer specifying the zero based piece index
+///  begin - A u32 integer specifying the zero based byte offset within the piece
+///  length - A u32 integer specifying the requested length
+///
+/// It has a total length of 4 + 13 = 17 bytes
+#[derive(PartialEq, Debug, Clone)]
+pub struct Cancel {
+    index: u32,
+    begin: u32,
+    length: u32,
+}
+
+impl Cancel {
+    /// Creates a Cancel Struct from the bytes of Cancel Message Frame
+    ///
+    /// src - It must be 17 bytes long
+    pub fn from_bytes(src: &BytesMut) -> Self {
+        // Currenlty there is no error handling
+        // TODO : Add some sort of error handling
+        let index_bytes = &src[5..=8];
+        let begin_bytes = &src[9..=12];
+        let length_bytes = &src[13..=16];
+
+        let index = ReadBytesExt::read_u32::<BigEndian>(&mut index_bytes).unwrap();
+        let begin = ReadBytesExt::read_u32::<BigEndian>(&mut begin_bytes).unwrap();
+        let length = ReadBytesExt::read_u32::<BigEndian>(&mut length_bytes).unwrap();
+
+        Self { index, begin, length }
+    }
 }
 
 ///// INTERESTED message
@@ -189,20 +233,22 @@ pub enum Message {
 //    pub v: Option<String>,
 //}
 //
-///// HAVE Message :
-///// TODO : Add info about HAVE message
-//#[derive(Debug, PartialEq, Clone)]
-//pub struct Have {
-//    pub piece_index: u32,
-//}
 //
-//impl Have {
-//    pub fn from(bytes: &mut BytesMut) -> Self {
-//        let piece_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[5..=8]).unwrap();
-//        bytes.split_to(9);
-//        Self { piece_index }
-//    }
-//}
+/// HAVE Message :
+/// TODO : Add info about HAVE message
+#[derive(Debug, PartialEq, Clone)]
+pub struct Have {
+    pub piece_index: u32,
+}
+
+impl Have {
+    pub fn from_bytes(src: &mut BytesMut) -> Self {
+        let piece_index_bytes = &src[5..=8];
+        // TODO : Make sure unpwrap here is safe
+        let piece_index = ReadBytesExt::read_u32::<BigEndian>(&mut piece_index_bytes).unwrap();
+        Self { piece_index }
+    }
+}
 
 /// Handshake Message :
 ///

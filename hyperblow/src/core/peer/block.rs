@@ -1,7 +1,6 @@
 #![allow(non_camel_case_types)]
 #![allow(unused_must_use)]
 
-use crate::Result;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::BytesMut;
 
