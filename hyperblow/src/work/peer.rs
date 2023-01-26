@@ -207,9 +207,8 @@ async fn messageHandler(bytes: &mut BytesMut, receiver: &mut TcpReceiver) -> Opt
 /// In order to make sure we are reding a complete data, what we will do is whenever some
 /// response comes we'll see the length of the data using "len" and compare it with the length
 /// mentioned in the "length_prefix" of the data:w
-
-    /// Reads on the TCP socket until a Message is found
-    /// NOTE : On error, drop the connection!
+/// Reads on the TCP socket until a Message is found
+/// NOTE : On error, drop the connection!
     async fn getMessage(&mut self) -> Option<Vec<Message>> {
         // It's the max amount of data we'll ever receive, which is the max size of block we're
         // ever gonna request

@@ -18,3 +18,4 @@ hyperblow_parser = { path = "../libs/hyperblow_parser" }
 tokio = { version = "1.23.0", features = ["full"] }
 rand = "0.8.5"
 futures = "0.3.25"
+tokio-util = "0.7.4"

@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 mod core;
+mod engine;
 
 use crate::core::TorrentFile;
 use clap::Parser;

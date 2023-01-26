@@ -52,14 +52,14 @@ impl TorrentFile {
     // TODO : Return error on error generated rather than this Option<T>
     /// It will try to parse the given the path of the torrent file and create a new data structure
     /// from the Torrent file
-    pub async fn new(path: &String) -> Option<TorrentFile> {
+    pub async fn new(path: &String) -> Option<Self> {
         match FileMeta::fromTorrentFile(&path) {
             Ok(meta_info) => {
                 let info_hash = meta_info.generateInfoHash();
                 let pieces_hash = meta_info.getPiecesHash();
                 let pieces_count = pieces_hash.len();
                 let d_state = DownState::Unknown;
-                let file_tree = Some(TorrentFile::generateFileTree(&meta_info).await);
+                let file_tree = Some(Self::generateFileTree(&meta_info).await);
                 let trackers = ArcRwLock!(Vec::new());
                 let udp_ports = ArcMutex!(Vec::new());
                 let tcp_ports = ArcMutex!(Vec::new());
@@ -78,7 +78,7 @@ impl TorrentFile {
                     peers,
                 });
 
-                Some(TorrentFile {
+                Some(Self {
                     path: path.to_string(),
                     pieces_count,
                     meta_info,
@@ -101,7 +101,7 @@ impl TorrentFile {
         // announce_list
         //
         // Inside this function resolveTrackers(...) only the initial step of extracting out the
-        // URLS from announce_list or announce field is considered and resolving the DNS of the URL
+        // URLS from announce_list or announce fild is considered and resolving the DNS of the URL
         // is done
         if let Some(ref d) = self.meta_info.announce_list {
             for i in d {
