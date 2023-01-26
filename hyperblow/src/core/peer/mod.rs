@@ -2,10 +2,16 @@ mod block;
 mod messages;
 mod piece;
 
+use self::messages::Cancel;
+use self::messages::Have;
+
 use super::state::State;
 use crate::ArcMutex;
+use byteorder::BigEndian;
+use byteorder::ReadBytesExt;
 use messages::Handshake;
 use messages::Message;
+use std::os::unix::net::Messages;
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::io::AsyncReadExt;
@@ -234,4 +240,139 @@ impl Peer {
     }
 }
 
-struct PeerMessageCodec {}
+use bytes::{BufMut, BytesMut};
+struct PeerMessageCodec {
+    messages: Vec<Message>,
+}
+
+impl PeerMessageCodec {
+    // Checks if the given bytes frame is Keep Alive Message or not
+    pub fn is_bytes_keep_alive(&self, src: &BytesMut) -> bool {
+        if src.len() == 4 {
+            let length_prefix_bytes = &src[0..=3];
+            if let Ok(length_prefix) = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes) {
+                length_prefix == 0;
+            }
+        }
+        false
+    }
+
+    pub fn is_bytes_handshake(&self, src: &BytesMut) -> bool {
+        let pstr = String::from("BitTorrent protocol");
+        if src.len() >= 68 {
+            let pstr_len = src[0];
+            if pstr_len == 19 {
+                return true;
+                //let pstr_bytes = &[1..=19];
+                //let src_pstr = String::from_utf8(pstr_bytes);
+                // TODO : Check all the fields such as pstr, reserved bytes, info hash of the
+                // Handshake Message
+            }
+        }
+        return false;
+    }
+}
+
+impl Decoder for PeerMessageCodec {
+    type Item = Vec<Message>;
+    type Error = std::io::Error;
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        return if src.len() == 0 {
+            Ok(Some(self.messages))
+        } else if self.is_bytes_keep_alive(src) {
+            src.split_to(4);
+            self.messages.push(Message::KeepAlive);
+            Ok(None)
+        } else if self.is_bytes_handshake(src) {
+            src.split_to(68);
+            Ok(None)
+        } else if src.len() >= 5 {
+            let length_prefix_bytes = &src[0..=3];
+            if let Ok(length_prefix) = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes) {
+                let message_id = src[4];
+                if length_prefix == 1 {
+                    match message_id {
+                        0 => self.messages.push(Message::Choke),
+                        1 => self.messages.push(Message::Unchoke),
+                        2 => self.messages.push(Message::Interested),
+                        3 => self.messages.push(Message::NotInterested),
+                    }
+                    src.split_to(5);
+                } else if length_prefix == 5 && message_id == 4 {
+                    self.messages.push(Message::Have(Have::from_bytes(src)));
+                    src.split_to(9);
+                } else if length_prefix > 1 && message_id == 5 {
+                } else if length_prefix == 13 && message_id == 6 {
+                } else if length_prefix == 13 && message_id == 7 {
+                    // Piece Message
+                } else if length_prefix == 13 && message_id == 8 && src.len() == 17 {
+                    // Cancel Message
+                    let cancel_message = Message::Cancel(Cancel::from_bytes(src));
+                    self.messages.push(cancel_message);
+                    src.split_to(17);
+                } else if length_prefix == 3 && message_id == 9 && src.len() == 7 {
+                    // Port Message
+                    let port_bytes = &src[5..=6];
+                    let port = ReadBytesExt::read_u16::<BigEndian>(&mut port_bytes).unwrap();
+                    self.messages.push(Message::Port(port));
+                    src.split_to(7);
+                }
+            }
+            Ok(None)
+        } else {
+            //     src.len() == 4 {
+            //      // TODO : Check if the length is (0_u32) as well, coz a block's remaing data can also be 4
+            //      // bytes
+            //      bytes.split_to(4);
+            //      Some(Ok(Message::KEEP_ALIVE))
+            //      // Ok(None) means that more data is needed to build a Message Frame
+            Ok(None)
+        };
+    }
+}
+
+//    if bytes.len() == 0 {
+//        // If the buffer is empty then it means there is no message
+//        None
+//    } else if bytes.len() == 4 {
+//        // TODO : Check if the length is (0_u32) as well, coz a block's remaing data can also be 4
+//        // bytes
+//        bytes.split_to(4);
+//        Some(Ok(Message::KEEP_ALIVE))
+//    } else {
+//        let pstr_len = bytes[0];
+//        if pstr_len == 19u8 {
+//            Some(Ok(Message::HANDSHAKE(Handshake::from(bytes))))
+//        } else {
+//            let mut message_id = 100;
+//            if let Some(v) = bytes.get(4) {
+//                message_id = *v;
+//            }
+//            match message_id {
+//                5 => {
+//                    return Some(match Bitfield::from(bytes) {
+//                        Ok(bitfield) => Ok(Message::BITFIELD(bitfield)),
+//                        Err(e) => Err(e),
+//                    });
+//                }
+//                6 => Some(Ok(Message::REQUEST)),
+//                7 => {
+//                    return Some(match Block::from(bytes) {
+//                        Ok(block) => Ok(Message::PIECE(block)),
+//                        Err(e) => Err(e),
+//                    });
+//                }
+//                8 => {
+//                    bytes.split_to(5);
+//                    Some(Ok(Message::CANCEL))
+//                }
+//                9 => {
+//                    bytes.split_to(5);
+//                    Some(Ok(Message::PORT))
+//                }
+//                20 => Some(Ok(Message::EXTENDED(Extended::from(bytes)))),
+//                _ => None,
+//            }
+//        }
+//    }
+//
