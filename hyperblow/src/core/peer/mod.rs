@@ -6,6 +6,7 @@ use self::messages::Block;
 use self::messages::Cancel;
 use self::messages::Have;
 use self::messages::Port;
+use self::messages::Request;
 
 use super::state::State;
 use crate::ArcMutex;
@@ -303,7 +304,8 @@ impl Decoder for PeerMessageCodec {
                     self.messages.push(Message::Have(Have::from_bytes(src)));
                     src.split_to(9);
                 } else if length_prefix > 1 && message_id == 5 {
-                } else if length_prefix == 13 && message_id == 6 {
+                } else if Request::is_request_message(src) {
+                    self.messages.push(Message::Request(Request::from_bytes(src)))
                 } else if Block::is_piece_message(src) {
                     self.messages.push(Message::Piece(Block::from_bytes(src)))
                 } else if Cancel::is_cancel_message(src) {
