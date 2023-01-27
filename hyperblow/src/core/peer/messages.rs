@@ -40,7 +40,7 @@ pub enum Message {
     Unchoke,
     Interested,
     NotInterested,
-    Request,
+    Request(Request),
     Cancel(Cancel),
     Port(Port),
 }
@@ -54,6 +54,7 @@ pub enum Message {
 /////
 ///// NOTE : Sending an INTERESTED message doesn't guarantee that the peer would send UNCHOKE
 //pub struct Interested;
+
 //
 //impl Interested {
 //    pub fn build_message() -> BytesMut {
@@ -334,52 +335,66 @@ impl Interested {
     }
 }
 
-/// Request Message
+/// Request Message :
+///
+/// A Request Message is a fixed length message,
+/// which is used to request a block.
 ///
 /// Structure :
 ///
 /// <len=0013><id=6><index><begin><length>
-/// (Length Prefix)(Message ID)(0 based piece index)(0 based byte offset)(Requested length)
 ///
-/// length_prefix => 13u32 (Total length of the payload that follows the initial 4 bytes)
-/// id => u8 (id of the message)
-/// index => (index of the piece)
-/// begin => (index of the beginning byte)
-/// length => (length of the piece from beginning offset)
+///  index - A u32 integer, which specifies the zero based piece index
+///  begin - A u32 integer, which specifies the zero based byte offset within the piece
+///  length - A u32 integer, which specifies the requested length
 ///
+/// It has a total frame length of (4 + 13) bytes
 pub struct Request {
-    length_prefix: u32,
-    id: u8,
+    /// Zero based piece index
     index: u32,
+    /// Zero based byte offset within the piecec
     begin: u32,
+    /// Requested length
     length: u32,
 }
-//
-//impl Request {
-//    // TODO : Remove all parameters and make it BytesMut
-//    pub fn from(index: u32, begin: u32, length: u32) -> Self {
-//        //let mut buf = BytesMut::new();
-//        Self {
-//            length_prefix: 13,
-//            id: 6,
-//            index,
-//            begin,
-//            length,
-//        }
-//    }
-//
-//    pub fn build_message(index: u32, begin: u32, length: u32) -> BytesMut {
-//        let length_prefix = 13;
-//        let id = 6;
-//        let mut bytes_mut: BytesMut = BytesMut::new();
-//        bytes_mut.put_u32(length_prefix);
-//        bytes_mut.put_u8(id);
-//        bytes_mut.put_u32(index);
-//        bytes_mut.put_u32(begin);
-//        bytes_mut.put_u32(length);
-//        bytes_mut
-//    }
-//}
+
+impl Request {
+    /// Creates a Request instance from the Request Message Frame bytes.
+    /// It consumes the frame bytes and produces an instance of Request
+    ///
+    /// src - It must be validated by using is_request_message() method
+    /// before calling this from_bytes() method
+    pub fn from_bytes(src: &mut BytesMut) -> Self {
+        let index_bytes = &src[5..=8];
+        let begin_bytes = &src[9..=12];
+        let length_bytes = &src[13..=16];
+
+        let index = ReadBytesExt::read_u32::<BigEndian>(&mut index_bytes).unwrap();
+        let begin = ReadBytesExt::read_u32::<BigEndian>(&mut begin_bytes).unwrap();
+        let length = ReadBytesExt::read_u32::<BigEndian>(&mut length_bytes).unwrap();
+
+        src.split_to(17);
+        Self { index, begin, length }
+    }
+
+    /// Checks if the given source contains a Request Message frame.
+    /// NOTE : Only checks if the message is Request message from index 0
+    pub fn is_request_message(src: &BytesMut) -> bool {
+        // First check if there is enough bytes to get the length prefix
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+
+            // Once we get the length prefix, then we simply check if the source is atleast
+            // (4 + lengthprefix) bytes or not
+            if length_prefix == 13 && src.len() >= 17 {
+                let message_id = src[4];
+                message_id == 6
+            }
+        }
+        false
+    }
+}
 
 /// Piece Message :
 ///
@@ -396,9 +411,9 @@ pub struct Request {
 ///
 ///  index - A u32 integer, which specifies the zero based piece index
 ///  begin - A u32 integer, which specifies the zero based byte offset within the piece
-///  block - Bytes which is the block of data that make up the piece
+///  block - Bytes, which is the block of data that make up the piece
 ///
-/// It has a total frame length of (4 + 9 + X), wher X is the length of the bytes
+/// It has a total frame length of (4 + 9 + X) bytes, where X is the length of the block
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     /// Zero based piece index
@@ -524,7 +539,7 @@ impl Cancel {
 ///
 /// <len=0003><id=9><listen-port>
 ///
-/// listen-port : The port that peer's DHT node is listening on
+/// listen-port : A u16 integer, specifying port that peer's DHT node is listening on
 ///
 /// It has a total length of 4 + 3 = 7 bytes
 #[derive(PartialEq, Debug, Clone)]
