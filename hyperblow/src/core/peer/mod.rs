@@ -2,8 +2,10 @@ mod block;
 mod messages;
 mod piece;
 
+use self::messages::Block;
 use self::messages::Cancel;
 use self::messages::Have;
+use self::messages::Port;
 
 use super::state::State;
 use crate::ArcMutex;
@@ -11,7 +13,6 @@ use byteorder::BigEndian;
 use byteorder::ReadBytesExt;
 use messages::Handshake;
 use messages::Message;
-use std::os::unix::net::Messages;
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::io::AsyncReadExt;
@@ -303,19 +304,12 @@ impl Decoder for PeerMessageCodec {
                     src.split_to(9);
                 } else if length_prefix > 1 && message_id == 5 {
                 } else if length_prefix == 13 && message_id == 6 {
-                } else if length_prefix == 13 && message_id == 7 {
-                    // Piece Message
-                } else if length_prefix == 13 && message_id == 8 && src.len() == 17 {
-                    // Cancel Message
-                    let cancel_message = Message::Cancel(Cancel::from_bytes(src));
-                    self.messages.push(cancel_message);
-                    src.split_to(17);
-                } else if length_prefix == 3 && message_id == 9 && src.len() == 7 {
-                    // Port Message
-                    let port_bytes = &src[5..=6];
-                    let port = ReadBytesExt::read_u16::<BigEndian>(&mut port_bytes).unwrap();
-                    self.messages.push(Message::Port(port));
-                    src.split_to(7);
+                } else if Block::is_piece_message(src) {
+                    self.messages.push(Message::Piece(Block::from_bytes(src)))
+                } else if Cancel::is_cancel_message(src) {
+                    self.messages.push(Message::Cancel(Cancel::from_bytes(src)));
+                } else if Port::is_port_message(src) {
+                    self.messages.push(Message::Port(Port::from_bytes(src)));
                 }
             }
             Ok(None)

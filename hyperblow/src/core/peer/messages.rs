@@ -1,21 +1,14 @@
 /*
+ * NOTE : This file contains all the structs and methods related to
+ * Bittorent Message
  *
- *NOTE : This file contains all the structs and methods related to
- *Bittorent Message
- *
- *All the messages and their specified protocol is taken from :
- *https://wiki.theory.org/index.php/BitTorrentSpecification#Messages
- *https://www.bittorrent.org/beps/bep_0010.html
- *Initially we as a peer start as :
+ * All the messages and their specified protocol is taken from :
+ * https://wiki.theory.org/index.php/BitTorrentSpecification#Messages
+ * https://www.bittorrent.org/beps/bep_0010.html
+ * Initially we as a peer start as :
  *
  * NOT_INTERESTED and
  * CHOKE
- *
- *
- *
- *
- *
- *
  */
 
 #![allow(unused_must_use)]
@@ -33,68 +26,23 @@ use bytes::{BufMut, BytesMut};
 use std::sync::Arc;
 //use serde_derive::{Deserialize, Serialize};
 
-/// Messages sent to the peer and recieved form the peer takes the following forms
-///
-/// All possible messages are specified by BitTorrent Specifications at :
-///
+/// Messages sent to the peer and recieved form the peer takes
+/// the following forms
 #[derive(PartialEq, Debug, Clone)]
 pub enum Message {
     Handshake(Handshake),
     //    BITFIELD(Bitfield),
     //    EXTENDED(Extended),
     Have(Have),
-    //Piece(Block),
+    Piece(Block),
     KeepAlive,
     Choke,
     Unchoke,
     Interested,
     NotInterested,
     Request,
-    /// Cancel(index, begin, length), used to cancel block reques
-    /// TODO : Create Cancel Struct
     Cancel(Cancel),
-    Port(u16),
-}
-
-/// Cancel :
-///
-/// It's a fixed length message and used to cancel block requests.
-/// The payload is identical to that of the "request" message
-/// It is typically used during "End Game".
-///
-/// Structure :
-///
-/// <len=0013><id=8><index><begin><length>
-///
-///  index - A u32 integer specifying the zero based piece index
-///  begin - A u32 integer specifying the zero based byte offset within the piece
-///  length - A u32 integer specifying the requested length
-///
-/// It has a total length of 4 + 13 = 17 bytes
-#[derive(PartialEq, Debug, Clone)]
-pub struct Cancel {
-    index: u32,
-    begin: u32,
-    length: u32,
-}
-
-impl Cancel {
-    /// Creates a Cancel Struct from the bytes of Cancel Message Frame
-    ///
-    /// src - It must be 17 bytes long
-    pub fn from_bytes(src: &BytesMut) -> Self {
-        // Currenlty there is no error handling
-        // TODO : Add some sort of error handling
-        let index_bytes = &src[5..=8];
-        let begin_bytes = &src[9..=12];
-        let length_bytes = &src[13..=16];
-
-        let index = ReadBytesExt::read_u32::<BigEndian>(&mut index_bytes).unwrap();
-        let begin = ReadBytesExt::read_u32::<BigEndian>(&mut begin_bytes).unwrap();
-        let length = ReadBytesExt::read_u32::<BigEndian>(&mut length_bytes).unwrap();
-
-        Self { index, begin, length }
-    }
+    Port(Port),
 }
 
 ///// INTERESTED message
@@ -432,3 +380,188 @@ pub struct Request {
 //        bytes_mut
 //    }
 //}
+
+/// Piece Message :
+///
+/// A Block Message, also coined as Piece Message(Not the same thing)
+/// A Block is a subset of a Piece. Whenever we request some data from a peer,
+/// we don't directly request a piece, but rather request the blocks that make
+/// up that piece
+///
+/// It's a variable length message, where X is the length of the block.
+///
+/// Structure :
+///
+/// <len=0009+X><id=7><index><begin><block>
+///
+///  index - A u32 integer, which specifies the zero based piece index
+///  begin - A u32 integer, which specifies the zero based byte offset within the piece
+///  block - Bytes which is the block of data that make up the piece
+///
+/// It has a total frame length of (4 + 9 + X), wher X is the length of the bytes
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    /// Zero based piece index
+    pub piece_index: u32,
+    /// Zero based byte index within the piece
+    pub byte_index: u32,
+    /// Block of raw data(bytes)
+    pub raw_block: BytesMut,
+}
+
+impl Block {
+    //  /// Creates a "Block" instance from the raw "Piece" message sent by the client
+    //  /// NOTE : It removes the data it read from the buffer
+    pub fn from_bytes(src: &mut BytesMut) -> Self {
+        let length_prefix_bytes = &[0..=3];
+        let piece_index_bytes = &[5..=8];
+        let bytes_index_bytes = &[9..=12];
+
+        let length_prefix: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+        let piece_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut piece_index_bytes).unwrap();
+        let byte_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut bytes_index_bytes).unwrap();
+
+        let total_frame_length = 4 + length_prefix;
+        let block_length = length_prefix - 9;
+        let block_bytes = &[13..block_length];
+        let raw_block = BytesMut::from(block_bytes);
+
+        src.split_to(total_frame_length as usize);
+        Self {
+            piece_index,
+            byte_index,
+            raw_block,
+        }
+    }
+
+    pub fn is_piece_message(src: &BytesMut) -> bool {
+        // First, check if there is enough bytes to read the length prefix
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+
+            // Expected length of the entire message
+            let expected_length = 4 + length_prefix;
+            // Second, check if there is enough data in the buffer
+            // as mentioned in length_prefix
+            if src.len() as u32 >= expected_length {
+                let message_id = src[4];
+                message_id == 7
+            }
+        }
+        false
+    }
+}
+
+/// Cancel Message :
+///
+/// It's a fixed length message and used to cancel block requests.
+/// The payload is identical to that of the "request" message
+/// It is typically used during "End Game".
+///
+/// Structure :
+///
+/// <len=0013><id=8><index><begin><length>
+///
+///  index - A u32 integer specifying the zero based piece index
+///  begin - A u32 integer specifying the zero based byte offset within the piece
+///  length - A u32 integer specifying the requested length
+///
+/// It has a total frame length of 4 + 13 = 17 bytes
+#[derive(PartialEq, Debug, Clone)]
+pub struct Cancel {
+    index: u32,
+    begin: u32,
+    length: u32,
+}
+
+impl Cancel {
+    /// Creates a Cancel instance from the bytes of Cancel Message Frame
+    /// src - It must be atleast 17 bytes long and must be validated by
+    /// Cancel::is_cancel_message() function before actually creating it
+    ///
+    /// It will consume the Cancel Message Frame bytes and create the Cancel instance
+    pub fn from_bytes(src: &BytesMut) -> Self {
+        // TODO : Add some sort of error handling by using is_cancel_message() method
+        let index_bytes = &src[5..=8];
+        let begin_bytes = &src[9..=12];
+        let length_bytes = &src[13..=16];
+
+        let index = ReadBytesExt::read_u32::<BigEndian>(&mut index_bytes).unwrap();
+        let begin = ReadBytesExt::read_u32::<BigEndian>(&mut begin_bytes).unwrap();
+        let length = ReadBytesExt::read_u32::<BigEndian>(&mut length_bytes).unwrap();
+
+        src.split_to(17);
+        Self { index, begin, length }
+    }
+
+    /// Checks if the given source contains a Cancel Message frame.
+    /// NOTE : Only checks if the message is Cancel message from index 0
+    pub fn is_cancel_message(src: &BytesMut) -> bool {
+        // First check if there is enough bytes to get the length prefix
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+
+            // Once we get the length prefix, then we simply check if the source is atleast
+            // (4 + lengthprefix) bytes or not
+            if length_prefix == 13 && src.len() >= 17 {
+                let message_id = src[4];
+                message_id == 8
+            }
+        }
+        false
+    }
+}
+
+/// Port Message :
+///
+/// It's a fixed length message and sent by the newer version of Mainline that implements
+/// the DHT Tracker. The listen port is this peer's DHS node is listening.
+/// This peer should be insertedin the local routing table (if DHT Tracker is supported)
+///
+/// Structure :
+///
+/// <len=0003><id=9><listen-port>
+///
+/// listen-port : The port that peer's DHT node is listening on
+///
+/// It has a total length of 4 + 3 = 7 bytes
+#[derive(PartialEq, Debug, Clone)]
+pub struct Port {
+    listen_port: u16,
+}
+
+impl Port {
+    /// Creates a Port instance from the bytes of Port Message Frame
+    /// src - It must be atleast 7 bytes long and must be validated by
+    /// Port::is_port_message() function before actually creating it.
+    ///
+    /// It will consume the Port Message Frame bytes and create the Port instance
+    pub fn from_bytes(src: &mut BytesMut) -> Self {
+        // TODO : Add some sort of error handling by using is_por_message() method
+        let listen_port_bytes = &src[4..=6];
+
+        let listen_port = ReadBytesExt::read_u16::<BigEndian>(&mut listen_port_bytes).unwrap();
+        src.split_to(7);
+        Self { listen_port }
+    }
+
+    /// Checks if the given source contains a Port Message frame.
+    /// NOTE : Only checks if the message is Port message from index 0
+    pub fn is_port_message(src: &mut BytesMut) -> bool {
+        // First check if there is enough bytes to get the length prefix
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+
+            // Once we get the length prefix, then we simply check if the source is atleast
+            // (4 + lengthprefix) bytes or not
+            if length_prefix == 3 && src.len() >= 7 {
+                let message_id = src[4];
+                message_id == 9
+            }
+        }
+        false
+    }
+}
