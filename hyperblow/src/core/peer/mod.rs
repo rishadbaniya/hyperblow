@@ -1,7 +1,7 @@
-mod block;
 mod messages;
 mod piece;
 
+use self::messages::Bitfield;
 use self::messages::Block;
 use self::messages::Cancel;
 use self::messages::Have;
@@ -26,6 +26,7 @@ use tokio::{
     sync::Mutex,
     time::{sleep, timeout},
 };
+use tokio_util::codec::Framed;
 use tokio_util::codec::{Decoder, Encoder};
 
 /// PeerState denotes high level overview of the
@@ -86,12 +87,11 @@ pub struct PeerInfo {
 
 #[derive(Debug)]
 pub struct Peer {
-    /// An Owned Read Split Half of the connected TcpStream
-    tcp_read_half: Arc<Mutex<Option<OwnedReadHalf>>>,
+    ///// An Owned Read Split Half of the connected TcpStream
+    //tcp_read_half: Arc<Mutex<Option<OwnedReadHalf>>>,
 
-    /// An Owned Write Split Half of the connected TcpStream
-    tcp_write_half: Arc<Mutex<Option<OwnedWriteHalf>>>,
-
+    ///// An Owned Write Split Half of the connected TcpStream
+    //tcp_write_half: Arc<Mutex<Option<OwnedWriteHalf>>>,
     /// Holds the information and state of the Peer
     pub info: Arc<Mutex<PeerInfo>>,
 
@@ -100,6 +100,8 @@ pub struct Peer {
 
     /// The socket address of the peer
     pub socket_adr: SocketAddr,
+
+    peer_codec: Arc<Mutex<Option<Framed<TcpStream, PeerMessageCodec>>>>,
 }
 
 impl Peer {
@@ -115,15 +117,13 @@ impl Peer {
             peer_state: PeerState::NotConnected,
         });
 
-        let tcp_read_half = ArcMutex!(None);
-        let tcp_write_half = ArcMutex!(None);
+        let peer_codec = ArcMutex!(None);
 
         Self {
-            tcp_read_half,
-            tcp_write_half,
             info,
             state,
             socket_adr,
+            peer_codec,
         }
     }
 
@@ -146,9 +146,8 @@ impl Peer {
             match timeout(CONNECTION_TIMEOUT, TcpStream::connect(socket_adr)).await {
                 Ok(connection) => match connection {
                     Ok(tcp_stream) => {
-                        let (tcp_read_half, tcp_write_half) = tcp_stream.into_split();
-                        (*self.tcp_write_half.lock().await) = Some(tcp_write_half);
-                        (*self.tcp_read_half.lock().await) = Some(tcp_read_half);
+                        let m = PeerMessageCodec::new();
+                        //let x = Framed::new();
                     }
                     Err(_) => {
                         // Err while trying to achieve a TCP Connection with the peer
@@ -183,44 +182,37 @@ impl Peer {
         // 1. Send the Handshake message to the peer
         // 2. Wait for messages that the peer is gonna send to us
         // 3. After receiving the messages
-        const HANDSHAKE_RESPONSE_WAIT_TIME: u64 = 2;
+        //const HANDSHAKE_RESPONSE_WAIT_TIME: u64 = 2;
 
-        // Creates a Handshake Message
-        let handshake_message = Handshake::new(self.state.clone()).to_bytes();
+        //// Creates a Handshake Message
+        //let handshake_message = Handshake::new(self.state.clone()).to_bytes();
 
-        let mut read_half_lock = self.tcp_read_half.lock().await;
-        let mut write_half_lock = self.tcp_write_half.lock().await;
+        //let write_half = write_half_lock.as_mut().unwrap();
+        //let read_half = read_half_lock.as_mut().unwrap();
 
-        let write_half = write_half_lock.as_mut().unwrap();
-        let read_half = read_half_lock.as_mut().unwrap();
+        //// Waits for all the messages that peer is gonna send as response
+        //// to the Handshake message we sent
 
-        write_half.write_all(&handshake_message);
+        //// A 4 Kb buffer for the response of Handshake message
+        //// TODO: Find the perfect buffer size
 
-        // Waits for all the messages that peer is gonna send as response
-        // to the Handshake message we sent
+        ////let mut messages = Vec::new();
+        ////    messages.append(&mut msgs);
+        ////    //    // Store all responses sent after 2 seconds of receiving HANDSHAKE response, its usually BITFIELD/HAVE/EXTENDED
+        ////    //    timeout(Duration::from_secs(HANDSHAKE_RESPONSE_WAIT_TIME), async {
+        ////    //        loop {
+        ////    //            if let Some(mut _msgs) = self.receiver.recv().await {
+        ////    //                messages.append(&mut _msgs);
+        ////    //            }
+        ////    //        }
+        ////    //    })
+        ////    //    .await;
 
-        // A 4 Kb buffer for the response of Handshake message
-        // TODO: Find the perfect buffer size
-        let mut buf = [0; 4096];
-        //let mut messages = Vec::new();
-        if let Ok(d) = read_half.read(&mut buf).await {
-            //    messages.append(&mut msgs);
-            //    //    // Store all responses sent after 2 seconds of receiving HANDSHAKE response, its usually BITFIELD/HAVE/EXTENDED
-            //    //    timeout(Duration::from_secs(HANDSHAKE_RESPONSE_WAIT_TIME), async {
-            //    //        loop {
-            //    //            if let Some(mut _msgs) = self.receiver.recv().await {
-            //    //                messages.append(&mut _msgs);
-            //    //            }
-            //    //        }
-            //    //    })
-            //    //    .await;
-        }
-
-        //// If the peer sends CHOKE, then we'll disconnect from that peer
-        //if messages.contains(&Message::CHOKE) {
-        //    self.write_half.shutdown();
-        //}
-        //Ok(messages)
+        ////// If the peer sends CHOKE, then we'll disconnect from that peer
+        ////if messages.contains(&Message::CHOKE) {
+        ////    self.write_half.shutdown();
+        ////}
+        ////Ok(messages)
     }
 
     async fn get_messages(&self) {
@@ -242,36 +234,15 @@ impl Peer {
     }
 }
 
-use bytes::{BufMut, BytesMut};
+#[derive(Debug)]
 struct PeerMessageCodec {
     messages: Vec<Message>,
 }
 
 impl PeerMessageCodec {
-    // Checks if the given bytes frame is Keep Alive Message or not
-    pub fn is_bytes_keep_alive(&self, src: &BytesMut) -> bool {
-        if src.len() == 4 {
-            let length_prefix_bytes = &src[0..=3];
-            if let Ok(length_prefix) = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes) {
-                length_prefix == 0;
-            }
-        }
-        false
-    }
-
-    pub fn is_bytes_handshake(&self, src: &BytesMut) -> bool {
-        let pstr = String::from("BitTorrent protocol");
-        if src.len() >= 68 {
-            let pstr_len = src[0];
-            if pstr_len == 19 {
-                return true;
-                //let pstr_bytes = &[1..=19];
-                //let src_pstr = String::from_utf8(pstr_bytes);
-                // TODO : Check all the fields such as pstr, reserved bytes, info hash of the
-                // Handshake Message
-            }
-        }
-        return false;
+    pub fn new() -> Self {
+        let messages = Vec::new();
+        Self { messages }
     }
 }
 
@@ -279,96 +250,37 @@ impl Decoder for PeerMessageCodec {
     type Item = Vec<Message>;
     type Error = std::io::Error;
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        return if src.len() == 0 {
-            Ok(Some(self.messages))
-        } else if self.is_bytes_keep_alive(src) {
-            src.split_to(4);
+        if src.len() == 0 {
+            return Ok(Some(self.messages));
+        } else if Message::is_handshake_message(src) {
+            self.messages.push(Message::Handshake(Handshake::from(src)));
+        } else if Message::is_keep_alive_message(src) {
             self.messages.push(Message::KeepAlive);
-            Ok(None)
-        } else if self.is_bytes_handshake(src) {
-            src.split_to(68);
-            Ok(None)
-        } else if src.len() >= 5 {
-            let length_prefix_bytes = &src[0..=3];
-            if let Ok(length_prefix) = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes) {
-                let message_id = src[4];
-                if length_prefix == 1 {
-                    match message_id {
-                        0 => self.messages.push(Message::Choke),
-                        1 => self.messages.push(Message::Unchoke),
-                        2 => self.messages.push(Message::Interested),
-                        3 => self.messages.push(Message::NotInterested),
-                    }
-                    src.split_to(5);
-                } else if length_prefix == 5 && message_id == 4 {
-                    self.messages.push(Message::Have(Have::from_bytes(src)));
-                    src.split_to(9);
-                } else if length_prefix > 1 && message_id == 5 {
-                } else if Request::is_request_message(src) {
-                    self.messages.push(Message::Request(Request::from_bytes(src)))
-                } else if Block::is_piece_message(src) {
-                    self.messages.push(Message::Piece(Block::from_bytes(src)))
-                } else if Cancel::is_cancel_message(src) {
-                    self.messages.push(Message::Cancel(Cancel::from_bytes(src)));
-                } else if Port::is_port_message(src) {
-                    self.messages.push(Message::Port(Port::from_bytes(src)));
-                }
-            }
-            Ok(None)
-        } else {
-            //     src.len() == 4 {
-            //      // TODO : Check if the length is (0_u32) as well, coz a block's remaing data can also be 4
-            //      // bytes
-            //      bytes.split_to(4);
-            //      Some(Ok(Message::KEEP_ALIVE))
-            //      // Ok(None) means that more data is needed to build a Message Frame
-            Ok(None)
-        };
+            src.split_to(4);
+        } else if Message::is_choke_message(src) {
+            self.messages.push(Message::Choke);
+            src.split_to(5);
+        } else if Message::is_unchoke_message(src) {
+            self.messages.push(Message::Unchoke);
+            src.split_to(5);
+        } else if Message::is_interested_message(src) {
+            self.messages.push(Message::Interested);
+            src.split_to(5);
+        } else if Message::is_not_interested_message(src) {
+            self.messages.push(Message::NotInterested);
+        } else if Message::is_have_message(src) {
+            self.messages.push(Message::Have(Have::from_bytes(src)));
+        } else if Message::is_bitfield_message(src) {
+            self.messages.push(Message::Bitfield(Bitfield::from_bytes(src)));
+        } else if Message::is_request_message(src) {
+            self.messages.push(Message::Request(Request::from_bytes(src)))
+        } else if Message::is_piece_message(src) {
+            self.messages.push(Message::Piece(Block::from_bytes(src)))
+        } else if Message::is_cancel_message(src) {
+            self.messages.push(Message::Cancel(Cancel::from_bytes(src)));
+        } else if Message::is_port_message(src) {
+            self.messages.push(Message::Port(Port::from_bytes(src)));
+        }
+        return Ok(None);
     }
 }
-
-//    if bytes.len() == 0 {
-//        // If the buffer is empty then it means there is no message
-//        None
-//    } else if bytes.len() == 4 {
-//        // TODO : Check if the length is (0_u32) as well, coz a block's remaing data can also be 4
-//        // bytes
-//        bytes.split_to(4);
-//        Some(Ok(Message::KEEP_ALIVE))
-//    } else {
-//        let pstr_len = bytes[0];
-//        if pstr_len == 19u8 {
-//            Some(Ok(Message::HANDSHAKE(Handshake::from(bytes))))
-//        } else {
-//            let mut message_id = 100;
-//            if let Some(v) = bytes.get(4) {
-//                message_id = *v;
-//            }
-//            match message_id {
-//                5 => {
-//                    return Some(match Bitfield::from(bytes) {
-//                        Ok(bitfield) => Ok(Message::BITFIELD(bitfield)),
-//                        Err(e) => Err(e),
-//                    });
-//                }
-//                6 => Some(Ok(Message::REQUEST)),
-//                7 => {
-//                    return Some(match Block::from(bytes) {
-//                        Ok(block) => Ok(Message::PIECE(block)),
-//                        Err(e) => Err(e),
-//                    });
-//                }
-//                8 => {
-//                    bytes.split_to(5);
-//                    Some(Ok(Message::CANCEL))
-//                }
-//                9 => {
-//                    bytes.split_to(5);
-//                    Some(Ok(Message::PORT))
-//                }
-//                20 => Some(Ok(Message::EXTENDED(Extended::from(bytes)))),
-//                _ => None,
-//            }
-//        }
-//    }
-//

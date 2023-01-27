@@ -31,115 +31,254 @@ use std::sync::Arc;
 #[derive(PartialEq, Debug, Clone)]
 pub enum Message {
     Handshake(Handshake),
-    //    BITFIELD(Bitfield),
-    //    EXTENDED(Extended),
-    Have(Have),
-    Piece(Block),
     KeepAlive,
     Choke,
     Unchoke,
     Interested,
     NotInterested,
+    Bitfield(Bitfield),
+    //    EXTENDED(Extended)
+    Have(Have),
     Request(Request),
+    Piece(Block),
     Cancel(Cancel),
     Port(Port),
 }
 
-///// INTERESTED message
-/////
-///// INTERESTED Message is sent after HANDSHAKE message has been
-///// exchanged between the peers, its used to tell the peer "hey i'm interested in exchanging files with you",
-///// and the peer can choose choke or unchoke us by sending us CHOKE or UNCHOKE message,
-///// we can then choose to CHOKE and UNCHOKE the user after by looking at the response of this INTERESTED message
-/////
-///// NOTE : Sending an INTERESTED message doesn't guarantee that the peer would send UNCHOKE
-//pub struct Interested;
+impl Message {
+    /// Checks in the given src buffer if the first Message Frame is A Handshake Message Frame
+    pub fn is_handshake_message(src: &BytesMut) -> bool {
+        let expected_pstr = String::from("BitTorrent protocol");
+        // First check if there is enough bytes to be a Handshake Message Frame
+        if src.len() >= 68 {
+            let pstr_len = src[0];
+            // TODO : Check pstr
+            // let pstr: Vec<u8> = [1..=19].iter().collect();
+            //let pstr = String::from_utf8(pstr).unwrap();
+            if pstr_len == 19 {
+                return true;
+                //   return pstr == expected_pstr;
+                // TODO : Check for info hash
+                // TODO : Check the peer id
+                // Then only validate the Handshake Message Frame
+            }
+        }
+        return false;
+    }
 
-//
-//impl Interested {
-//    pub fn build_message() -> BytesMut {
-//        let mut bytes_mut = BytesMut::new();
-//        bytes_mut.put_u32(1);
-//        bytes_mut.put_u8(2);
-//        bytes_mut
-//    }
-//}
-//
-//
-///// Request Message
-/////
-///// length_prefix => 13u32 (Total length of the payload that follows the initial 4 bytes)
-///// id => u8 (id of the message)
-///// index => (index of the piece)
-///// begin => (index of the beginning byte)
-///// length => (length of the piece from beginning offset)
-//pub struct Request {
-//    length_prefix: u32,
-//    id: u8,
-//    index: u32,
-//    begin: u32,
-//    length: u32,
-//}
-//
-//impl Request {
-//    // TODO : Remove all parameters and make it BytesMut
-//    pub fn from(index: u32, begin: u32, length: u32) -> Self {
-//        //let mut buf = BytesMut::new();
-//        Self {
-//            length_prefix: 13,
-//            id: 6,
-//            index,
-//            begin,
-//            length,
-//        }
-//    }
-//
-//    pub fn build_message(index: u32, begin: u32, length: u32) -> BytesMut {
-//        let length_prefix = 13;
-//        let id = 6;
-//        let mut bytes_mut: BytesMut = BytesMut::new();
-//        bytes_mut.put_u32(length_prefix);
-//        bytes_mut.put_u8(id);
-//        bytes_mut.put_u32(index);
-//        bytes_mut.put_u32(begin);
-//        bytes_mut.put_u32(length);
-//        bytes_mut
-//    }
-//}
-//
-//#[derive(Debug, Clone, PartialEq)]
-//pub struct Bitfield {
-//    pub have: Vec<u32>,
-//    pub not_have: Vec<u32>,
-//}
-//
-//impl Bitfield {
-//    pub fn from(bytes: &mut BytesMut) -> crate::Result<Self> {
-//        let mut have: Vec<u32> = Vec::new();
-//        let mut not_have: Vec<u32> = Vec::new();
-//
-//        let length_prefix: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut &bytes[0..=3]).unwrap();
-//        let bitfield_total_length = (length_prefix + 4) as usize;
-//
-//        // If the bytes size is less than bitfield total length then it means it needs more tcp
-//        // packet to combine and create its full data
-//        if bytes.len() < bitfield_total_length {
-//            return Err("WAIT FOR MORE TCP SEGMENT".into());
-//        } else {
-//            let bitfield_payload = bytes.split_to(bitfield_total_length);
-//            for i in 0..bitfield_payload.len() - 1 {
-//                match bitfield_payload[i] {
-//                    0 => not_have.push(i as u32),
-//                    1 => have.push(i as u32),
-//                    _ => {}
-//                }
-//            }
-//        }
-//
-//        Ok(Self { have, not_have })
-//    }
-//}
-//
+    /// Checks in the given src buffer if the first Message Frame is A KeepAlive Message Frame
+    pub fn is_keep_alive_message(src: &BytesMut) -> bool {
+        // First check if there is enough bytes to get the length prefix
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            // Once we get the length prefix, we check if its value is equal to 0
+            return length_prefix == 0;
+        }
+        return false;
+    }
+
+    /// Checks in the given src buffer if the first Message Frame is A Choke Message Frame
+    pub fn is_choke_message(src: &BytesMut) -> bool {
+        // First check if there is enough bytes to get the length prefix
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            // Once we get the length prefix, we check if its value is equal to 1, and has enough
+            // bytes for the entire Choke Message Frame and the message id is 0
+            if length_prefix == 0 && src.len() >= 5 {
+                let message_id = src[4];
+                return message_id == 0;
+            }
+        }
+        return false;
+    }
+
+    /// Checks in the given src buffer if the first Message Frame is A Unchoke Message Frame
+    pub fn is_unchoke_message(src: &BytesMut) -> bool {
+        // First check if there is enough bytes to get the length prefix
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            // Once we get the length prefix, we check if its value is equal to 1, and has enough
+            // bytes for the entire Unchoke Message Frame and the message id is 1
+            if length_prefix == 0 && src.len() >= 5 {
+                let message_id = src[4];
+                return message_id == 1;
+            }
+        }
+        return false;
+    }
+
+    /// Checks in the given src buffer if the first Message Frame is A Interested Message Frame
+    pub fn is_interested_message(src: &BytesMut) -> bool {
+        // First check if there is enough bytes to get the length prefix
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            // Once we get the length prefix, we check if its value is equal to 1, and has enough
+            // bytes for the entire Unchoke Message Frame and the message id is 2
+            if length_prefix == 0 && src.len() >= 5 {
+                let message_id = src[4];
+                return message_id == 2;
+            }
+        }
+        return false;
+    }
+
+    /// Checks in the given src buffer if the first Message Frame is A NotInterested Message Frame
+    pub fn is_not_interested_message(src: &BytesMut) -> bool {
+        // First check if there is enough bytes to get the length prefix
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            // Once we get the length prefix, we check if its value is equal to 1, and has enough
+            // bytes for the entire Unchoke Message Frame and the message id is 3
+            if length_prefix == 0 && src.len() >= 5 {
+                let message_id = src[4];
+                return message_id == 3;
+            }
+        }
+        return false;
+    }
+
+    /// Checks in the given src buffer if the first Message Frame is A Have Message Frame
+    pub fn is_have_message(src: &BytesMut) -> bool {
+        // First check if there is enough bytes to get the length prefix
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+
+            // Once we get the length prefix, then we simply check if the length_prefix matches
+            // or not and the source is atleast (4 + length_prefix) i.e (4 + 5) bytes or not
+            if length_prefix == 5 && src.len() >= 9 {
+                let message_id = src[4];
+                return message_id == 4;
+            }
+        }
+        return false;
+    }
+
+    /// Checks in the given src buffer if the first Message Frame is A Bitfield Message Frame
+    pub fn is_bitfield_message(src: &BytesMut) -> bool {
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+
+            // Expected length of the entire Bitfield Message Frame
+            let expected_frame_length = 4 + length_prefix;
+
+            // Second, check if there is enough data in the buffer
+            // as mentioned in length_prefix
+            if src.len() as u32 >= expected_frame_length {
+                let message_id = src[4];
+                return message_id == 5;
+            }
+        }
+        return false;
+    }
+
+    /// Checks in the given src buffer if the first Message Frame is A Request Message Frame
+    pub fn is_request_message(src: &BytesMut) -> bool {
+        // First check if there is enough bytes to get the length prefix
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+
+            // Once we get the length prefix, then we simply check if the source is atleast
+            // (4 + lengthprefix) bytes or not
+            if length_prefix == 13 && src.len() >= 17 {
+                let message_id = src[4];
+                return message_id == 6;
+            }
+        }
+        return false;
+    }
+
+    /// Checks in the given src buffer if the first Message Frame is A Piece Message Frame
+    pub fn is_piece_message(src: &BytesMut) -> bool {
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+
+            // Expected length of the entire message
+            let expected_length = 4 + length_prefix;
+            // Second, check if there is enough data in the buffer
+            // as mentioned in length_prefix
+            if src.len() as u32 >= expected_length {
+                let message_id = src[4];
+                return message_id == 7;
+            }
+        }
+        return false;
+    }
+
+    /// Checks in the given src buffer if the first Message Frame is A Cancel Message Frame
+    pub fn is_cancel_message(src: &BytesMut) -> bool {
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+
+            // Once we get the length prefix, then we simply check if the source is atleast
+            // (4 + lengthprefix) bytes or not
+            if length_prefix == 13 && src.len() >= 17 {
+                let message_id = src[4];
+                return message_id == 8;
+            }
+        }
+        return false;
+    }
+
+    /// Checks in the given src buffer if the first Message Frame is A Port Message Frame
+    pub fn is_port_message(src: &BytesMut) -> bool {
+        if src.len() >= 4 {
+            let length_prefix_bytes = &src[0..=3];
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+
+            // Once we get the length prefix, then we simply check if the source is atleast
+            // (4 + lengthprefix) bytes or not
+            if length_prefix == 3 && src.len() >= 7 {
+                let message_id = src[4];
+                return message_id == 9;
+            }
+        }
+        return false;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bitfield {
+    /// Represents the pieces that peer have
+    pub have: Vec<usize>,
+
+    /// Represents the pieces that peer doesn't have
+    pub not_have: Vec<usize>,
+}
+
+impl Bitfield {
+    pub fn from_bytes(src: &mut BytesMut) -> Self {
+        let mut have = Vec::new();
+        let mut not_have = Vec::new();
+
+        let length_prefix_bytes = &src[0..=3];
+        let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+
+        let bitfield_frame_length = length_prefix + 4;
+
+        let bitfield_bytes = &src[5..bitfield_frame_length];
+        let bitfield = BytesMut::from(bitfield_bytes);
+
+        for (index, bit) in bitfield.iter().enumerate() {
+            match bit {
+                0 => not_have.push(index),
+                1 => have.push(index),
+            }
+        }
+        src.split_to(bitfield_frame_length as usize);
+        Self { have, not_have }
+    }
+}
+
 ///// Extended Message :
 /////
 ///// A message type for those who implement the Extension Protocol
@@ -268,6 +407,7 @@ impl Handshake {
         let info_hash = v.split_to(20).to_vec();
         let peer_id = v.split_to(20).to_vec();
 
+        v.split_to(68);
         Self {
             pstrlen,
             pstr,
@@ -349,6 +489,7 @@ impl Interested {
 ///  length - A u32 integer, which specifies the requested length
 ///
 /// It has a total frame length of (4 + 13) bytes
+#[derive(Debug, Clone, PartialEq)]
 pub struct Request {
     /// Zero based piece index
     index: u32,
@@ -375,24 +516,6 @@ impl Request {
 
         src.split_to(17);
         Self { index, begin, length }
-    }
-
-    /// Checks if the given source contains a Request Message frame.
-    /// NOTE : Only checks if the message is Request message from index 0
-    pub fn is_request_message(src: &BytesMut) -> bool {
-        // First check if there is enough bytes to get the length prefix
-        if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
-
-            // Once we get the length prefix, then we simply check if the source is atleast
-            // (4 + lengthprefix) bytes or not
-            if length_prefix == 13 && src.len() >= 17 {
-                let message_id = src[4];
-                message_id == 6
-            }
-        }
-        false
     }
 }
 
@@ -448,24 +571,6 @@ impl Block {
             raw_block,
         }
     }
-
-    pub fn is_piece_message(src: &BytesMut) -> bool {
-        // First, check if there is enough bytes to read the length prefix
-        if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
-
-            // Expected length of the entire message
-            let expected_length = 4 + length_prefix;
-            // Second, check if there is enough data in the buffer
-            // as mentioned in length_prefix
-            if src.len() as u32 >= expected_length {
-                let message_id = src[4];
-                message_id == 7
-            }
-        }
-        false
-    }
 }
 
 /// Cancel Message :
@@ -509,24 +614,6 @@ impl Cancel {
         src.split_to(17);
         Self { index, begin, length }
     }
-
-    /// Checks if the given source contains a Cancel Message frame.
-    /// NOTE : Only checks if the message is Cancel message from index 0
-    pub fn is_cancel_message(src: &BytesMut) -> bool {
-        // First check if there is enough bytes to get the length prefix
-        if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
-
-            // Once we get the length prefix, then we simply check if the source is atleast
-            // (4 + lengthprefix) bytes or not
-            if length_prefix == 13 && src.len() >= 17 {
-                let message_id = src[4];
-                message_id == 8
-            }
-        }
-        false
-    }
 }
 
 /// Port Message :
@@ -560,23 +647,5 @@ impl Port {
         let listen_port = ReadBytesExt::read_u16::<BigEndian>(&mut listen_port_bytes).unwrap();
         src.split_to(7);
         Self { listen_port }
-    }
-
-    /// Checks if the given source contains a Port Message frame.
-    /// NOTE : Only checks if the message is Port message from index 0
-    pub fn is_port_message(src: &mut BytesMut) -> bool {
-        // First check if there is enough bytes to get the length prefix
-        if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
-
-            // Once we get the length prefix, then we simply check if the source is atleast
-            // (4 + lengthprefix) bytes or not
-            if length_prefix == 3 && src.len() >= 7 {
-                let message_id = src[4];
-                message_id == 9
-            }
-        }
-        false
     }
 }
