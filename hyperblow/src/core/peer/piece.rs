@@ -1,4 +1,3 @@
-use crate::core::peer::block::Block;
 use bytes::{BufMut, BytesMut};
 
 /// Holds all the raw data of a piece and the piece's metadata
