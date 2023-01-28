@@ -46,9 +46,52 @@ pub enum Message {
 }
 
 impl Message {
+    /// Converts a Message into Bytes
+    pub fn to_bytes(&self) -> BytesMut {
+        let mut buf = BytesMut::new();
+        match *self {
+            Message::Handshake(ref handshake) => {
+                buf.put_u8(handshake.pstrlen);
+                buf.put_slice(&handshake.pstr);
+                buf.put_slice(&handshake.reserved);
+                buf.put_slice(&handshake.info_hash);
+                buf.put_slice(&handshake.peer_id);
+            }
+
+            Message::KeepAlive => {
+                buf.put_u32(0);
+            }
+
+            Message::Choke => {
+                buf.put_u32(1);
+                buf.put_u8(1);
+            }
+
+            Message::Unchoke => {
+                buf.put_u32(1);
+                buf.put_u8(2);
+            }
+
+            Message::Interested => {
+                buf.put_u32(1);
+                buf.put_u8(3);
+            }
+
+            Message::NotInterested => {
+                buf.put_u32(1);
+                buf.put_u8(4);
+            }
+            // TODO : Do it for all messages
+
+            //Message::Have(ref have) => {}
+            _ => {}
+        }
+        return buf;
+    }
+
     /// Checks in the given src buffer if the first Message Frame is A Handshake Message Frame
     pub fn is_handshake_message(src: &BytesMut) -> bool {
-        let expected_pstr = String::from("BitTorrent protocol");
+        let _expected_pstr = String::from("BitTorrent protocol");
         // First check if there is enough bytes to be a Handshake Message Frame
         if src.len() >= 68 {
             let pstr_len = src[0];
@@ -67,12 +110,26 @@ impl Message {
     }
 
     /// Checks in the given src buffer if the first Message Frame is A KeepAlive Message Frame
+    ///
+    /// Structure :
+    ///
+    /// <0000>
+    ///
+    /// Which just contains the length prefix and does not have any id and
+    /// payload
+    ///
+    /// Steps :
+    /// Firstly we check if there are enough bytes to contain the length_prefix field i.e <0000>
+    /// field of the KeepAlive Message, if it does then and we need to deserialize those
+    /// length_prefix to u32, if the value is 0_u32 then it's a KeepAlive Message.
+    ///
+    /// Because, no other Message Frame has a message that starts with bytes 0000, so there is no chance
+    /// for this collide with other messages as far as i know
+    ///
     pub fn is_keep_alive_message(src: &BytesMut) -> bool {
-        // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
+            let mut length_prefix_bytes = &src[0..=3];
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
-            // Once we get the length prefix, we check if its value is equal to 0
             return length_prefix == 0;
         }
         return false;
@@ -82,7 +139,7 @@ impl Message {
     pub fn is_choke_message(src: &BytesMut) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
+            let mut length_prefix_bytes = &src[0..=3];
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Choke Message Frame and the message id is 0
@@ -98,7 +155,7 @@ impl Message {
     pub fn is_unchoke_message(src: &BytesMut) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
+            let mut length_prefix_bytes = &src[0..=3];
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Unchoke Message Frame and the message id is 1
@@ -114,7 +171,7 @@ impl Message {
     pub fn is_interested_message(src: &BytesMut) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
+            let mut length_prefix_bytes = &src[0..=3];
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Unchoke Message Frame and the message id is 2
@@ -130,7 +187,7 @@ impl Message {
     pub fn is_not_interested_message(src: &BytesMut) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
+            let mut length_prefix_bytes = &src[0..=3];
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Unchoke Message Frame and the message id is 3
@@ -146,7 +203,7 @@ impl Message {
     pub fn is_have_message(src: &BytesMut) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
+            let mut length_prefix_bytes = &src[0..=3];
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
 
             // Once we get the length prefix, then we simply check if the length_prefix matches
@@ -162,7 +219,7 @@ impl Message {
     /// Checks in the given src buffer if the first Message Frame is A Bitfield Message Frame
     pub fn is_bitfield_message(src: &BytesMut) -> bool {
         if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
+            let mut length_prefix_bytes = &src[0..=3];
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
 
             // Expected length of the entire Bitfield Message Frame
@@ -182,7 +239,7 @@ impl Message {
     pub fn is_request_message(src: &BytesMut) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
+            let mut length_prefix_bytes = &src[0..=3];
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
 
             // Once we get the length prefix, then we simply check if the source is atleast
@@ -198,7 +255,7 @@ impl Message {
     /// Checks in the given src buffer if the first Message Frame is A Piece Message Frame
     pub fn is_piece_message(src: &BytesMut) -> bool {
         if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
+            let mut length_prefix_bytes = &src[0..=3];
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
 
             // Expected length of the entire message
@@ -216,7 +273,7 @@ impl Message {
     /// Checks in the given src buffer if the first Message Frame is A Cancel Message Frame
     pub fn is_cancel_message(src: &BytesMut) -> bool {
         if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
+            let mut length_prefix_bytes = &src[0..=3];
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
 
             // Once we get the length prefix, then we simply check if the source is atleast
@@ -232,7 +289,7 @@ impl Message {
     /// Checks in the given src buffer if the first Message Frame is A Port Message Frame
     pub fn is_port_message(src: &BytesMut) -> bool {
         if src.len() >= 4 {
-            let length_prefix_bytes = &src[0..=3];
+            let mut length_prefix_bytes = &src[0..=3];
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
 
             // Once we get the length prefix, then we simply check if the source is atleast
@@ -260,10 +317,10 @@ impl Bitfield {
         let mut have = Vec::new();
         let mut not_have = Vec::new();
 
-        let length_prefix_bytes = &src[0..=3];
+        let mut length_prefix_bytes = &src[0..=3];
         let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
 
-        let bitfield_frame_length = length_prefix + 4;
+        let bitfield_frame_length = (length_prefix + 4) as usize;
 
         let bitfield_bytes = &src[5..bitfield_frame_length];
         let bitfield = BytesMut::from(bitfield_bytes);
@@ -272,6 +329,7 @@ impl Bitfield {
             match bit {
                 0 => not_have.push(index),
                 1 => have.push(index),
+                _ => {}
             }
         }
         src.split_to(bitfield_frame_length as usize);
@@ -331,7 +389,7 @@ pub struct Have {
 
 impl Have {
     pub fn from_bytes(src: &mut BytesMut) -> Self {
-        let piece_index_bytes = &src[5..=8];
+        let mut piece_index_bytes = &src[5..=8];
         // TODO : Make sure unpwrap here is safe
         let piece_index = ReadBytesExt::read_u32::<BigEndian>(&mut piece_index_bytes).unwrap();
         Self { piece_index }
@@ -416,17 +474,6 @@ impl Handshake {
             peer_id,
         }
     }
-
-    /// Serializes the Handshake instance into bytes
-    pub fn to_bytes(&self) -> BytesMut {
-        let mut buf = BytesMut::new();
-        buf.put_u8(self.pstrlen);
-        buf.put_slice(&(self.pstr));
-        buf.put_slice(&(self.reserved));
-        buf.put_slice(&(self.info_hash));
-        buf.put_slice(&(self.peer_id));
-        buf
-    }
 }
 
 /// Unchoke message
@@ -506,9 +553,9 @@ impl Request {
     /// src - It must be validated by using is_request_message() method
     /// before calling this from_bytes() method
     pub fn from_bytes(src: &mut BytesMut) -> Self {
-        let index_bytes = &src[5..=8];
-        let begin_bytes = &src[9..=12];
-        let length_bytes = &src[13..=16];
+        let mut index_bytes = &src[5..=8];
+        let mut begin_bytes = &src[9..=12];
+        let mut length_bytes = &src[13..=16];
 
         let index = ReadBytesExt::read_u32::<BigEndian>(&mut index_bytes).unwrap();
         let begin = ReadBytesExt::read_u32::<BigEndian>(&mut begin_bytes).unwrap();
@@ -551,19 +598,19 @@ impl Block {
     //  /// Creates a "Block" instance from the raw "Piece" message sent by the client
     //  /// NOTE : It removes the data it read from the buffer
     pub fn from_bytes(src: &mut BytesMut) -> Self {
-        let length_prefix_bytes = &[0..=3];
-        let piece_index_bytes = &[5..=8];
-        let bytes_index_bytes = &[9..=12];
+        let mut length_prefix_bytes = &src[0..=3];
+        let mut piece_index_bytes = &src[5..=8];
+        let mut bytes_index_bytes = &src[9..=12];
 
         let length_prefix: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
         let piece_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut piece_index_bytes).unwrap();
         let byte_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut bytes_index_bytes).unwrap();
 
-        let total_frame_length = 4 + length_prefix;
-        let block_length = length_prefix - 9;
-        let block_bytes = &[13..block_length];
+        let block_length = (length_prefix - 9) as usize;
+        let block_bytes = &src[13..block_length];
         let raw_block = BytesMut::from(block_bytes);
 
+        let total_frame_length = 4 + length_prefix;
         src.split_to(total_frame_length as usize);
         Self {
             piece_index,
@@ -601,11 +648,11 @@ impl Cancel {
     /// Cancel::is_cancel_message() function before actually creating it
     ///
     /// It will consume the Cancel Message Frame bytes and create the Cancel instance
-    pub fn from_bytes(src: &BytesMut) -> Self {
+    pub fn from_bytes(src: &mut BytesMut) -> Self {
         // TODO : Add some sort of error handling by using is_cancel_message() method
-        let index_bytes = &src[5..=8];
-        let begin_bytes = &src[9..=12];
-        let length_bytes = &src[13..=16];
+        let mut index_bytes = &src[5..=8];
+        let mut begin_bytes = &src[9..=12];
+        let mut length_bytes = &src[13..=16];
 
         let index = ReadBytesExt::read_u32::<BigEndian>(&mut index_bytes).unwrap();
         let begin = ReadBytesExt::read_u32::<BigEndian>(&mut begin_bytes).unwrap();
@@ -642,7 +689,7 @@ impl Port {
     /// It will consume the Port Message Frame bytes and create the Port instance
     pub fn from_bytes(src: &mut BytesMut) -> Self {
         // TODO : Add some sort of error handling by using is_por_message() method
-        let listen_port_bytes = &src[4..=6];
+        let mut listen_port_bytes = &src[4..=6];
 
         let listen_port = ReadBytesExt::read_u16::<BigEndian>(&mut listen_port_bytes).unwrap();
         src.split_to(7);

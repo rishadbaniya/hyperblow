@@ -1,5 +1,6 @@
 #![allow(unused_must_use)]
 
+use super::peer::Peer;
 use crate::core::state::{DownState, State};
 use crate::core::tracker::Tracker;
 use crate::core::File;
@@ -8,6 +9,7 @@ use futures::future::join_all;
 use hyperblow_parser::torrent_parser::FileMeta;
 use std::sync::Arc;
 use tokio::join;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::RwLock;
 use tokio::{net::UdpSocket, sync::Mutex, task::JoinHandle};
 
@@ -45,6 +47,18 @@ pub struct TorrentFile {
     /// For eg. A UI library is keeping track of the changes in "state" every 2 seconds and displaying the UI,
     /// here we are making changes in the state field continuosly
     pub state: Arc<State>,
+
+    /// Trackers get the socket address of the peers.
+    /// Let's say there are 20 trackers, we are communicating to,
+    /// and when all of them have this UnboundedSender, then we can simply
+    /// use this channel to collect the peers and after collecting the
+    /// peers we can invoke run() method of the peer and
+    /// store in the peers field of [Peers]
+    peers_channel: (Arc<UnboundedSender<Peer>>, Arc<Mutex<UnboundedReceiver<Peer>>>),
+}
+
+struct Peers {
+    peers: Vec<u32>,
 }
 
 /// TODO: Implement DHT(Distributed Hash Table) as well
@@ -66,6 +80,9 @@ impl TorrentFile {
                 let total_size = 0; // TODO : Replace it with actual total size of the torrent
                 let peers = ArcMutex!(Vec::new());
 
+                let peers_channel = unbounded_channel::<Peer>();
+                let peers_channel = (Arc::new(peers_channel.0), ArcMutex!(peers_channel.1));
+
                 let state = Arc::new(State {
                     d_state,
                     file_tree,
@@ -83,6 +100,7 @@ impl TorrentFile {
                     pieces_count,
                     meta_info,
                     state,
+                    peers_channel,
                 })
             }
             _ => None,
@@ -111,7 +129,7 @@ impl TorrentFile {
                         // This tries to parse the given URL and if it parses successfully then
                         // signals to resolve the socket address
                         let torrent_state = self.state.clone();
-                        if let Ok(mut tracker) = Tracker::new(addrs, torrent_state) {
+                        if let Ok(mut tracker) = Tracker::new(addrs, torrent_state, self.peers_channel.0.clone()) {
                             // TODO : Figure out what to do to those trackers who DNS wasn't
                             // resolved, whether to try after a certain time or what
                             if tracker.resolveSocketAddr() {
@@ -126,7 +144,7 @@ impl TorrentFile {
         } else {
             let ref addrs = self.meta_info.announce;
             let torrent_state = self.state.clone();
-            if let Ok(mut tracker) = Tracker::new(addrs, torrent_state) {
+            if let Ok(mut tracker) = Tracker::new(addrs, torrent_state, self.peers_channel.0.clone()) {
                 if tracker.resolveSocketAddr() {
                     tracker_s.push(vec![Arc::new(tracker)]);
                 }
