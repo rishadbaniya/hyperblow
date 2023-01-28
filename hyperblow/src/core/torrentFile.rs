@@ -264,6 +264,13 @@ impl TorrentFile {
     }
 
     pub async fn runDownload(&self) {
+        let ref peers_rcv = self.peers_channel.1;
+        let mut peers_rcv = peers_rcv.lock().await;
+        while let Some(peer) = peers_rcv.recv().await {
+            println!("--------------------------------------------",);
+            println!("{:?}", peer.socket_adr);
+            println!("--------------------------------------------",);
+        }
         // TODO: Run in a loop, but never return anything
     }
 

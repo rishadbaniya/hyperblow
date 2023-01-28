@@ -193,6 +193,10 @@ impl Tracker {
                                                             println!("The interval is {}", ar.interval);
                                                             let sleep_duration = Duration::from_secs(ar.interval as u64);
                                                             {
+                                                                for peer_socket_adr in ar.peersAddresses.clone() {
+                                                                    let peer = Peer::new(peer_socket_adr, self.torrent_state.clone());
+                                                                    self.peer_sender.send(peer);
+                                                                }
                                                                 let mut announce_response = self.announce_response.lock().await;
                                                                 *announce_response = res;
                                                             }
