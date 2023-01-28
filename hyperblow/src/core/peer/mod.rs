@@ -1,52 +1,44 @@
+mod codec;
 mod messages;
 mod piece;
 
-use self::messages::Bitfield;
-use self::messages::Block;
-use self::messages::Cancel;
-use self::messages::Have;
-use self::messages::Port;
-use self::messages::Request;
-
 use super::state::State;
 use crate::ArcMutex;
-use byteorder::BigEndian;
-use byteorder::ReadBytesExt;
-use messages::Handshake;
 use messages::Message;
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
-use tokio::io::AsyncReadExt;
-use tokio::io::AsyncWriteExt;
 use tokio::{
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpStream,
-    },
+    net::TcpStream,
     sync::Mutex,
     time::{sleep, timeout},
 };
-use tokio_util::codec::Framed;
-use tokio_util::codec::{Decoder, Encoder};
 
-/// PeerState denotes high level overview of the
-/// current state of relationship with the Peer
+use codec::PeerMessageCodec;
+use tokio_util::codec::Framed;
+
+/// PeerState denotes high level overview of the current state of
+/// relationship of this client with the remote Peer
 #[derive(Debug, Clone)]
 pub enum PeerState {
-    /// Haven't even tried to connect to the peer
+    /// Haven't even made a TCP Connection
     NotConnected,
 
-    /// Trying to connect to the peer
+    /// Trying to make a TCP Connection
     TryingToConnect,
 
-    /// Staying idle, because Connection timeout occured while trying to connect with the peer
+    /// Staying idle, because Connection timeout occured while trying to make a TCP Connection
+    /// with the peer
     ConnectionTimeoutIdle,
 
-    /// Staying idle, because TcpStream error occured while trying to connect with the peer
+    /// Staying idle, because TcpStream error occured while trying to make a TCP Connection  with
+    /// the peer
     ConnectionErrorIdle,
 
-    /// Connected with the peer
+    /// Made a TCP Connection with the peer
     Connected,
+
+    /// Sent a Handshake to the Peer
+    SentHandshake,
     // TODO: Add more states later on
     //RequestingPiece,
     // DOWNLOADING_PIECE,
@@ -101,7 +93,7 @@ pub struct Peer {
     /// The socket address of the peer
     pub socket_adr: SocketAddr,
 
-    peer_codec: Arc<Mutex<Option<Framed<TcpStream, PeerMessageCodec>>>>,
+    stream: Arc<Mutex<Option<Framed<TcpStream, PeerMessageCodec>>>>,
 }
 
 impl Peer {
@@ -117,13 +109,13 @@ impl Peer {
             peer_state: PeerState::NotConnected,
         });
 
-        let peer_codec = ArcMutex!(None);
+        let stream = ArcMutex!(None);
 
         Self {
             info,
             state,
             socket_adr,
-            peer_codec,
+            stream,
         }
     }
 
@@ -141,26 +133,27 @@ impl Peer {
     /// socket error or connection timeout, figure out the time until next connection attempt
     async fn connect(&self, socket_adr: SocketAddr) {
         let CONNECTION_TIMEOUT = Duration::from_secs(16);
-
         loop {
             match timeout(CONNECTION_TIMEOUT, TcpStream::connect(socket_adr)).await {
                 Ok(connection) => match connection {
                     Ok(tcp_stream) => {
-                        let m = PeerMessageCodec::new();
-                        //let x = Framed::new();
+                        let peer_message_codec = codec::PeerMessageCodec;
+                        let codec_stream = Framed::new(tcp_stream, peer_message_codec);
+                        let mut stream = self.stream.lock().await;
+                        *stream = Some(codec_stream);
                     }
                     Err(_) => {
                         // Err while trying to achieve a TCP Connection with the peer
                         // TODO : Handle Connection timeout properly with
                         // proper protocol implementation rather than this 1000 secs of sleep
-                        sleep(Duration::from_secs(1000));
+                        sleep(Duration::from_secs(1000)).await;
                     }
                 },
                 Err(_) => {
                     // TCP Connection timeout
                     // TODO : Handle Connection timeout properly with
                     // proper protocol implementation rather than this 1000 secs of sleep
-                    sleep(Duration::from_secs(1000));
+                    sleep(Duration::from_secs(1000)).await;
                 }
             }
         }
@@ -215,14 +208,6 @@ impl Peer {
         ////Ok(messages)
     }
 
-    async fn get_messages(&self) {
-        // It's the max amount of data we'll ever receive, which is the max size of block we're
-        // ever gonna request
-        const MAX_BUFFER_CAPACITY: usize = 16000;
-
-        let mut messages: Vec<Message> = Vec::new();
-    }
-
     ///
     /// TODO : Write some stuff about INTERESTED message and its response
     ///
@@ -231,56 +216,5 @@ impl Peer {
         // self.write_half.write_all(&Interested::build_message()).await;
 
         // self.receiver.recv().await
-    }
-}
-
-#[derive(Debug)]
-struct PeerMessageCodec {
-    messages: Vec<Message>,
-}
-
-impl PeerMessageCodec {
-    pub fn new() -> Self {
-        let messages = Vec::new();
-        Self { messages }
-    }
-}
-
-impl Decoder for PeerMessageCodec {
-    type Item = Vec<Message>;
-    type Error = std::io::Error;
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.len() == 0 {
-            return Ok(Some(self.messages));
-        } else if Message::is_handshake_message(src) {
-            self.messages.push(Message::Handshake(Handshake::from(src)));
-        } else if Message::is_keep_alive_message(src) {
-            self.messages.push(Message::KeepAlive);
-            src.split_to(4);
-        } else if Message::is_choke_message(src) {
-            self.messages.push(Message::Choke);
-            src.split_to(5);
-        } else if Message::is_unchoke_message(src) {
-            self.messages.push(Message::Unchoke);
-            src.split_to(5);
-        } else if Message::is_interested_message(src) {
-            self.messages.push(Message::Interested);
-            src.split_to(5);
-        } else if Message::is_not_interested_message(src) {
-            self.messages.push(Message::NotInterested);
-        } else if Message::is_have_message(src) {
-            self.messages.push(Message::Have(Have::from_bytes(src)));
-        } else if Message::is_bitfield_message(src) {
-            self.messages.push(Message::Bitfield(Bitfield::from_bytes(src)));
-        } else if Message::is_request_message(src) {
-            self.messages.push(Message::Request(Request::from_bytes(src)))
-        } else if Message::is_piece_message(src) {
-            self.messages.push(Message::Piece(Block::from_bytes(src)))
-        } else if Message::is_cancel_message(src) {
-            self.messages.push(Message::Cancel(Cancel::from_bytes(src)));
-        } else if Message::is_port_message(src) {
-            self.messages.push(Message::Port(Port::from_bytes(src)));
-        }
-        return Ok(None);
     }
 }

@@ -4,6 +4,7 @@ mod announce_req_res;
 mod connect_req_res;
 mod error_res;
 
+use crate::core::peer::Peer;
 use crate::core::state::State;
 use crate::ArcMutex;
 use byteorder::{BigEndian, ReadBytesExt};
@@ -20,8 +21,6 @@ use tokio::time::{sleep, timeout};
 
 use self::announce_req_res::{AnnounceRequest, AnnounceResponse};
 use self::connect_req_res::{ConnectRequest, ConnectResponse};
-
-use super::peer::Peer;
 
 ///Type of protocol used to connect to the tracker
 #[derive(PartialEq, Debug, Clone)]
@@ -57,6 +56,12 @@ pub struct Tracker {
     /// Tracker
     pub socketAddrs: Option<Vec<SocketAddr>>,
 
+    /// A sender part of a channel, to send the [Peer] instance to the runDownload()
+    /// method of [TorrentFile], created by collecting the socket address of Peers
+    /// from the Trackers, received while getting AnnounceResponse or ScrapeResponse
+    /// from other trackers.
+    pub peer_sender: Arc<UnboundedSender<Peer>>,
+
     pub udp_channel: Option<(UnboundedSender<Vec<u8>>, Arc<Mutex<UnboundedReceiver<Vec<u8>>>>)>,
 
     /// Data to make connect request
@@ -81,7 +86,7 @@ pub struct Tracker {
 
 impl Tracker {
     /// Tries to create a Tracker instance by parsing the given url
-    pub fn new(address: &String, torrent_state: Arc<State>) -> Result<Tracker, Box<dyn std::error::Error>> {
+    pub fn new(address: &String, torrent_state: Arc<State>, peer_sender: Arc<UnboundedSender<Peer>>) -> Result<Tracker, Box<dyn std::error::Error>> {
         let address = Url::parse(address)?;
 
         let connect_request = ArcMutex!(TrackerRequest::None);
@@ -114,6 +119,7 @@ impl Tracker {
             announce_response,
             scrape_request,
             scrape_response,
+            peer_sender,
         })
     }
 
@@ -184,6 +190,7 @@ impl Tracker {
                                                 Ok(_) => match self.getResponse().await {
                                                     Some(res) => {
                                                         if let TrackerResponse::AnnounceResponse(ref ar) = res {
+                                                            println!("The interval is {}", ar.interval);
                                                             let sleep_duration = Duration::from_secs(ar.interval as u64);
                                                             {
                                                                 let mut announce_response = self.announce_response.lock().await;
