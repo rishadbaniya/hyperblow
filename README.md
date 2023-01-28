@@ -2,6 +2,7 @@
 
 **Currently this project is in a complete rewrite**
 
+
 [![dependency status](https://deps.rs/repo/github/rishadbaniya/hyperblow/status.svg)](https://deps.rs/repo/github/rishadbaniya/hyperblow)
 
 
@@ -30,6 +31,7 @@ TODO :
 - ✅ Implement the ".torrent" file parser
 - ✅ Implement the MagnetURI verifier and parser
 - ✅ Handle redundancy of both the tracker URL's in "announce" and "announce-list" field, used BEP12
+- ☐  Upload Architecture and working methods of both Tracker and Peer
 - ☐ Make use of Crossbeam crate's Concurrency Primitives
 - ☐ Add both Unit and Integration testing for the parsing library 
 - ☐ Re architect the entire CLI application's system design
