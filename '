@@ -1,6 +1,5 @@
 use std::io::Error;
 
-use futures::stream::FuturesUnordered;
 //// Engine, is the core abstraction over all the state, tasks of the
 //// torrent session. It is going to be the backend for the CLI or Desktop Applications.
 ////
@@ -22,7 +21,7 @@ use tokio::runtime::Runtime;
 //use futures::stream::{FuturesUnordered, StreamExt};
 //use futures::FutureExt;
 //use tokio::select;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 use crate::core::TorrentFile;
 use std::{sync::Arc, thread::JoinHandle};
@@ -36,55 +35,53 @@ struct Engine {
     /// where all the torrents download is gonna take place
     engine_thread_handle: JoinHandle<()>,
 
-    /// A internal sender that sends the newly spawned torrent source
+    /// A internal sender that sends the newly spawned torrent
     /// into the engine_thread
     torrent_thread_sender: UnboundedSender<TorrentSource>,
 
-    torrenthandle_receiver: UnboundedReceiver<Arc<TorrentHandle>>,
+    torrenthandle_receiver: UnboundedSender<Arc<TorrentHandle>>,
 }
 
 impl Engine {
     /// Creates an instance of the engine
-    fn new() -> Self {
-        let torrents = Vec::new();
-
-        // TODO : Make a versatile runtime, using Builder method
-        let engine_runtime = Runtime::new().unwrap();
-        let (tsrc_sd, mut tsrc_rx) = unbounded_channel::<TorrentSource>();
-        let (thdl_sd, mut thdl_rx) = unbounded_channel::<Arc<TorrentHandle>>();
-
-        let engine_thread_handle = std::thread::spawn(move || {
-            let tokio_runtime = Runtime::new().unwrap();
-            let futures = FuturesUnordered::new();
-            tokio_runtime.block_on(async move {
-                tokio::spawn(async move {
-                    while let Some(source) = tsrc_rx.recv().await {
-                        let handle = TorrentHandle::new(source).await;
-                        thdl_sd.send(handle);
-                        futures.push(async {});
-                    }
-                });
-
-                //tokio::spawn(async move { futures.push(async {}) });
-            });
-        });
-
-        Self {
-            torrents,
-            engine_thread_handle,
-            torrent_thread_sender: tsrc_sd,
-            torrenthandle_receiver: thdl_rx,
-        }
-    }
+    //    fn new() -> Self {
+    //        let platform = EnginePlatform::Unknown;
+    //        let torrents = Vec::new();
+    //
+    //        // TODO : Make a versatile runtime, using Builder method
+    //        let engine_runtime = Runtime::new().unwrap();
+    //        let (sd, mut rx) = unbounded_channel::<Arc<dyn Torrent + Send + Sync>>();
+    //        let torrent_sender = sd;
+    //
+    //        let engine_thread_handle = std::thread::spawn(move || {
+    //            let tokio_runtime = Runtime::new().unwrap();
+    //            tokio_runtime.block_on(async move {
+    //                while let Some(torrent) = rx.recv().await {
+    //                    let x = torrent.run();
+    //                    tokio::spawn(x);
+    //                }
+    //                //while let Some(x) = rx.recv().await {
+    //                //    let y = x.clone().run();
+    //                //    tokio::spawn(x.clone().run());
+    //                //}
+    //            });
+    //        });
+    //
+    //        Self {
+    //            engine_thread_handle,
+    //            platform,
+    //            torrents,
+    //            torrent_sender,
+    //        }
+    //    }
     //
     //    fn start(&self) {}
     //
-    /// Spawns a new TorrentHandle for the torrent to be downloaded and returns
-    fn spawn(&mut self, input: TorrentSource) -> Option<Arc<TorrentHandle>> {
-        // Sends the torrent source into the engine runtime thread
-        self.torrent_thread_sender.send(input);
-        // Attempts to receive the TorrentHandle produced from the torrent source
-        self.torrenthandle_receiver.blocking_recv()
+    /// Spawns a new torrent to be downloaded and returns
+    fn spawn(&self, input: TorrentSource) -> () {
+        let y = async {
+            self.torrent_thread_sender.send(input);
+        };
     }
 
     // Check either inpu is a path or a magnet URI, and then decide accordingly either to create
@@ -152,15 +149,22 @@ struct TorrentHandle {
 
 impl TorrentHandle {
     /// Consumes the torrent source, may it be a Path or a MagnetURI,
-    async fn new(source: TorrentSource) -> Arc<TorrentHandle> {
-        return match source {
-            TorrentSource::FilePath(ref path) => {
-                let torrent = TorrentFile::new(path).await.unwrap();
-                Arc::new(Self {
-                    inner: Torrent::FileTorrent(torrent),
-                })
-            }
-        };
+    async fn new(source: TorrentSource) {
+        //    return match source {
+        //        TorrentSource::FilePath(ref path) => {
+        //            if let Some(torrent) = TorrentFile::new(path).await {
+        //                Ok(Self {
+        //                    inner: Torrent::FileTorrent(torrent),
+        //                })
+        //            } else {
+        //                //Err("ABC".to_string() as Box<dyn std::error::Error>)
+        //            }
+        //            //let torrent = TorrentFile::new(path)
+        //            //     Self {
+        //            //     inner: Torrent::FileTorrent(TorrentFile::new(path).await.unwrap()),
+        //            // }
+        //        }
+        //    };
     }
 
     async fn run(&self) {
