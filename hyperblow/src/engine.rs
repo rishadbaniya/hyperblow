@@ -18,10 +18,10 @@ use futures::stream::FuturesUnordered;
 //// 2. The only abstraction engine is going to share is EngineHandle,
 ////    which can control core behaviours of engine such as shut it down
 //// 3.
+use futures::stream::{FuturesUnordered, StreamExt};
+use futures::FutureExt;
 use tokio::runtime::Runtime;
-//use futures::stream::{FuturesUnordered, StreamExt};
-//use futures::FutureExt;
-//use tokio::select;
+use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::core::TorrentFile;
@@ -55,17 +55,18 @@ impl Engine {
 
         let engine_thread_handle = std::thread::spawn(move || {
             let tokio_runtime = Runtime::new().unwrap();
-            let futures = FuturesUnordered::new();
+            let all_concurrent_tasks = FuturesUnordered::new();
             tokio_runtime.block_on(async move {
-                tokio::spawn(async move {
-                    while let Some(source) = tsrc_rx.recv().await {
-                        let handle = TorrentHandle::new(source).await;
-                        thdl_sd.send(handle);
-                        futures.push(async {});
+                select! {
+                    Some(src) = tsrc_rx.recv() => {
+                        let handle = TorrentHandle::new(src).await;
+                        all_concurrent_tasks.push(handle.run());
                     }
-                });
 
-                //tokio::spawn(async move { futures.push(async {}) });
+                    _ = all_concurrent_tasks.next() =>{
+                    }
+
+                }
             });
         });
 
@@ -90,56 +91,6 @@ impl Engine {
     // Check either inpu is a path or a magnet URI, and then decide accordingly either to create
     // a FileTorrent or MagnetURI Torrentsjflsdlsadjflsadjflas
 }
-
-///// The platform on which this engine is running
-///// If someone is using Hyperblow CLI, then EnginePlatform::CLI will be used
-//pub enum EnginePlatform {
-//    CLI,
-//    Desktop,
-//    Unknown,
-//}
-//
-////pub enum Torrent {
-////    File(FileTorrent),
-////    MagnetLink(MagnetLinkTorrent),
-////}
-//
-
-//
-/////// A trait to perform every CRUD Operations over the state
-/////// of the Torrent being downloaded
-////#[async_trait]
-////trait TorrentHandle {
-////    /// Starts the downloading and uploading, or resumes if it has been paused
-////    fn start(&self);
-////
-////    /// Temporarily stops the download and upload
-////    fn pause(&self);
-////}
-////
-////#[async_trait]
-////impl TorrentHandle for TorrentFile {
-////    async fn start(&self) {
-////        self.run().await;
-////    }
-////
-////    fn pause(&self) {}
-////}
-//
-////unsafe impl<T: Torrent> Send for TorrentHandle<T> {}
-////
-////unsafe impl<T: Torrent> Sync for TorrentHandle<T> {}
-////
-////impl<T: Torrent> TorrentHandle<T> {
-////    fn new(torrent: T ) -> Self {
-////        Self { torrent }
-////    }
-////
-////    pub async fn start(&self) {
-////
-////        //self.torrent.run().await;
-////    }
-////}
 
 pub enum TorrentSource {
     //MagnetURI(String),
