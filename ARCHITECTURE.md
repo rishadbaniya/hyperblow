@@ -45,3 +45,12 @@ In order to connect to peers and start sending and receiving pieces, first of al
 Once you have received peer's ip address, you can use it to send a "Handshake" **Message**. The tricky part comes right here, we expect one of 11 Message Type to be sent by peer as a response to that Handshake Message, but what happens is that sometimes there is some sort of incosistency. It means, when we can recieve multiple Message in single packet i.e we can end up getting a very long unusual message consisting of several *Message* at the same time. Eg both **Handshake** and **Bitfield** in the same packet. We need to build some sort of mechanism to deal with this inconsistency of *Message*
 
 A client can send us a series of Have messages, one for each piece it has. Alternatively, at the start of a connection, the peer can send a ‘Bitfield’ message. Bitfield messages are optional and can only be sent as the message immediately following the handshake message.
+
+
+# Engine
+
+It's the core abstraction of overall torrent session, it handles everything and acts as an backend for frontends, may it be CLI or GUI. It provides various API to access different torrent sessions, controlling the engine.
+
+A basic possible Engine Architecture : 
+![image](https://user-images.githubusercontent.com/54678051/216830912-81e0a44e-7fce-4700-97af-9db4b89b61df.png)
+
