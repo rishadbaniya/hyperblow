@@ -1,6 +1,5 @@
 use std::io::Error;
 
-use futures::stream::FuturesUnordered;
 //// Engine, is the core abstraction over all the state, tasks of the
 //// torrent session. It is going to be the backend for the CLI or Desktop Applications.
 ////
@@ -27,7 +26,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use crate::core::TorrentFile;
 use std::{sync::Arc, thread::JoinHandle};
 
-struct Engine {
+pub struct Engine {
     /// Stores all the torrents that are to be downloaded
     torrents: Vec<Arc<TorrentHandle>>,
     // Stores the platform this engine is running in
@@ -40,16 +39,18 @@ struct Engine {
     /// into the engine_thread
     torrent_thread_sender: UnboundedSender<TorrentSource>,
 
+    /// A pointer to the torrent handle spawned by the internal thread is gonna
+    /// be passed back to the
     torrenthandle_receiver: UnboundedReceiver<Arc<TorrentHandle>>,
 }
 
 impl Engine {
     /// Creates an instance of the engine
-    fn new() -> Self {
+    pub fn new() -> Self {
         let torrents = Vec::new();
 
         // TODO : Make a versatile runtime, using Builder method
-        let engine_runtime = Runtime::new().unwrap();
+
         let (tsrc_sd, mut tsrc_rx) = unbounded_channel::<TorrentSource>();
         let (thdl_sd, mut thdl_rx) = unbounded_channel::<Arc<TorrentHandle>>();
 
@@ -77,19 +78,22 @@ impl Engine {
             torrenthandle_receiver: thdl_rx,
         }
     }
-    //
-    //    fn start(&self) {}
-    //
-    /// Spawns a new TorrentHandle for the torrent to be downloaded and returns
-    fn spawn(&mut self, input: TorrentSource) -> Option<Arc<TorrentHandle>> {
-        // Sends the torrent source into the engine runtime thread
-        self.torrent_thread_sender.send(input);
-        // Attempts to receive the TorrentHandle produced from the torrent source
-        self.torrenthandle_receiver.blocking_recv()
-    }
 
-    // Check either inpu is a path or a magnet URI, and then decide accordingly either to create
-    // a FileTorrent or MagnetURI Torrentsjflsdlsadjflsadjflas
+    /// Spawns a new TorrentHandle for the torrent to be downloaded and returns,
+    /// it's async but it just waits for the internal Engine thread to create a torrent handle for
+    /// it
+    pub async fn spawn(&mut self, input: TorrentSource) -> Option<Arc<TorrentHandle>> {
+        // Sends the torrent source into the inner thread that holds the
+        // tokio runtime
+        self.torrent_thread_sender.send(input);
+
+        // Attempts to receive the TorrentHandle produced from the torrent source
+        if let Some(handle) = self.torrenthandle_receiver.recv().await {
+            Some(handle)
+        } else {
+            None
+        }
+    }
 }
 
 pub enum TorrentSource {
