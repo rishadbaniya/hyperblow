@@ -52,5 +52,7 @@ A client can send us a series of Have messages, one for each piece it has. Alter
 It's the core abstraction of overall torrent session, it handles everything and acts as an backend for frontends, may it be CLI or GUI. It provides various API to access different torrent sessions, controlling the engine.
 
 A basic possible Engine Architecture : 
-![image](https://user-images.githubusercontent.com/54678051/216830912-81e0a44e-7fce-4700-97af-9db4b89b61df.png)
+![image](https://user-images.githubusercontent.com/54678051/216830912-81e0a44e-7fce-4700-97af-9db4b89b61df.png)\
+![image](https://user-images.githubusercontent.com/54678051/216831243-e854c244-d39e-4662-be2d-91154fa0926f.png)
+
 
