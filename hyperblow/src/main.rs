@@ -3,10 +3,8 @@
 mod core;
 mod engine;
 
-use crate::core::TorrentFile;
 use clap::Parser;
-use engine::{Engine, TorrentSource};
-use std::sync::Arc;
+use engine::Engine;
 
 //use std::{env, error::Error, sync::Arc, thread, time::Instant};
 //use tokio::sync::Mutex;
@@ -23,13 +21,13 @@ struct Arguments {
     magnet_uri: Option<String>,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args = Arguments::parse();
     let mut engine = Engine::new();
 
-    if let Some(ref path) = args.torrent_file {
-        let path = path.clone();
-        let torrent_handle = engine.spawn(TorrentSource::FilePath(path)).await;
-    }
+    //if let Some(ref path) = args.torrent_file {
+    //    //    let path = path.clone();
+    //    //    //        let torrent_handle = engine.spawn(TorrentSource::FilePath(path)).await;
+    //}
 }

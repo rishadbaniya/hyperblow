@@ -164,7 +164,7 @@ impl TorrentFile {
         File::new(meta, &".".to_owned()).await.unwrap()
     }
 
-    pub async fn getUDPSocket(&mut self) -> Arc<UdpSocket> {
+    pub async fn getUDPSocket(&self) -> Arc<UdpSocket> {
         // TODO : Currently this function exhaustively checks for each port and tries to
         // give one of the ports incrementing from 6881
         let mut port = 6881;
@@ -281,12 +281,11 @@ impl TorrentFile {
     // ///
     // /// NOTE : While using this method, one must clone and keep a Arc pointer of "state" field,
     // /// so that they can use it later on to display the UI or the data changed
-    pub fn run(&self) -> JoinHandle<()> {
+    pub fn run(x: Arc<TorrentFile>) -> JoinHandle<()> {
         let rt = async move {
             println!("HEY THERE");
-
             // A UDP socket for Trackers, not just a single tracker
-            let t_udp_socket = self.getUDPSocket().await;
+            let t_udp_socket = x.getUDPSocket().await;
 
             //let tasks = vec![];
             // Collects all the tasks
@@ -296,9 +295,9 @@ impl TorrentFile {
             // At last run them in parallel, through some ways such as join_all(Uses abstraction upon FuturesUnordered) or FuturesUnordered directly
             //let concurrent = FuturesUnordered::new();
 
-            if let Ok(_) = self.resolveTrackers().await {
-                let run_trackers = self.runTrackers(t_udp_socket.clone());
-                let run_download = self.runDownload();
+            if let Ok(_) = x.resolveTrackers().await {
+                let run_trackers = x.runTrackers(t_udp_socket.clone());
+                let run_download = x.runDownload();
 
                 // Run both
                 // 1. Requesting and resolving the trackers
