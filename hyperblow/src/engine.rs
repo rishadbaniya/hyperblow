@@ -1,5 +1,4 @@
-// TODO : Implementa a way to identify the platform the engine is running on
-
+#![allow(dead_code, unused_must_use)]
 //// Engine, is the core abstraction over all the state, tasks of the
 //// torrent session. It is going to be the backend for the CLI or Desktop Applications.
 ////
@@ -23,9 +22,14 @@ use tokio::sync::Mutex;
 use crate::core::TorrentFile;
 use std::{sync::Arc, thread::JoinHandle};
 
+pub enum TorrentSource {
+    //MagnetURI(String),
+    FilePath(String),
+}
+
 pub struct Engine {
     /// Stores all the torrents that are to be downloaded
-    torrents: Vec<Arc<TorrentHandle>>,
+    pub torrents: Arc<Mutex<Vec<Arc<TorrentHandle>>>>,
 
     /// The thread that spawns the tokio runtime, where all the torrents download is gonna take place
     engine_thread_handle: JoinHandle<()>,
@@ -39,8 +43,8 @@ pub struct Engine {
 
 impl Engine {
     /// Creates an instance of the engine
-    pub fn new() -> Self {
-        let torrents = Vec::new();
+    pub fn new() -> Arc<Self> {
+        let torrents = Arc::default();
 
         // Receivies the torrent source from ui_thread and sends it into the engine thread
         let (tsrc_sd, mut tsrc_rx) = unbounded_channel::<TorrentSource>();
@@ -58,22 +62,24 @@ impl Engine {
                     let handle = TorrentHandle::new(src).await;
                     let tokio_handle = handle.clone();
                     tokio::task::spawn(async move { tokio_handle.run().await });
+
+                    // Send the handle back to the main thread
                     thdl_sd.send(handle);
                 }
             });
         });
 
-        Self {
+        Arc::new(Self {
             torrents,
             engine_thread_handle,
             trnt_thread_sender: tsrc_sd,
             trnt_handle_receiver: Arc::new(Mutex::new(thdl_rx)),
-        }
+        })
     }
 
-    /// Creates a tokio runtime on thread its calleda
-    pub fn generate_tokio_runtime() -> Runtime {
-        Builder::new_current_thread().build().unwrap()
+    /// Creates a tokio runtime on thread its called
+    fn generate_tokio_runtime() -> Runtime {
+        Builder::new_multi_thread().enable_all().build().unwrap()
     }
 
     /// Takes TorrentSource as input, it sends the TorrentSource to the internal engine_thread and
@@ -81,31 +87,32 @@ impl Engine {
     /// method i.e ui_thread
     ///
     ///  TODO : Return some verbose error i.e Result<T,G> rather than Option None
-    pub async fn spawn(&mut self, src: TorrentSource) -> Option<Arc<TorrentHandle>> {
+    pub async fn spawn(&self, src: TorrentSource) -> Option<Arc<TorrentHandle>> {
         // Sends the torrent source into the engine_thread that holds the tokio runtime
-        self.trnt_thread_sender.send(src);
-        let mut torrenthandle_receiver = self.trnt_handle_receiver.lock().await;
-
-        if let Some(handle) = torrenthandle_receiver.recv().await {
-            Some(handle)
+        if let Ok(_) = self.trnt_thread_sender.send(src) {
+            let mut torrenthandle_receiver = self.trnt_handle_receiver.lock().await;
+            if let Some(handle) = torrenthandle_receiver.recv().await {
+                println!("GOT HERE BRO");
+                //println!("{:?}", self.torrents);
+                self.torrents.lock().await.push(handle.clone());
+                Some(handle)
+            } else {
+                None
+            }
         } else {
             None
         }
     }
 }
 
-pub enum TorrentSource {
-    //MagnetURI(String),
-    FilePath(String),
-}
-
+#[derive(Debug)]
 pub struct TorrentHandle {
     inner: Torrent,
 }
 
 impl TorrentHandle {
     /// Consumes the torrent source, may it be a Path or a MagnetURI,
-    async fn new(src: TorrentSource) -> Arc<TorrentHandle> {
+    pub async fn new(src: TorrentSource) -> Arc<TorrentHandle> {
         return match src {
             TorrentSource::FilePath(ref path) => {
                 let torrent = TorrentFile::new(path).await.unwrap();
@@ -116,17 +123,121 @@ impl TorrentHandle {
         };
     }
 
-    async fn run(&self) {
+    pub async fn run(&self) {
         match self.inner {
-            Torrent::MagnetUriTorrent(ref m_torrent) => {}
-            Torrent::FileTorrent(ref f_torrent) => {
-                TorrentFile::run(f_torrent.clone());
+            //Torrent::MagnetUriTorrent(ref m_torrent) => {}
+            Torrent::FileTorrent(ref file_trnt) => {
+                file_trnt.run().await;
             }
         }
     }
+
+    /// Gets the name of the torrent blockingly
+    pub fn pause_resume(&self) -> String {
+        return match self.inner {
+            Torrent::FileTorrent(ref file_trnt) => {
+                return file_trnt.state.meta_info.info.name.as_ref().unwrap().clone();
+            }
+            _ => "Testing".to_string(),
+        };
+    }
+
+    pub fn name(&self) -> String {
+        return match self.inner {
+            Torrent::FileTorrent(ref file_trnt) => {
+                if let Some(ref name) = file_trnt.state.meta_info.info.name.clone() {
+                    name.clone()
+                } else {
+                    String::from("Name Not Found!")
+                }
+            }
+        };
+    }
+
+    pub fn bytes_complete(&self) -> usize {
+        return match self.inner {
+            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.bytes_complete(),
+        };
+    }
+
+    pub fn bytes_total(&self) -> usize {
+        return match self.inner {
+            Torrent::FileTorrent(ref file_trnt) => {
+                if let Some(size) = file_trnt.state.meta_info.info.length {
+                    size as usize
+                } else {
+                    0 as usize
+                }
+            }
+        };
+    }
+
+    pub fn pieces_total(&self) -> usize {
+        return match self.inner {
+            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.pieces_total(),
+        };
+    }
+
+    pub fn pieces_downloaded(&self) -> usize {
+        return match self.inner {
+            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.pieces_downloaded(),
+        };
+    }
+
+    pub fn piece_size(&self) -> usize {
+        return match self.inner {
+            Torrent::FileTorrent(ref file_trnt) => {
+                if let Some(size) = file_trnt.state.meta_info.info.piece_length {
+                    size as usize
+                } else {
+                    0
+                }
+            }
+        };
+    }
 }
 
+#[derive(Debug)]
 enum Torrent {
-    MagnetUriTorrent(i32),
+    //MagnetUriTorrent(i32),
     FileTorrent(Arc<TorrentFile>),
+}
+
+// High Level State Of the Torrent
+struct TorrentDetails {
+    /// Name of the torrent
+    name: Option<String>,
+
+    /// Total bytes downloaded
+    bytes_complete: Option<usize>,
+
+    /// Total size of torrent in bytes
+    bytes_total: Option<usize>,
+
+    /// Total pieces
+    pieces_total: Option<usize>,
+
+    /// Downloaded pieces
+    pieces_downloaded: Option<usize>,
+
+    /// Size of individual piece
+    piece_size: Option<usize>,
+
+    /// Download speed in bytes/s
+    download_speed: Option<usize>,
+
+    /// Upload speed in bytes/s
+    upload_speed: Option<usize>,
+
+    /// Total bytes downloaded
+    bytes_in: Option<usize>,
+
+    /// Total bytes uploaded
+    bytes_out: Option<usize>,
+
+    /// Total session time that torrent has been active in seconds
+    uptime: Option<usize>,
+
+    /// TODO : Add paused or resumed
+    paused_or_resumed: u32,
 }
