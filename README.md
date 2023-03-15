@@ -2,6 +2,7 @@
 
 **Currently this project is in a complete rewrite**
 
+Tired of seeing boring TUI based Bittorent Clients? Here comes **hyperblow**, a modern Bittorent Client that uses Bittorent Protocol V1. A rich TUI, with modern features in TUI. 
 
 [![dependency status](https://deps.rs/repo/github/rishadbaniya/hyperblow/status.svg)](https://deps.rs/repo/github/rishadbaniya/hyperblow)
 ## **Screenshots of TUI**
