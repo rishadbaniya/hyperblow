@@ -5,8 +5,10 @@ use crate::core::state::{DownState, State};
 use crate::core::tracker::Tracker;
 use crate::core::File;
 use crate::{ArcMutex, ArcRwLock};
+use crossbeam::atomic::AtomicCell;
 use futures::future::join_all;
 use hyperblow_parser::torrent_parser::FileMeta;
+use std::cell::Cell;
 use std::sync::Arc;
 use tokio::join;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -14,6 +16,12 @@ use tokio::sync::RwLock;
 use tokio::{net::UdpSocket, sync::Mutex, task::JoinHandle};
 
 const TRANS_ID: i32 = 10;
+
+macro_rules! ACell {
+    ($e : expr) => {
+        AtomicCell::new($e)
+    };
+}
 
 #[derive(Debug)]
 pub enum TError {
@@ -36,7 +44,6 @@ pub struct TorrentFile {
     pub path: String,
 
     /// DataStructure that holds metadata about the date encoded inside of ".torrent" file
-    pub meta_info: FileMeta,
 
     /// Stores the total no of pieces
     pub pieces_count: usize,
@@ -77,28 +84,34 @@ impl TorrentFile {
                 let trackers = ArcRwLock!(Vec::new());
                 let udp_ports = ArcMutex!(Vec::new());
                 let tcp_ports = ArcMutex!(Vec::new());
-                let total_size = 0; // TODO : Replace it with actual total size of the torrent
                 let peers = ArcMutex!(Vec::new());
+                let bytes_complete = ACell!(3000000000);
+                let pieces_total = ACell!(0);
+                let pieces_downloaded = ACell!(0);
+                let uptime = ACell!(0);
 
                 let peers_channel = unbounded_channel::<Peer>();
                 let peers_channel = (Arc::new(peers_channel.0), ArcMutex!(peers_channel.1));
 
                 let state = Arc::new(State {
+                    pieces_total,
+                    pieces_downloaded,
+                    bytes_complete,
+                    meta_info,
                     d_state,
                     file_tree,
                     trackers,
                     udp_ports,
                     tcp_ports,
                     info_hash,
-                    total_size,
                     pieces_hash,
                     peers,
+                    uptime,
                 });
 
                 Some(Self {
                     path: path.to_string(),
                     pieces_count,
-                    meta_info,
                     state,
                     peers_channel,
                 })
@@ -121,7 +134,7 @@ impl TorrentFile {
         // Inside this function resolveTrackers(...) only the initial step of extracting out the
         // URLS from announce_list or announce fild is considered and resolving the DNS of the URL
         // is done
-        if let Some(ref d) = self.meta_info.announce_list {
+        if let Some(ref d) = self.state.meta_info.announce_list {
             for i in d {
                 let x: Vec<Arc<Tracker>> = {
                     let mut trackers = vec![];
@@ -142,7 +155,7 @@ impl TorrentFile {
                 tracker_s.push(x);
             }
         } else {
-            let ref addrs = self.meta_info.announce;
+            let ref addrs = self.state.meta_info.announce;
             let torrent_state = self.state.clone();
             if let Ok(mut tracker) = Tracker::new(addrs, torrent_state, self.peers_channel.0.clone()) {
                 if tracker.resolveSocketAddr() {
@@ -281,32 +294,19 @@ impl TorrentFile {
     // ///
     // /// NOTE : While using this method, one must clone and keep a Arc pointer of "state" field,
     // /// so that they can use it later on to display the UI or the data changed
-    pub fn run(x: Arc<TorrentFile>) -> JoinHandle<()> {
-        let rt = async move {
-            println!("HEY THERE");
-            // A UDP socket for Trackers, not just a single tracker
-            let t_udp_socket = x.getUDPSocket().await;
+    pub async fn run(&self) {
+        // A UDP socket for all Trackers, not just a single tracker
+        let t_udp_socket = self.getUDPSocket().await;
+        if let Ok(_) = self.resolveTrackers().await {
+            let run_trackers = self.runTrackers(t_udp_socket.clone());
+            let run_download = self.runDownload();
 
-            //let tasks = vec![];
-            // Collects all the tasks
-            // 1. Running the trackers
-            // 2. Running the download process
-            //
-            // At last run them in parallel, through some ways such as join_all(Uses abstraction upon FuturesUnordered) or FuturesUnordered directly
-            //let concurrent = FuturesUnordered::new();
-
-            if let Ok(_) = x.resolveTrackers().await {
-                let run_trackers = x.runTrackers(t_udp_socket.clone());
-                let run_download = x.runDownload();
-
-                // Run both
-                // 1. Requesting and resolving the trackers
-                // 2. Downloading from the peers
-                join!(run_trackers, run_download);
-            } else {
-                // Handle what happens when none of the trackers DNS are resolved
-            }
-        };
-        tokio::spawn(rt)
+            // Run both
+            // 1. Requesting and resolving the trackers
+            // 2. Downloading from the peers
+            join!(run_trackers, run_download);
+        } else {
+            // Handle what happens when none of the trackers DNS are resolved
+        }
     }
 }
