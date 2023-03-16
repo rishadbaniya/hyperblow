@@ -85,9 +85,6 @@ pub struct State {
     /// Total bytes downloaded
     pub bytes_complete: AtomicCell<usize>,
 
-    /// Total pieces
-    pub pieces_total: AtomicCell<usize>,
-
     // Total downloaded pieces
     pub pieces_downloaded: AtomicCell<usize>,
 }
@@ -106,8 +103,6 @@ impl State {
     cell_get_set!(uptime: usize);
 
     cell_get_set!(bytes_complete: usize);
-
-    cell_get_set!(pieces_total: usize);
 
     cell_get_set!(pieces_downloaded: usize);
 }

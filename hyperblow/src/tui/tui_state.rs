@@ -1,10 +1,14 @@
 use super::mouse::Mouse;
+use super::sections::tabs_section::bandwidth_tab::TabSectionBandwidth;
+//use super::sections::tabs_section::details_tab::TabSectionDetails;
+use super::sections::tabs_section::files_tab::TabSectionFiles;
 use crate::engine::Engine;
 use std::cell::RefCell;
 use std::fmt::format;
 use std::{cell::Cell, rc::Rc, sync::Arc};
 use tui::layout::Rect;
 use tui::text::Text;
+use tui::widgets;
 use tui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout},
@@ -12,6 +16,7 @@ use tui::{
     terminal::Frame,
     widgets::{Block, BorderType, Borders, Gauge},
 };
+
 pub enum TabsSection {
     Details(TabSectionDetails),
     Bandwidth(TabSectionBandwidth),
@@ -88,12 +93,13 @@ impl TabSectionDetails {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .title(self.amountCompleteInfo()),
+                    .title(self.getAmountCompleteInfo()),
             )
             .gauge_style(Style::default().fg(Color::White).bg(Color::Black).add_modifier(Modifier::ITALIC))
             .percent(self.getPercentageDownloaded());
 
         let widget_pieces_status = Block::default().title(self.getPiecesStatus());
+        let widget_piece_size = Block::default().title(self.getPiecesSize());
         // The pieces info goes here for the sake of bytes value
         //let widget_piece_info = Block::default().title(self.name.clone());
 
@@ -102,6 +108,7 @@ impl TabSectionDetails {
         frame.render_widget(widget_bytes_completed_gauge, chunks[1]);
         frame.render_widget(widget_download_upload_speed, chunks[2]);
         frame.render_widget(widget_pieces_status, chunks[3]);
+        frame.render_widget(widget_piece_size, chunks[4]);
     }
 
     // TODO : Docs about this API
@@ -116,7 +123,7 @@ impl TabSectionDetails {
     }
 
     // TODO : Docs about this API
-    fn amountCompleteInfo(&self) -> String {
+    fn getAmountCompleteInfo(&self) -> String {
         let delim = 1024_f32;
 
         let bytes_completed_kibibyte: f32 = self.bytes_completed as f32 / delim;
@@ -168,11 +175,22 @@ impl TabSectionDetails {
 
         format!("Download Speed : {} | Upload Speed {}", speed(424234), speed(2342))
     }
+
+    // TODO : Docs about this API
+    fn getPiecesSize(&self) -> String {
+        let size = |s: usize| -> String {
+            let kibibytes = s as f32 / 1024_f32;
+            if kibibytes < 1024_f32 {
+                format!("{:.2} KiB", kibibytes)
+            } else {
+                let mibibytes = kibibytes / 1024_f32;
+                format!("{:.2} MiB", mibibytes)
+            }
+        };
+
+        format!("Piece Size : {}", size(self.piece_size))
+    }
 }
-
-pub struct TabSectionBandwidth {}
-
-pub struct TabSectionFiles {}
 
 pub struct TabSectionTrackers {}
 
@@ -289,9 +307,15 @@ impl TUIState {
     pub async fn loadTabSection(&self, index: usize) {
         if self.tab_index() == 0 {
             let tabSectionDetails = self.getTabSectionDetails(index).await;
-            *self.tabs_section.borrow_mut() = TabsSection::Details(tabSectionDetails)
+            *self.tabs_section.borrow_mut() = TabsSection::Details(tabSectionDetails);
+        } else if self.tab_index() == 1 {
+            let tabSectionBandwidth = self.getTabSectionBandwidth(index).await;
+            *self.tabs_section.borrow_mut() = TabsSection::Bandwidth(tabSectionBandwidth);
+        } else if self.tab_index() == 2 {
+            let tabSectionFiles = self.getTabSectionFiles(index).await;
+            *self.tabs_section.borrow_mut() = TabsSection::Files(tabSectionFiles);
         } else {
-            *self.tabs_section.borrow_mut() = TabsSection::None
+            *self.tabs_section.borrow_mut() = TabsSection::None;
         }
     }
 
@@ -329,5 +353,22 @@ impl TUIState {
             download_speed,
             upload_speed,
         }
+    }
+
+    async fn getTabSectionBandwidth(&self, index: usize) -> TabSectionBandwidth {
+        TabSectionBandwidth {
+            download_speed: 0,
+            upload_speed: 0,
+        }
+    }
+
+    async fn getTabSectionFiles(&self, index: usize) -> TabSectionFiles {
+        let torrent_handle = self.engine.torrents.lock().await[index].clone();
+
+        let file_tree = torrent_handle.getFileTree();
+        let widgets = Rc::default();
+        let mut x = TabSectionFiles { file_tree, widgets };
+        x.loadWidgets().await;
+        x
     }
 }
