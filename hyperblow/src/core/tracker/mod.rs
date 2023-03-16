@@ -190,7 +190,7 @@ impl Tracker {
                                                 Ok(_) => match self.getResponse().await {
                                                     Some(res) => {
                                                         if let TrackerResponse::AnnounceResponse(ref ar) = res {
-                                                            println!("The interval is {}", ar.interval);
+                                                            //println!("The interval is {}", ar.interval);
                                                             let sleep_duration = Duration::from_secs(ar.interval as u64);
                                                             {
                                                                 for peer_socket_adr in ar.peersAddresses.clone() {
@@ -207,12 +207,12 @@ impl Tracker {
                                                         // Save the received AnnounceResponse in self.announannounce_response
                                                     }
                                                     None => {
-                                                        println!("GOT ERROR");
+                                                        //println!("GOT ERROR");
                                                     }
                                                 },
                                                 Err(e) => {
                                                     // Error while sending AnnounceRequest, probably some kind of socket issue
-                                                    println!("CONNECT REQUEST SOCKET ISSUE {:?}", e.to_string());
+                                                    //println!("CONNECT REQUEST SOCKET ISSUE {:?}", e.to_string());
                                                     sleep(Duration::from_secs(1000)).await;
                                                     // TODO : Replace this with some actual solution rather than sleeping
                                                 }
@@ -232,21 +232,21 @@ impl Tracker {
                     },
                     Err(e) => {
                         // Error while sending ConnectRequest, probably some kind of socket issue
-                        println!("CONNECT REQUEST SOCKET ISSUE {:?}", e.to_string());
+                        //println!("CONNECT REQUEST SOCKET ISSUE {:?}", e.to_string());
                         sleep(Duration::from_secs(1000)).await;
 
                         // TODO : Replace this with some actual solution rather than sleeping
                     }
                 },
                 Err(_) => {
-                    println!("GOT TIMEOUT ERROR FOR CONNECT RESPONSE");
+                    //println!("GOT TIMEOUT ERROR FOR CONNECT RESPONSE");
                     // Connect Request timeout error
                     if no_of_times_connect_request_timeout <= 8 {
                         no_of_times_connect_request_timeout += 1;
                     }
                 }
             }
-            println!("ENDED PRETTY QUICK");
+            //println!("ENDED PRETTY QUICK");
         }
     }
 
@@ -319,7 +319,7 @@ impl Tracker {
                 Err(e) => Err(e),
             };
         } else {
-            println!("Error in serializing to bytes");
+            //println!("Error in serializing to bytes");
             // TODO : Write else case
         }
 
@@ -357,7 +357,8 @@ impl Tracker {
             Some(d) => {
                 // Check for ConnectResponse
                 if self.isConnectResponse(&d).await {
-                    println!("GOT A CONNECT RESPONSE HERE");
+                    //println!("GOT A CONNECT RESPONSE HERE");
+                    //println!("{:?}", self.torrents);
 
                     return if let Ok(cr) = ConnectResponse::from(&d) {
                         Some(TrackerResponse::ConnectResponse(cr))
@@ -365,7 +366,7 @@ impl Tracker {
                         NONE
                     };
                 } else if self.isAnnounceResponse(&d).await {
-                    println!("GOT ANNOUNCE RESPONSE");
+                    //println!("GOT ANNOUNCE RESPONSE");
 
                     return if let Ok(ar) = AnnounceResponse::from(&d) {
                         Some(TrackerResponse::AnnounceResponse(ar))

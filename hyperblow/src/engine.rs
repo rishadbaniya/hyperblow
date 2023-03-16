@@ -22,6 +22,12 @@ use tokio::sync::Mutex;
 use crate::core::TorrentFile;
 use std::{sync::Arc, thread::JoinHandle};
 
+#[derive(Debug)]
+enum Torrent {
+    //MagnetUriTorrent(i32),
+    FileTorrent(Arc<TorrentFile>),
+}
+
 pub enum TorrentSource {
     //MagnetURI(String),
     FilePath(String),
@@ -92,8 +98,6 @@ impl Engine {
         if let Ok(_) = self.trnt_thread_sender.send(src) {
             let mut torrenthandle_receiver = self.trnt_handle_receiver.lock().await;
             if let Some(handle) = torrenthandle_receiver.recv().await {
-                println!("GOT HERE BRO");
-                //println!("{:?}", self.torrents);
                 self.torrents.lock().await.push(handle.clone());
                 Some(handle)
             } else {
@@ -142,6 +146,7 @@ impl TorrentHandle {
         };
     }
 
+    /// Gives the name of the torrent
     pub fn name(&self) -> String {
         return match self.inner {
             Torrent::FileTorrent(ref file_trnt) => {
@@ -154,12 +159,14 @@ impl TorrentHandle {
         };
     }
 
+    /// Gives the total "bytes" downloaded
     pub fn bytes_complete(&self) -> usize {
         return match self.inner {
             Torrent::FileTorrent(ref file_trnt) => file_trnt.state.bytes_complete(),
         };
     }
 
+    /// Gives total size of entire torrent in "bytes"
     pub fn bytes_total(&self) -> usize {
         return match self.inner {
             Torrent::FileTorrent(ref file_trnt) => {
@@ -172,18 +179,21 @@ impl TorrentHandle {
         };
     }
 
+    /// Gives total no of pieces
     pub fn pieces_total(&self) -> usize {
         return match self.inner {
-            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.pieces_total(),
+            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.meta_info.info.pieces.len(),
         };
     }
 
+    /// Gives the total pieces downloaded
     pub fn pieces_downloaded(&self) -> usize {
         return match self.inner {
             Torrent::FileTorrent(ref file_trnt) => file_trnt.state.pieces_downloaded(),
         };
     }
 
+    /// Gives the size of torrent piece
     pub fn piece_size(&self) -> usize {
         return match self.inner {
             Torrent::FileTorrent(ref file_trnt) => {
@@ -195,49 +205,22 @@ impl TorrentHandle {
             }
         };
     }
-}
 
-#[derive(Debug)]
-enum Torrent {
-    //MagnetUriTorrent(i32),
-    FileTorrent(Arc<TorrentFile>),
-}
+    /// Gives the total download speed in "bytes/second"
+    pub fn download_speed(&self) -> usize {
+        // TODO : Add implementation for download speed
+        400000
+    }
 
-// High Level State Of the Torrent
-struct TorrentDetails {
-    /// Name of the torrent
-    name: Option<String>,
+    /// Gives the total upload speed in "bytes/second"
+    pub fn upload_speed(&self) -> usize {
+        // TODO : Add implementation for upload speed
+        100000
+    }
 
-    /// Total bytes downloaded
-    bytes_complete: Option<usize>,
-
-    /// Total size of torrent in bytes
-    bytes_total: Option<usize>,
-
-    /// Total pieces
-    pieces_total: Option<usize>,
-
-    /// Downloaded pieces
-    pieces_downloaded: Option<usize>,
-
-    /// Size of individual piece
-    piece_size: Option<usize>,
-
-    /// Download speed in bytes/s
-    download_speed: Option<usize>,
-
-    /// Upload speed in bytes/s
-    upload_speed: Option<usize>,
-
-    /// Total bytes downloaded
-    bytes_in: Option<usize>,
-
-    /// Total bytes uploaded
-    bytes_out: Option<usize>,
-
-    /// Total session time that torrent has been active in seconds
-    uptime: Option<usize>,
-
-    /// TODO : Add paused or resumed
-    paused_or_resumed: u32,
+    pub fn getFileTree(&self) -> Arc<Mutex<crate::core::File>> {
+        return match self.inner {
+            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.file_tree.as_ref().unwrap().clone(),
+        };
+    }
 }

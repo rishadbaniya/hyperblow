@@ -1,25 +1,20 @@
 #![allow(non_snake_case)]
+#![feature(async_closure)]
 
 //use super::files;
-use super::mouse::Mouse;
-use super::mouse::MouseEv;
-use crossterm::event;
-use std::{cell::Cell, io::stdout, ops::Range, rc::Rc, time::Duration};
-use tui::style::Modifier;
-//use crossterm::execute;
+use super::sections::torrents_section::TorrentsSection;
+use super::{mouse::MouseEv, sections::tabs_section::bandwidth_tab::TabSectionBandwidth};
 use crate::engine::Engine;
-use crossterm::{execute, terminal};
-use std::sync::Arc;
-use tui::widgets::Gauge;
+use crossterm::{event, execute, terminal};
+use std::{cell::Cell, io::stdout, ops::Range, rc::Rc, sync::Arc, time::Duration};
+use tokio::task;
 use tui::{
     backend::{Backend, CrosstermBackend},
-    terminal::Terminal,
-};
-use tui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::Color,
     style::Style,
+    style::{Color, Modifier},
     terminal::Frame,
+    terminal::Terminal,
     text::Spans,
     widgets::{Block, BorderType, Borders, Tabs},
 };
@@ -27,17 +22,17 @@ use tui::{
 use super::tui_state::TUIState;
 
 //// Function that represents the start of the UI rendering of hyperblow
-pub async fn draw_ui(engine: Arc<Engine>) -> Result<(), Box<dyn std::error::Error>> {
-    // Note : Any try to invoke println! or any other method related to stdout "fd" won't work after enabling raw mode
+pub fn draw_ui(engine: Arc<Engine>) -> Result<(), Box<dyn std::error::Error>> {
     terminal::enable_raw_mode()?;
     let mut stdout = stdout();
     execute!(stdout, terminal::EnterAlternateScreen, event::EnableMouseCapture)?;
+
     // Create a backend from Crossterm and connect it with tui-rs Terminal
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     // Draw the UI
-    draw(&mut terminal, engine).await?;
+    draw(&mut terminal, engine);
 
     // Restoring the terminal
     terminal::disable_raw_mode()?;
@@ -47,19 +42,30 @@ pub async fn draw_ui(engine: Arc<Engine>) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-pub async fn draw<B: Backend>(terminal: &mut Terminal<B>, engine: Arc<Engine>) -> crossterm::Result<()> {
+pub fn draw<B: Backend>(terminal: &mut Terminal<B>, engine: Arc<Engine>) -> crossterm::Result<()> {
     let state = Rc::new(TUIState::new(engine));
+
     loop {
         terminal.draw(|frame| {
+            //let x = local.spawn_local(async { 10 });
             //Divide the Rect of Frame vertically in 60% and 30% of the total height
             let chunks = Layout::default()
                 .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
                 .direction(Direction::Vertical)
                 .split(frame.size());
-
-            drawTorrentsSection(frame, chunks[0]);
+            TorrentsSection::draw(frame, chunks[0], state.clone());
             drawTabsSection(frame, chunks[1], state.clone());
         })?;
+
+        ////let x = local.spawn_local(async { 10 });
+        //////Divide the Rect of Frame vertically in 60% and 30% of the total height
+        ////let chunks = Layout::default()
+        ////.constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+        ////.direction(Direction::Vertical)
+        ////.split(frame.size());
+        ////TorrentsSection::draw(frame, chunks[0], state.clone());
+        ////drawTabsSection(frame, chunks[1], state.clone());
+        //});
 
         // Waits for upto 200 ms for some event to occure before moving on the rendering the new frame,
         // as soon as it gets an event, it moves on to rendering a new frame, and doesn't entirely
@@ -94,7 +100,7 @@ pub async fn draw<B: Backend>(terminal: &mut Terminal<B>, engine: Arc<Engine>) -
                 _ => {}
             };
         }
-        state.refresh().await;
+        //state.refresh().await;
     }
 }
 
@@ -109,11 +115,6 @@ fn drawTorrentsSection<B: Backend>(frame: &mut Frame<B>, area: Rect) {
         .border_type(BorderType::Rounded);
     frame.render_widget(torrents_section, area);
 }
-//struct TabTitle {
-//spans: Vec<Spans<'static>>,
-//x_range: Vec<Range<usize>>,
-//}
-
 // Bottom Section :
 //      Dispaly region to render all the high level state of those torrents such as
 //      - Name, Bytes, Speed Out, Speed In, Progress, Pause/Resume -> To be extracted from the TorrentHandle within the Engine
@@ -134,7 +135,7 @@ fn drawTabsSection<B: Backend>(frame: &mut Frame<B>, area: Rect, state: Rc<TUISt
     state.set_max_tab_index(titles.len() - 1);
 
     let widget_tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title("Tabs"))
+        .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded))
         .select(state.tab_index())
         .style(Style::default().fg(Color::Cyan))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::Black));
@@ -143,6 +144,8 @@ fn drawTabsSection<B: Backend>(frame: &mut Frame<B>, area: Rect, state: Rc<TUISt
 
     match *state.tabs_section.borrow() {
         super::tui_state::TabsSection::Details(ref details) => details.renderWidget(frame, chunks[1]),
+        super::tui_state::TabsSection::Bandwidth(ref bandwidth) => bandwidth.renderWidget(frame, chunks[1]),
+        super::tui_state::TabsSection::Files(ref files) => files.renderWidget(frame, chunks[1]),
         _ => {
             let widget_border = Block::default().borders(Borders::ALL).border_type(BorderType::Rounded);
             frame.render_widget(widget_border, chunks[1]);

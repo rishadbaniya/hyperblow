@@ -3,9 +3,10 @@ mod state;
 mod torrentFile;
 mod tracker;
 
+use async_recursion::async_recursion;
 use hyperblow_parser::torrent_parser::FileMeta;
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
-use std::sync::Arc;
+use std::{sync::Arc, vec};
 use tokio::sync::Mutex;
 pub use torrentFile::TorrentFile;
 
@@ -68,7 +69,6 @@ impl File {
     // meta => It's the File Meta that has all the informations about the torrent file
     // directory => The download directory of the data i.e the absolute path of the directory
     // where we want the contents to go to
-    //
     pub async fn new(meta: &FileMeta, directory: &String) -> Result<Arc<Mutex<File>>, Box<dyn std::error::Error>> {
         // Create file tree in single file mode
         let mut rootFile = File {
@@ -81,11 +81,9 @@ impl File {
             isDownloaded: false,
         };
 
-        println!("{:?}", meta.info.name);
-
         if let Some(ref files) = meta.info.files {
             let rootFile = ArcMutex!(rootFile);
-            println!("Entered multiple file mode");
+            //println!("Entered multiple file mode");
             // Multiple file mode
             // Go through all the files inside of meta.info.files given by the ".torrent" file
             let mut currentFile = rootFile.clone();
@@ -125,12 +123,17 @@ impl File {
                 }
                 currentFile = rootFile.clone();
             }
+
             Ok(rootFile)
         } else {
             // Single File Mode
             rootFile.file_type = FileType::Regular;
             rootFile.inner_files = None;
-
+            if let Some(ref name) = meta.info.name {
+                rootFile.name = name.clone()
+            }
+            rootFile.size = meta.info.length;
+            println!("{:?}", rootFile);
             Ok(ArcMutex!(rootFile))
         }
     }
@@ -163,6 +166,27 @@ impl File {
             }
         }
         return None;
+    }
+
+    #[async_recursion]
+    pub async fn tabs_traverse_names(&self, depth: usize) -> Vec<String> {
+        let mut x = vec![];
+        let spaces = std::iter::repeat(" ").take(depth).collect::<String>();
+        match self.file_type {
+            FileType::Regular => {
+                x.push(format!("{}{}", spaces, self.name));
+            }
+            FileType::Directory => {
+                x.push(format!("{}{}", spaces, self.name));
+                if let Some(ref inner_files) = self.inner_files {
+                    for file in inner_files {
+                        let mut files = file.lock().await.tabs_traverse_names(depth + 1).await;
+                        x.append(&mut files);
+                    }
+                }
+            }
+        };
+        x
     }
 }
 

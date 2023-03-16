@@ -3,28 +3,40 @@
 mod arguments;
 mod core;
 mod engine;
-mod ui;
+mod tui;
+mod utils;
 
 use arguments::Arguments;
 use clap::Parser;
 use engine::Engine;
 use engine::TorrentSource;
+use futures::FutureExt;
+use std::sync::Arc;
 
 //use std::{env, error::Error, sync::Arc, thread, time::Instant};
 //use tokio::sync::Mutex;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args = Arguments::parse();
     args.check();
-    println!("{args:?}");
 
+    // Creates engine
     let engine = Engine::new();
-    engine.spawn(TorrentSource::FilePath(args.torrent_file.unwrap())).await;
+    spawn_in_engine(engine.clone(), &args);
 
-    ui::ui::draw_ui(engine.clone()).await?;
+    tui::ui::draw_ui(engine.clone())?;
 
+    Ok(())
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn spawn_in_engine(engine: Arc<Engine>, args: &Arguments) -> Result<()> {
+    engine.spawn(TorrentSource::FilePath(args.torrent_file.clone().unwrap())).await;
+    engine.spawn(TorrentSource::FilePath(args.torrent_file.clone().unwrap())).await;
+    engine.spawn(TorrentSource::FilePath(args.torrent_file.clone().unwrap())).await;
+    engine.spawn(TorrentSource::FilePath(args.torrent_file.clone().unwrap())).await;
+    engine.spawn(TorrentSource::FilePath(args.torrent_file.clone().unwrap())).await;
     Ok(())
 }

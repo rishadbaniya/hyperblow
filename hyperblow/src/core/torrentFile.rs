@@ -86,15 +86,13 @@ impl TorrentFile {
                 let tcp_ports = ArcMutex!(Vec::new());
                 let peers = ArcMutex!(Vec::new());
                 let bytes_complete = ACell!(3000000000);
-                let pieces_total = ACell!(0);
-                let pieces_downloaded = ACell!(0);
+                let pieces_downloaded = ACell!(120);
                 let uptime = ACell!(0);
 
                 let peers_channel = unbounded_channel::<Peer>();
                 let peers_channel = (Arc::new(peers_channel.0), ArcMutex!(peers_channel.1));
 
                 let state = Arc::new(State {
-                    pieces_total,
                     pieces_downloaded,
                     bytes_complete,
                     meta_info,
@@ -194,7 +192,7 @@ impl TorrentFile {
                     return Arc::new(socket);
                 }
                 Err(e) => {
-                    println!("{:?}", e.to_string());
+                    //println!("{:?}", e.to_string());
                     port = port + 1;
                 }
             }
@@ -280,9 +278,9 @@ impl TorrentFile {
         let ref peers_rcv = self.peers_channel.1;
         let mut peers_rcv = peers_rcv.lock().await;
         while let Some(peer) = peers_rcv.recv().await {
-            println!("--------------------------------------------",);
-            println!("{:?}", peer.socket_adr);
-            println!("--------------------------------------------",);
+            //println!("--------------------------------------------",);
+            //println!("{:?}", peer.socket_adr);
+            //println!("--------------------------------------------",);
         }
         // TODO: Run in a loop, but never return anything
     }
