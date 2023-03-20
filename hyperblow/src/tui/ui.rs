@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 #![feature(async_closure)]
 
+use super::sections::tabs_section::trackers_tab::TrackersTab;
 //use super::files;
 use super::sections::torrents_section::TorrentsSection;
 use super::{mouse::MouseEv, sections::tabs_section::bandwidth_tab::TabSectionBandwidth};
@@ -19,7 +20,7 @@ use tui::{
     widgets::{Block, BorderType, Borders, Tabs},
 };
 
-use super::tui_state::TUIState;
+use super::tui_state::{TUIState, Tab};
 
 //// Function that represents the start of the UI rendering of hyperblow
 pub fn draw_ui(engine: Arc<Engine>) -> Result<(), Box<dyn std::error::Error>> {
@@ -119,7 +120,6 @@ fn drawTorrentsSection<B: Backend>(frame: &mut Frame<B>, area: Rect) {
 //      Dispaly region to render all the high level state of those torrents such as
 //      - Name, Bytes, Speed Out, Speed In, Progress, Pause/Resume -> To be extracted from the TorrentHandle within the Engine
 // TODO : Add support for mouse in Tabs somehow, from the library itself there is no support of mouse in tabs
-//
 fn drawTabsSection<B: Backend>(frame: &mut Frame<B>, area: Rect, state: Rc<TUIState>) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -142,15 +142,13 @@ fn drawTabsSection<B: Backend>(frame: &mut Frame<B>, area: Rect, state: Rc<TUISt
 
     frame.render_widget(widget_tabs, chunks[0]);
 
-    match *state.tabs_section.borrow() {
-        super::tui_state::TabsSection::Details(ref details) => details.renderWidget(frame, chunks[1]),
-        super::tui_state::TabsSection::Bandwidth(ref bandwidth) => bandwidth.renderWidget(frame, chunks[1]),
-        super::tui_state::TabsSection::Files(ref files) => files.renderWidget(frame, chunks[1]),
-        _ => {
-            let widget_border = Block::default().borders(Borders::ALL).border_type(BorderType::Rounded);
-            frame.render_widget(widget_border, chunks[1]);
-        }
+    match *state.tab.borrow() {
+        Tab::Details => {}
+        Tab::Bandwidth => {}
+        Tab::Files => {}
+        Tab::Trackers => TrackersTab::draw(frame, chunks[1], state.clone()),
+        Tab::Peers => {}
+        Tab::Pieces => {}
+        Tab::None => {}
     };
-
-    //frame.render_widget(gauge, children_chunks[0]);
 }
