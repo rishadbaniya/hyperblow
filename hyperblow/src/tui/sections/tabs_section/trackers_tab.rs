@@ -1,11 +1,11 @@
 use crate::tui::tui_state::TUIState;
-use std::rc::Rc;
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Layout, Rect},
     terminal::Frame,
     widgets::{Block, BorderType, Borders, Cell, Row, Table},
 };
+use std::rc::Rc;
 
 const SN: &str = "SN";
 const SN_PERC: u16 = 5;
@@ -34,7 +34,14 @@ impl TrackersTab {
         let area: Rect = Layout::default().constraints([Constraint::Min(0)]).margin(2).split(area)[0];
 
         // Split the area for header row and torrents row
-        let area: Vec<Rect> = Layout::default().constraints([Constraint::Length(2), Constraint::Min(0)]).split(area);
+        let area: Vec<Rect> = Layout::default()
+            .constraints([Constraint::Length(2), Constraint::Min(0)])
+            .split(area)
+            .iter()
+            .cloned()
+            .collect();
+        //.into_iter()
+        //.collect();
 
         Self::draw_header_row(frame, area[0]);
         Self::draw_tracker_rows(frame, area[1], state.clone());
@@ -47,7 +54,7 @@ impl TrackersTab {
             Constraint::Percentage(URL_PERC),
             Constraint::Percentage(STATUS_PERC),
         ]);
-        frame.render_widget(table, area);
+        frame.render_widget(table, area.to_owned());
     }
 
     // Draws all trackers informations that could be fit in the given area
@@ -79,6 +86,6 @@ impl TrackersTab {
             Constraint::Percentage(STATUS_PERC),
         ]);
 
-        frame.render_widget(table, area);
+        frame.render_widget(table, area.to_owned());
     }
 }

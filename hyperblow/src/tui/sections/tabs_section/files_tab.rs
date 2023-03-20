@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
