@@ -15,12 +15,13 @@
 //// 1. It has its own internal thread(s), runtime, to dowload the torrent.
 //// 2. The only abstraction engine is going to share is EngineHandle,
 ////    which can control core behaviours of engine such as shut it down
+use crate::core::tracker::Tracker;
+use crate::core::TorrentFile;
+use std::{sync::Arc, thread::JoinHandle};
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
-
-use crate::core::TorrentFile;
-use std::{sync::Arc, thread::JoinHandle};
+use tokio::sync::RwLock;
 
 #[derive(Debug)]
 enum Torrent {
@@ -207,12 +208,14 @@ impl TorrentHandle {
     }
 
     /// Gives the total download speed in "bytes/second"
+    /// NOTE: Currenlty  it holds some dummy data
     pub fn download_speed(&self) -> usize {
         // TODO : Add implementation for download speed
         400000
     }
 
     /// Gives the total upload speed in "bytes/second"
+    /// NOTE: Currenlty it holds some dummy data
     pub fn upload_speed(&self) -> usize {
         // TODO : Add implementation for upload speed
         100000
@@ -222,5 +225,11 @@ impl TorrentHandle {
         return match self.inner {
             Torrent::FileTorrent(ref file_trnt) => file_trnt.state.file_tree.as_ref().unwrap().clone(),
         };
+    }
+
+    pub fn getTrackers(&self) -> Arc<RwLock<Vec<Vec<Arc<Tracker>>>>> {
+        match self.inner {
+            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.trackers.clone(),
+        }
     }
 }

@@ -29,11 +29,12 @@ pub enum TrackerProtocol {
     TCP,
 }
 
-//pub enum TrackerState {
-//    waitingForConRes,
-//    waitingForAnnRes,
-//}
-//
+pub enum TrackerState {
+    Unresolved,
+    Resolved,
+    //waitingForConRes,
+    //waitingForAnnRes,
+}
 
 /// A tracker in BitTorrent is simply, a "URL", that uses certian request and response technique in
 /// order to get information about peers

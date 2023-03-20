@@ -1,7 +1,7 @@
-mod peer;
-mod state;
-mod torrentFile;
-mod tracker;
+pub mod peer;
+pub mod state;
+pub mod torrentFile;
+pub mod tracker;
 
 use async_recursion::async_recursion;
 use hyperblow_parser::torrent_parser::FileMeta;

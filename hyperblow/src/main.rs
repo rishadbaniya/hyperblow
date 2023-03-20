@@ -33,10 +33,7 @@ fn main() -> Result<()> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn spawn_in_engine(engine: Arc<Engine>, args: &Arguments) -> Result<()> {
-    engine.spawn(TorrentSource::FilePath(args.torrent_file.clone().unwrap())).await;
-    engine.spawn(TorrentSource::FilePath(args.torrent_file.clone().unwrap())).await;
-    engine.spawn(TorrentSource::FilePath(args.torrent_file.clone().unwrap())).await;
-    engine.spawn(TorrentSource::FilePath(args.torrent_file.clone().unwrap())).await;
+    /// TEST RIGHT HERE
     engine.spawn(TorrentSource::FilePath(args.torrent_file.clone().unwrap())).await;
     Ok(())
 }
