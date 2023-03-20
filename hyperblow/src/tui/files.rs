@@ -1,20 +1,20 @@
 //TODO : Add a way to toggle the state of the Download
 
 use crate::work::file::{File, FileType};
-use std::cell;
-use std::sync::Arc;
-use tokio::sync::{Mutex, MutexGuard};
-use tui::text;
-use tui::widgets::{Block, Borders};
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::Alignment,
     layout::{Constraint, Rect},
     style::Color,
     style::Style,
+    text,
+    widgets::{Block, Borders},
     widgets::{BorderType, Cell, Row, Table},
     Frame,
 };
+use std::cell;
+use std::sync::Arc;
+use tokio::sync::{Mutex, MutexGuard};
 
 // Name : Name of the root file or the folder
 // Type : Type of the file, if it's directory of a regular file

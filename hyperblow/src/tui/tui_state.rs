@@ -3,19 +3,19 @@ use super::mouse::Mouse;
 //use super::sections::tabs_section::details_tab::TabSectionDetails;
 //use super::sections::tabs_section::files_tab::TabSectionFiles;
 use crate::engine::Engine;
-use std::cell::RefCell;
-use std::fmt::format;
-use std::{cell::Cell, rc::Rc, sync::Arc};
-use tui::layout::Rect;
-use tui::text::Text;
-use tui::widgets;
-use tui::{
+use ratatui::{
     backend::Backend,
+    layout::Rect,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     terminal::Frame,
+    text::Text,
+    widgets,
     widgets::{Block, BorderType, Borders, Gauge},
 };
+use std::cell::RefCell;
+use std::fmt::format;
+use std::{cell::Cell, rc::Rc, sync::Arc};
 
 pub enum Tab {
     Details,

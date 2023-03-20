@@ -6,11 +6,7 @@
 use crate::core::tracker::Tracker;
 use crate::tui::tui_state::TUIState;
 use crate::utils;
-use std::{
-    fmt::{format, Display},
-    rc::Rc,
-};
-use tui::{
+use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::Alignment,
     layout::{Constraint, Direction, Layout, Rect},
@@ -19,6 +15,10 @@ use tui::{
     terminal::Frame,
     text::Span,
     widgets::{Block, BorderType, Borders, Cell, Gauge, List, ListItem, Row, Table},
+};
+use std::{
+    fmt::{format, Display},
+    rc::Rc,
 };
 
 /// Constants that define, the division percentage of the column in
@@ -132,7 +132,10 @@ impl TorrentsSection {
                         Constraint::Percentage(OUT_PERC),
                         Constraint::Percentage(TIME_LEFT_PERC),
                     ])
-                    .split(row_area);
+                    .split(row_area)
+                    .iter()
+                    .cloned()
+                    .collect();
                 y = y + ROW_HEIGHT;
                 columns_area.push(column_area);
             }

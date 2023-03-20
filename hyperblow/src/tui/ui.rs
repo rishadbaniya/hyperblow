@@ -7,11 +7,9 @@ use super::sections::torrents_section::TorrentsSection;
 use super::{mouse::MouseEv, sections::tabs_section::bandwidth_tab::TabSectionBandwidth};
 use crate::engine::Engine;
 use crossterm::{event, execute, terminal};
-use std::{cell::Cell, io::stdout, ops::Range, rc::Rc, sync::Arc, time::Duration};
-use tokio::task;
-use tui::{
+use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::Style,
     style::{Color, Modifier},
     terminal::Frame,
@@ -19,6 +17,8 @@ use tui::{
     text::Spans,
     widgets::{Block, BorderType, Borders, Tabs},
 };
+use std::{cell::Cell, io::stdout, ops::Range, rc::Rc, sync::Arc, time::Duration};
+use tokio::task;
 
 use super::tui_state::{TUIState, Tab};
 
@@ -111,7 +111,7 @@ pub fn draw<B: Backend>(terminal: &mut Terminal<B>, engine: Arc<Engine>) -> cros
 fn drawTorrentsSection<B: Backend>(frame: &mut Frame<B>, area: Rect) {
     let torrents_section = Block::default()
         .title(" Torrents ")
-        .title_alignment(tui::layout::Alignment::Left)
+        .title_alignment(Alignment::Left)
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded);
     frame.render_widget(torrents_section, area);
