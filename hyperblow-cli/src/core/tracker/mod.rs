@@ -4,11 +4,16 @@ mod announce_req_res;
 mod connect_req_res;
 mod error_res;
 
+use self::{
+    announce_req_res::{AnnounceRequest, AnnounceResponse},
+    connect_req_res::{ConnectRequest, ConnectResponse},
+};
 use crate::{
     core::{peer::Peer, state::State},
-    ArcMutex,
+    ACell, ArcMutex,
 };
 use byteorder::{BigEndian, ReadBytesExt};
+use crossbeam::atomic::AtomicCell;
 use rand::{thread_rng, Rng};
 use reqwest::Url;
 use std::{
@@ -18,6 +23,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use strum_macros::Display;
 use tokio::{
     net::UdpSocket,
     sync::{
@@ -28,11 +34,6 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-use self::{
-    announce_req_res::{AnnounceRequest, AnnounceResponse},
-    connect_req_res::{ConnectRequest, ConnectResponse},
-};
-
 ///Type of protocol used to connect to the tracker
 #[derive(PartialEq, Debug, Clone)]
 pub enum TrackerProtocol {
@@ -40,13 +41,63 @@ pub enum TrackerProtocol {
     TCP,
 }
 
+/// List of all the states that a **UDP or TCP** Tracker can be in
+///
+/// **TCP and UDP** - Tracker state for both UDP and TCP based tracker
+/// **TCP** - Tracker state for only TCP based tracker
+/// **UDP** - Tracker state for only UDP based tracker
+#[derive(Debug, PartialEq, Copy, Clone, Display)]
 pub enum TrackerState {
-    Unresolved,
-    Resolved,
-    //waitingForConRes,
-    //waitingForAnnRes,
+    /// The DNS of the tracker is resolving
+    /// **TCP and UDP**
+    #[strum(serialize = "DNS Resolving")]
+    DNSResolving,
+
+    /// The DNS of the tracker was not resolved
+    /// **TCP and UDP**
+    #[strum(serialize = "DNS Unresolved")]
+    DNSUnresolved,
+
+    /// The DNS of the tracker was resolved
+    /// **TCP and UDP**
+    #[strum(serialize = "DNS Resolved")]
+    DNSResolved,
+
+    /// DNS was resolved and a Connect Request was sent to the tracker, for which
+    /// we are now waiting to get a response
+    /// **UDP**
+    #[strum(serialize = "Waiting For Connect Response")]
+    WaitingForConnectResponse,
+
+    /// ConnectResponse was received and AnnounceRequest was sent to the tracker, for which
+    /// we are now waiting to get a response
+    /// **UDP**
+    #[strum(serialize = "Waiting For Announce Response")]
+    WaitingForAnnounceResponse,
+
+    /// A ScrapeRequest was sent to the tracker, for which we are now watiing to get
+    /// a response
+    /// **UDP**
+    #[strum(serialize = "Waiting For Scrape Response")]
+    WaitingForScrapeResponse,
 }
 
+///
+///
+///
+///
+///
+///
+///
+///
+///
+///
+///
+///
+///
+///
+///
+///
 /// A tracker in BitTorrent is simply, a "URL", that uses certian request and response technique in
 /// order to get information about peers
 ///
@@ -66,7 +117,7 @@ pub struct Tracker {
     ///
     /// A "None" in the socketAddrs means that the DNS wasn't resolved for the given domain of
     /// Tracker
-    pub socketAddrs: Option<Vec<SocketAddr>>,
+    pub socketAddrs: Arc<Mutex<Vec<SocketAddr>>>,
 
     /// A sender part of a channel, to send the [Peer] instance to the runDownload()
     /// method of [TorrentFile], created by collecting the socket address of Peers
@@ -93,7 +144,9 @@ pub struct Tracker {
 
     /// Data received from scrape request as response
     pub scrape_response: Arc<Mutex<TrackerResponse>>,
+
     // TODO : Store UDP Socket here in the struct
+    pub tracker_state: AtomicCell<TrackerState>,
 }
 
 impl Tracker {
@@ -107,10 +160,8 @@ impl Tracker {
 
         let connect_request = ArcMutex!(TrackerRequest::None);
         let connect_response = ArcMutex!(TrackerResponse::None);
-
         let announce_request = ArcMutex!(TrackerRequest::None);
         let announce_response = ArcMutex!(TrackerResponse::None);
-
         let scrape_request = ArcMutex!(TrackerRequest::None);
         let scrape_response = ArcMutex!(TrackerResponse::None);
 
@@ -123,10 +174,12 @@ impl Tracker {
             TrackerProtocol::TCP => None,
         };
 
+        let tracker_state = ACell!(TrackerState::DNSUnresolved);
+
         Ok(Tracker {
             torrent_state,
             address,
-            socketAddrs: None,
+            socketAddrs: Arc::default(),
             protocol,
             udp_channel,
             connect_request,
@@ -136,16 +189,29 @@ impl Tracker {
             scrape_request,
             scrape_response,
             peer_sender,
+            tracker_state,
         })
     }
 
-    /// Tries to resolve the A and AAAA records of the domain
-    pub fn resolveSocketAddr(&mut self) -> bool {
+    /// Tries to resolve the DNS of the tracker's URL
+    async fn resolveDNS(&self) -> bool {
         if let Ok(addrs) = self.address.socket_addrs(|| None) {
-            self.socketAddrs = Some(addrs);
+            *self.socketAddrs.lock().await = addrs;
             true
         } else {
             false
+        }
+    }
+
+    /// Initially we are only given the URL of the tracker, in order to check if the tracker is even
+    /// alive or not, we must check if it's IP is availaible or not by simply resolving the
+    /// tracker's DNS, that's what this method does, it resolves the DNS of the tracker
+    pub async fn resolveTracker(&self) {
+        self.tracker_state.store(TrackerState::DNSResolving);
+        if self.resolveDNS().await {
+            self.tracker_state.store(TrackerState::DNSResolved);
+        } else {
+            self.tracker_state.store(TrackerState::DNSUnresolved);
         }
     }
 
@@ -153,11 +219,12 @@ impl Tracker {
     // if it matches any one of it, then we can say that the given socket address belongs
     // to the tracker i.e the socket address is equal to the Tracker
     pub fn isEqualTo(&self, sAdr1: &SocketAddr) -> bool {
-        if let Some(ref sAdresses) = self.socketAddrs {
-            for sAdr2 in sAdresses {
-                return *sAdr1 == *sAdr2;
-            }
-        }
+        // TODO: Make it functional after brekage
+        //if let Some(ref sAdresses) = self.socketAddrs {
+        //for sAdr2 in sAdresses {
+        //return *sAdr1 == *sAdr2;
+        //}
+        //}
         false
     }
 
@@ -207,18 +274,13 @@ impl Tracker {
                                                     Some(res) => {
                                                         if let TrackerResponse::AnnounceResponse(ref ar) = res {
                                                             //println!("The interval is {}", ar.interval);
-                                                            let sleep_duration =
-                                                                Duration::from_secs(ar.interval as u64);
+                                                            let sleep_duration = Duration::from_secs(ar.interval as u64);
                                                             {
                                                                 for peer_socket_adr in ar.peersAddresses.clone() {
-                                                                    let peer = Peer::new(
-                                                                        peer_socket_adr,
-                                                                        self.torrent_state.clone(),
-                                                                    );
+                                                                    let peer = Peer::new(peer_socket_adr, self.torrent_state.clone());
                                                                     self.peer_sender.send(peer);
                                                                 }
-                                                                let mut announce_response =
-                                                                    self.announce_response.lock().await;
+                                                                let mut announce_response = self.announce_response.lock().await;
                                                                 *announce_response = res;
                                                             }
                                                             sleep(sleep_duration).await;
@@ -295,7 +357,11 @@ impl Tracker {
         // NOTE : One can use the exact concept that a browser makes use of in order to decide the
         // socket address to be used right now and in the future, as a round robin or ?. Currenlty
         // we are deciding to use the socket at the index 0
-        let socketAddrs = self.socketAddrs.as_ref().unwrap().get(0).unwrap();
+        let socketAddrs = {
+            let socket_addresses = self.socketAddrs.lock().await;
+            // TODO : Make choosable among other indices too
+            socket_addresses[0]
+        };
 
         return match socket.send_to(connect_req_bytes.as_ref(), socketAddrs).await {
             Ok(_) => {
@@ -330,7 +396,11 @@ impl Tracker {
         }
 
         if let Some(announce_req_bytes) = announce_req.serialize_to_bytes() {
-            let socketAddrs = self.socketAddrs.as_ref().unwrap().get(0).unwrap();
+            let socketAddrs = {
+                let socket_addresses = self.socketAddrs.lock().await;
+                // TODO : Make choosable among other indices too
+                socket_addresses[0]
+            };
             return match socket.send_to(&announce_req_bytes, socketAddrs).await {
                 Ok(_) => {
                     let mut ann_req = self.announce_request.lock().await;
@@ -491,4 +561,10 @@ pub enum TrackerRequest {
     ConnectRequest(ConnectRequest),
     AnnounceRequest(AnnounceRequest),
     None,
+}
+
+impl Default for TrackerRequest {
+    fn default() -> Self {
+        TrackerRequest::None
+    }
 }
