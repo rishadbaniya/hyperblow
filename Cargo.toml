@@ -1,6 +1,6 @@
 [workspace]
 
 members = [
-    "hyperblow",
-    "libs/hyperblow_parser"
+    "hyperblow-cli",
+    "libs/hyperblow"
 ]
