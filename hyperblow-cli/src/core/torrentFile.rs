@@ -20,7 +20,7 @@ use crate::{
     ACell, ArcMutex, ArcRwLock,
 };
 use crossbeam::atomic::AtomicCell;
-use futures::future::join_all;
+use futures::future::{join, join_all};
 use hyperblow::parser::torrent_parser::FileMeta;
 use std::{cell::Cell, sync::Arc};
 use tokio::{
@@ -200,61 +200,6 @@ impl TorrentFile {
         }
     }
 
-    /// It runs all the trackers concurrently.
-    ///
-    /// This function must run concurrently with receive_trackers_response() function
-    async fn send_trackers_requests(&self, socket: Arc<UdpSocket>) {
-        // Run i.e invoke the run() method of all the Trackers and then push the future
-        let mut all_trackers_task = Vec::new();
-
-        let trackers = self.state.trackers.read().await;
-        for trackers in trackers.iter() {
-            for tracker in trackers {
-                let _socket = socket.clone();
-                let _tracker = tracker.clone();
-                all_trackers_task.push(async move { _tracker.run(_socket).await });
-            }
-        }
-
-        // Polls all future to run them concurrently
-        join_all(all_trackers_task).await;
-    }
-
-    /// It simply waits on the UDP, socket. When some data arrives on the socket, it simply
-    /// reads that data, length, SocketAddr from which the data came and thereafter it sends the
-    /// data to the required channel of tracker that's waiting for data
-    ///
-    /// This function must run concurrently with send_trackers_requests() function
-    async fn receive_trackers_response(&self, socket: Arc<UdpSocket>) {
-        loop {
-            // A buffer of 4KiB capacity
-            let mut buf = [0; 4096];
-            match socket.recv_from(&mut buf).await {
-                Ok((len, ref s_addrs)) => {
-                    // NOTE : I could've stored all trackers in the top scope of this
-                    // receive_trackers_response() function, so that i don't have to await. But, the
-                    // problem is of BEP12, where i have to constantly arrange the Trackers, this
-                    // changes the index in the self.state.trackers field
-                    let trackers = self.state.trackers.read().await;
-                    for trackers in trackers.iter() {
-                        for tracker in trackers {
-                            if tracker.isEqualTo(s_addrs) {
-                                if let Some((ref sd, _)) = tracker.udp_channel {
-                                    if !sd.is_closed() {
-                                        let mut buf = buf.to_vec();
-                                        buf.truncate(len);
-                                        sd.send(buf); // TODO : send() return Result<T>, might need to make use of Err ?. Figure out
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
     // Running of trackers is divided into two sub tasks
     // 1. Sending trackers requests
     // 2. Receiving trackers response
@@ -266,7 +211,7 @@ impl TorrentFile {
     // task of 'res
     async fn runTrackers(&self, socket: Arc<UdpSocket>) {
         // Step 1 : Generate "Tracker" instance from all the tracker's URL in "announce" or
-        // "announce_list" field of FileMeta
+        // "announce_list" field of FileMeta and spawm a tokio task internally to call each tracker's run method
         let trackers: Vec<Vec<Arc<Tracker>>> = {
             let mut tracker_s = Vec::default();
             if let Some(ref announce_list_s) = self.state.meta_info.announce_list {
@@ -292,12 +237,39 @@ impl TorrentFile {
             }
             tracker_s
         };
-
         *self.state.trackers.write().await = trackers;
 
-        //let req = self.send_trackers_requests(socket.clone());
-        //let res = self.receive_trackers_response(socket);
-        //join!(req, res);
+        // Step 2 : Recv by listening on the UDP socket and then find out for whom the message came for and give
+        // back to that specific tracker the response messsage
+        loop {
+            // A buffer of 4KiB capacity
+            let mut buf = [0; 4096];
+            match socket.recv_from(&mut buf).await {
+                Ok((len, ref s_addrs)) => {
+                    // NOTE : I could've stored all trackers in the top scope of this
+                    // receive_trackers_response() function, so that i don't have to await. But, the
+                    // problem is of BEP12, where i have to constantly arrange the Trackers, this
+                    // changes the index in the self.state.trackers field
+                    let trackers = self.state.trackers.read().await;
+                    for trackers in trackers.iter() {
+                        for tracker in trackers {
+                            if tracker.isEqualTo(s_addrs) {
+                                if let Some((ref sd, _)) = tracker.udp_channel {
+                                    if !sd.is_closed() {
+                                        let mut buf = buf.to_vec();
+                                        buf.truncate(len);
+                                        sd.send(buf); // TODO : send() return Result<T>, might need to make use of Err ?. Figure out
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    // Error on receiving from the UDP Socket
+                }
+            }
+        }
     }
 
     pub async fn runDownload(&self) {

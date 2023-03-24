@@ -1,7 +1,8 @@
-use crate::tui::tui_state::TUIState;
+use crate::{core::tracker::TrackerState, tui::tui_state::TUIState};
 use ratatui::{
     backend::Backend,
     layout::{Constraint, Layout, Rect},
+    style::{Color, Style},
     terminal::Frame,
     widgets::{Block, BorderType, Borders, Cell, Row, Table},
 };
@@ -77,7 +78,16 @@ impl TrackersTab {
                 let sn_widget = Cell::from(sn.to_string());
                 let url_widget = Cell::from(tracker.address.to_string());
                 let tracker_state = tracker.tracker_state.load();
-                let tracker_state_widget = Cell::from(tracker_state.to_string());
+                let tracker_state_color = match tracker_state {
+                    TrackerState::Idle => Color::Red,
+                    TrackerState::DNSResolved => Color::Green,
+                    TrackerState::DNSResolving => Color::Green,
+                    TrackerState::DNSUnresolved {
+                        retry_time: _,
+                    } => Color::Red,
+                    _ => Color::Green,
+                };
+                let tracker_state_widget = Cell::from(tracker_state.to_string()).style(Style::default().fg(tracker_state_color));
                 let row = Row::new([sn_widget, url_widget, tracker_state_widget]);
                 row_s.push(row);
                 sn = sn + 1;
