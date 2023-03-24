@@ -1,58 +1,21 @@
 #![allow(non_snake_case, dead_code)]
 
-use serde_bencode;
 use serde_derive::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::{error, fmt, fs, io};
 use thiserror::Error;
 
-//#[derive(Error, Debug)]
-//pub enum DataStoreError {
-//#[error("data store disconnected")]
-//Disconnect(#[from] io::Error),
-//#[error("the data for key `{0}` is not available")]
-//Redaction(String),
-//#[error("invalid header (expected {expected:?}, found {found:?})")]
-//InvalidHeader { expected: String, found: String },
-//#[error("unknown data store error")]
-//Unknown,
-//}
-
-/// Error types while using FileMeta DataStructure
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum FileMetaError {
-    /// Error thrown when there is some issue while reading the file path provided
-    FileError { path: String, cause: Option<io::Error> },
-    /// Error thrown when deserializing the ".torrent" bencode encoded data into FileMeta struct
+    #[error("InvalidFile - path : {path:?}, error : {error:?}")]
+    InvalidFile { path: String, error: io::Error },
+
+    #[error("InvalidEncoding - encoding : {encoding:?}, error : {error:?}")]
     InvalidEncoding {
         encoding: String,
-        data: Vec<u8>,
-        error: Option<serde_bencode::Error>,
+        error: serde_bencode::Error,
     },
 }
-
-impl fmt::Display for FileMetaError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FileMetaError::FileError {
-                path,
-                cause,
-            } => {
-                write!(f, "FileError - Path : {path:?}, Cause : {cause:?}",)?;
-            }
-            FileMetaError::InvalidEncoding {
-                encoding,
-                data: _,
-                error,
-            } => {
-                write!(f, "InvalidEncoding - {encoding:?}, error : {error:?}",)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl error::Error for FileMetaError {}
 
 /// DataStructure that maps all the data inside of bencode encoded ".torrent" file
 /// into something rust program can use.
@@ -136,9 +99,9 @@ impl FileMeta {
                 Ok(meta) => Ok(meta),
                 Err(err) => Err(err),
             },
-            Err(err) => Err(FileMetaError::FileError {
-                path: file_path.to_string(),
-                cause: Some(err),
+            Err(err) => Err(FileMetaError::InvalidFile {
+                path: file_path.clone(),
+                error: err,
             }),
         }
     }
@@ -170,8 +133,7 @@ impl FileMeta {
             Ok(d) => Ok(d),
             Err(err) => Err(FileMetaError::InvalidEncoding {
                 encoding: "Bencode".to_string(),
-                data: file,
-                error: Some(err),
+                error: err,
             }),
         }
     }
@@ -196,7 +158,6 @@ impl FileMeta {
     ///     }
     /// }
     ///
-
     ///
     /// ```
     /// Gets you the Info Hash
@@ -209,8 +170,8 @@ impl FileMeta {
         hasher.finalize().into_iter().collect()
     }
 
-    /// Gets all the hash of the pieces stored in the bencode encoded ".torrent" file's
-    /// "pieces" field
+    // Gets all the hash of the pieces stored in the bencode encoded ".torrent" file's
+    // "pieces" field
     pub fn getPiecesHash(&self) -> Vec<[u8; 20]> {
         let mut pieces_hash: Vec<[u8; 20]> = Vec::new();
 

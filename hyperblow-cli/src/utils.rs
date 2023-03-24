@@ -1,6 +1,7 @@
-// Some shared code that is usceful everywhere
-// #![feature(async_closure)]
+// Some shared code that is useful everywhere
 //
+// As of right now, i don't know the proper structure on where the common code should be placed, so
+// i'm placing it right here
 //
 pub fn bytes_to_human_readable(size: usize) -> String {
     let kibibytes = size as f32 / 1024_f32;
@@ -15,4 +16,11 @@ pub fn bytes_to_human_readable(size: usize) -> String {
             format!("{:.2} GiB", gibibytes)
         }
     }
+}
+
+#[macro_export]
+macro_rules! ACell {
+    ($e : expr) => {
+        AtomicCell::new($e)
+    };
 }

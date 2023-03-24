@@ -31,10 +31,7 @@ impl TrackersTab {
         frame.render_widget(widget_border, area.clone());
 
         // Recalculate the area after border is built
-        let area: Rect = Layout::default()
-            .constraints([Constraint::Min(0)])
-            .margin(2)
-            .split(area)[0];
+        let area: Rect = Layout::default().constraints([Constraint::Min(0)]).margin(2).split(area)[0];
 
         // Split the area for header row and torrents row
         let area: Vec<Rect> = Layout::default()
@@ -63,7 +60,10 @@ impl TrackersTab {
     // Draws all trackers informations that could be fit in the given area
     fn draw_tracker_rows<B: Backend>(frame: &mut Frame<B>, area: Rect, state: Rc<TUIState>) {
         let mut row_s = Vec::default();
-        // Load the "torrent handle" from the currently selected torrent's index
+
+        // Load the "torrent handle" from the currently selected torrent's index (which is the
+        // currently selected torrent session)
+
         let current_torrent_index = state.torrent_index();
         let current_torrent_handle = { &(*state.engine.torrents.blocking_lock())[current_torrent_index] };
 
@@ -74,10 +74,11 @@ impl TrackersTab {
         let mut sn = 1_u16;
         for tracker_s in trackers {
             for tracker in tracker_s {
-                let widget_sn = Cell::from(sn.to_string());
-                let widget_address = Cell::from(tracker.address.to_string());
-
-                let row = Row::new([widget_sn, widget_address]);
+                let sn_widget = Cell::from(sn.to_string());
+                let url_widget = Cell::from(tracker.address.to_string());
+                let tracker_state = tracker.tracker_state.load();
+                let tracker_state_widget = Cell::from(tracker_state.to_string());
+                let row = Row::new([sn_widget, url_widget, tracker_state_widget]);
                 row_s.push(row);
                 sn = sn + 1;
             }
