@@ -20,6 +20,7 @@ paste = "1.0.12"
 crossbeam = "0.8.2"
 async-recursion = "1.0.2"
 ratatui = "0.20.0"
+thiserror = "1.0"
 
 [features]
 async_closure = []
