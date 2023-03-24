@@ -4,6 +4,19 @@ use serde_bencode;
 use serde_derive::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::{error, fmt, fs, io};
+use thiserror::Error;
+
+//#[derive(Error, Debug)]
+//pub enum DataStoreError {
+//#[error("data store disconnected")]
+//Disconnect(#[from] io::Error),
+//#[error("the data for key `{0}` is not available")]
+//Redaction(String),
+//#[error("invalid header (expected {expected:?}, found {found:?})")]
+//InvalidHeader { expected: String, found: String },
+//#[error("unknown data store error")]
+//Unknown,
+//}
 
 /// Error types while using FileMeta DataStructure
 #[derive(Debug)]
@@ -101,7 +114,7 @@ impl FileMeta {
     /// Example :
     ///
     /// ```
-    /// use hyperblow_parser::torrent_parser::FileMeta;
+    /// use hyperblow::parser::torrent_parser::FileMeta;
     ///
     /// let torrent_file_path = String::from("x/y/z/zz.torrent");
     /// let meta : FileMeta;
@@ -134,7 +147,7 @@ impl FileMeta {
     /// Eg.
     /// ```
     ///
-    /// use hyperblow_parser::torrent_parser::FileMeta;
+    /// use hyperblow::parser::torrent_parser::FileMeta;
     /// use std::fs;
     ///
     /// // Assume there is a binary data of torrent file inside this vector
@@ -169,7 +182,7 @@ impl FileMeta {
     /// Eg.
     ///
     /// ```
-    /// use hyperblow_parser::torrent_parser::FileMeta;
+    /// use hyperblow::parser::torrent_parser::FileMeta;
     ///
     /// let torrent_file_path = String::from("x/y/z/zz.torrent");
     /// let meta : FileMeta;
