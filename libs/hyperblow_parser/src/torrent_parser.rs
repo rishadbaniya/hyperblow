@@ -6,29 +6,36 @@ use sha1::{Digest, Sha1};
 use std::{error, fmt, fs, io};
 
 /// Error types while using FileMeta DataStructure
-#[derive(Debug)]
+#[derive(Debug,)]
 pub enum FileMetaError {
     /// Error thrown when there is some issue while reading the file path provided
-    FileError { path: String, cause: Option<io::Error> },
+    FileError { path: String, cause: Option<io::Error,>, },
     /// Error thrown when deserializing the ".torrent" bencode encoded data into FileMeta struct
     InvalidEncoding {
         encoding: String,
-        data: Vec<u8>,
-        error: Option<serde_bencode::Error>,
+        data: Vec<u8,>,
+        error: Option<serde_bencode::Error,>,
     },
 }
 
 impl fmt::Display for FileMetaError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_,>,) -> fmt::Result {
         match self {
-            FileMetaError::FileError { path, cause } => {
+            FileMetaError::FileError {
+                path,
+                cause,
+            } => {
                 write!(f, "FileError - Path : {path:?}, Cause : {cause:?}",)?;
             }
-            FileMetaError::InvalidEncoding { encoding, data: _, error } => {
+            FileMetaError::InvalidEncoding {
+                encoding,
+                data: _,
+                error,
+            } => {
                 write!(f, "InvalidEncoding - {encoding:?}, error : {error:?}",)?;
             }
         }
-        Ok(())
+        Ok((),)
     }
 }
 
@@ -36,7 +43,7 @@ impl error::Error for FileMetaError {}
 
 /// DataStructure that maps all the data inside of bencode encoded ".torrent" file
 /// into something rust program can use.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize,)]
 pub struct FileMeta {
     /// **(Required)** It's a URL that specifies the location of the tracker, which is a server that helps coordinate communication between the clients that are downloading and uploading the file.
     pub announce: String,
@@ -44,49 +51,49 @@ pub struct FileMeta {
     /// **(Optional)** It's a list of backup trackers in case the primary tracker is unavailable. Each tracker in the list is specified by a URL, it contains the url of "announce" field as well, so if this field is present, then
     /// we can surely omit value in the "announce" field
     #[serde(rename = "announce-list")]
-    pub announce_list: Option<Vec<Vec<String>>>,
+    pub announce_list: Option<Vec<Vec<String,>,>,>,
 
     /// **(Required)** It's a  dictionary that contains metadata about the file or group of files.
     pub info: Info,
 
     /// **(Optional)** UNIX timestamp that indicates when the file was created
     #[serde(rename = "creation date")]
-    pub creation_data: Option<i64>,
+    pub creation_data: Option<i64,>,
 
     /// **(Optional)** A comment about the torrent
-    pub comment: Option<String>,
+    pub comment: Option<String,>,
 
     /// **(Optional)** String that indicates the character encoding that was used to encode the name of the file
-    pub encoding: Option<String>,
+    pub encoding: Option<String,>,
 
     /// **(Optional)** String indicating the name and version of the software that was used to create the torrent file
     #[serde(rename = "created by")]
-    pub created_by: Option<String>,
+    pub created_by: Option<String,>,
 
     /// **(Optional)** As "as" is a reserved keyword in rust, acceptable_source as in whole word is
     /// written, which Refers to a direct download from a web server. It's URL encoded
-    pub acceptable_source: Option<String>,
+    pub acceptable_source: Option<String,>,
 }
 
 /// The fields within the Info DataStructure are used to build "info hash", so it must the required
 /// fields and its data must not be missed
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize,)]
 pub struct Info {
-    pub name: Option<String>,
-    pub length: Option<i64>,
-    pub files: Option<Vec<File>>,
+    pub name: Option<String,>,
+    pub length: Option<i64,>,
+    pub files: Option<Vec<File,>,>,
     #[serde(rename = "piece length")]
-    pub piece_length: Option<i64>,
+    pub piece_length: Option<i64,>,
     /// Consists of byte string of concatenation of all 20-byte SHA1 hash values, one per piece
     #[serde(with = "serde_bytes")]
-    pub pieces: Vec<u8>,
+    pub pieces: Vec<u8,>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize,)]
 pub struct File {
     pub length: i64,
-    pub path: Vec<String>,
-    pub md5sum: Option<String>,
+    pub path: Vec<String,>,
+    pub md5sum: Option<String,>,
 }
 
 impl FileMeta {
@@ -109,17 +116,17 @@ impl FileMeta {
     ///
     /// ```
     ///
-    pub fn fromTorrentFile(file_path: &String) -> Result<FileMeta, FileMetaError> {
+    pub fn fromTorrentFile(file_path: &String,) -> Result<FileMeta, FileMetaError,> {
         // Creates a buffer to store the bytes of the file
-        match fs::read(file_path) {
-            Ok(bytes) => match Self::fromRawTorrentFile(bytes) {
-                Ok(meta) => Ok(meta),
-                Err(err) => Err(err),
+        match fs::read(file_path,) {
+            Ok(bytes,) => match Self::fromRawTorrentFile(bytes,) {
+                Ok(meta,) => Ok(meta,),
+                Err(err,) => Err(err,),
             },
-            Err(err) => Err(FileMetaError::FileError {
+            Err(err,) => Err(FileMetaError::FileError {
                 path: file_path.to_string(),
-                cause: Some(err),
-            }),
+                cause: Some(err,),
+            },),
         }
     }
 
@@ -145,14 +152,14 @@ impl FileMeta {
     ///
     /// ```
     ///
-    pub fn fromRawTorrentFile(file: Vec<u8>) -> Result<FileMeta, FileMetaError> {
-        match serde_bencode::de::from_bytes::<FileMeta>(&file) {
-            Ok(d) => Ok(d),
-            Err(err) => Err(FileMetaError::InvalidEncoding {
+    pub fn fromRawTorrentFile(file: Vec<u8,>,) -> Result<FileMeta, FileMetaError,> {
+        match serde_bencode::de::from_bytes::<FileMeta,>(&file,) {
+            Ok(d,) => Ok(d,),
+            Err(err,) => Err(FileMetaError::InvalidEncoding {
                 encoding: "Bencode".to_string(),
                 data: file,
-                error: Some(err),
-            }),
+                error: Some(err,),
+            },),
         }
     }
 
@@ -180,25 +187,25 @@ impl FileMeta {
     ///
     /// ```
     /// Gets you the Info Hash
-    pub fn generateInfoHash(&self) -> Vec<u8> {
+    pub fn generateInfoHash(&self,) -> Vec<u8,> {
         // Serialize the info section of FileMeta and get all bytes in info field of a torrent file
         // i.e Converts the data of info field to "bytes", to generate Info Hash
-        let info_byte = serde_bencode::ser::to_bytes(&self.info).unwrap();
+        let info_byte = serde_bencode::ser::to_bytes(&self.info,).unwrap();
         let mut hasher = Sha1::new();
-        hasher.update(info_byte);
+        hasher.update(info_byte,);
         hasher.finalize().into_iter().collect()
     }
 
     /// Gets all the hash of the pieces stored in the bencode encoded ".torrent" file's
     /// "pieces" field
-    pub fn getPiecesHash(&self) -> Vec<[u8; 20]> {
-        let mut pieces_hash: Vec<[u8; 20]> = Vec::new();
+    pub fn getPiecesHash(&self,) -> Vec<[u8; 20],> {
+        let mut pieces_hash: Vec<[u8; 20],> = Vec::new();
 
         // Extract the hash of each piece
         // Jump 20 steps ahead to extract the entire hash of each piece
-        for (i, _) in self.info.pieces.iter().enumerate().step_by(20) {
+        for (i, _,) in self.info.pieces.iter().enumerate().step_by(20,) {
             let hash: [u8; 20] = self.info.pieces[i..i + 20].try_into().unwrap();
-            pieces_hash.push(hash);
+            pieces_hash.push(hash,);
         }
         pieces_hash
     }

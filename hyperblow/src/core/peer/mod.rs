@@ -5,8 +5,7 @@ mod piece;
 use super::state::State;
 use crate::ArcMutex;
 use messages::Message;
-use std::time::Duration;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
     net::TcpStream,
     sync::Mutex,
@@ -18,7 +17,7 @@ use tokio_util::codec::Framed;
 
 /// PeerState denotes high level overview of the current state of
 /// relationship of this client with the remote Peer
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,)]
 pub enum PeerState {
     /// Haven't even made a TCP Connection
     NotConnected,
@@ -45,7 +44,7 @@ pub enum PeerState {
 }
 
 /// It defines the type of Peer
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,)]
 pub enum PeerType {
     /// One that doesnt have all pieces and wants more piece
     Leecher,
@@ -62,13 +61,13 @@ pub enum PeerType {
 
 /// PeerInfo holds crucial informations about the Peer, such as the pieces the peer has
 /// or doesn't have, the type of the peer
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,)]
 pub struct PeerInfo {
     /// Zero based index of the piece the peer has
-    pieces_have: Vec<u32>,
+    pieces_have: Vec<u32,>,
 
     /// Zero based index of the piece the peer does not have
-    pieces_not_have: Vec<u32>,
+    pieces_not_have: Vec<u32,>,
 
     /// Whether the peer is a Seeder or Leecher
     peer_type: PeerType,
@@ -77,7 +76,7 @@ pub struct PeerInfo {
     peer_state: PeerState,
 }
 
-#[derive(Debug)]
+#[derive(Debug,)]
 pub struct Peer {
     ///// An Owned Read Split Half of the connected TcpStream
     //tcp_read_half: Arc<Mutex<Option<OwnedReadHalf>>>,
@@ -85,15 +84,15 @@ pub struct Peer {
     ///// An Owned Write Split Half of the connected TcpStream
     //tcp_write_half: Arc<Mutex<Option<OwnedWriteHalf>>>,
     /// Holds the information and state of the Peer
-    pub info: Arc<Mutex<PeerInfo>>,
+    pub info: Arc<Mutex<PeerInfo,>,>,
 
     /// State of this torrent session
-    state: Arc<State>,
+    state: Arc<State,>,
 
     /// The socket address of the peer
     pub socket_adr: SocketAddr,
 
-    stream: Arc<Mutex<Option<Framed<TcpStream, PeerMessageCodec>>>>,
+    stream: Arc<Mutex<Option<Framed<TcpStream, PeerMessageCodec,>,>,>,>,
 }
 
 impl Peer {
@@ -101,7 +100,7 @@ impl Peer {
     ///
     /// socket_adr : The Socket Address of the peer we're trying to connect with
     /// state : The State of teh torrent session
-    pub fn new(socket_adr: SocketAddr, state: Arc<State>) -> Self {
+    pub fn new(socket_adr: SocketAddr, state: Arc<State,>,) -> Self {
         let info = ArcMutex!(PeerInfo {
             pieces_have: Vec::new(),
             pieces_not_have: Vec::new(),
@@ -131,29 +130,29 @@ impl Peer {
     ///
     /// TODO : Figure out the sleep duration for connection timeout or socket error, i.e after a
     /// socket error or connection timeout, figure out the time until next connection attempt
-    async fn connect(&self, socket_adr: SocketAddr) {
-        let CONNECTION_TIMEOUT = Duration::from_secs(16);
+    async fn connect(&self, socket_adr: SocketAddr,) {
+        let CONNECTION_TIMEOUT = Duration::from_secs(16,);
         loop {
-            match timeout(CONNECTION_TIMEOUT, TcpStream::connect(socket_adr)).await {
-                Ok(connection) => match connection {
-                    Ok(tcp_stream) => {
+            match timeout(CONNECTION_TIMEOUT, TcpStream::connect(socket_adr,),).await {
+                Ok(connection,) => match connection {
+                    Ok(tcp_stream,) => {
                         let peer_message_codec = codec::PeerMessageCodec;
-                        let codec_stream = Framed::new(tcp_stream, peer_message_codec);
+                        let codec_stream = Framed::new(tcp_stream, peer_message_codec,);
                         let mut stream = self.stream.lock().await;
-                        *stream = Some(codec_stream);
+                        *stream = Some(codec_stream,);
                     }
-                    Err(_) => {
+                    Err(_,) => {
                         // Err while trying to achieve a TCP Connection with the peer
                         // TODO : Handle Connection timeout properly with
                         // proper protocol implementation rather than this 1000 secs of sleep
-                        sleep(Duration::from_secs(1000)).await;
+                        sleep(Duration::from_secs(1000,),).await;
                     }
                 },
-                Err(_) => {
+                Err(_,) => {
                     // TCP Connection timeout
                     // TODO : Handle Connection timeout properly with
                     // proper protocol implementation rather than this 1000 secs of sleep
-                    sleep(Duration::from_secs(1000)).await;
+                    sleep(Duration::from_secs(1000,),).await;
                 }
             }
         }
@@ -169,7 +168,7 @@ impl Peer {
     ///
     /// NOTE : This method should only be called after calling self.connect() method
     /// i.e after successfully establishing a TCP Connection with the peer
-    async fn send_handshake_message(&self) {
+    async fn send_handshake_message(&self,) {
         // Steps :
         //
         // 1. Send the Handshake message to the peer
@@ -212,7 +211,7 @@ impl Peer {
     /// TODO : Write some stuff about INTERESTED message and its response
     ///
     /// Creates and sends INTERESTED message to the peer
-    pub async fn sendInterestedMessage(&mut self) {
+    pub async fn sendInterestedMessage(&mut self,) {
         // self.write_half.write_all(&Interested::build_message()).await;
 
         // self.receiver.recv().await

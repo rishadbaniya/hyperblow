@@ -2,7 +2,7 @@
 // #![feature(async_closure)]
 //
 //
-pub fn bytes_to_human_readable(size: usize) -> String {
+pub fn bytes_to_human_readable(size: usize,) -> String {
     let kibibytes = size as f32 / 1024_f32;
     if kibibytes < 1024_f32 {
         format!("{:.2} KiB", kibibytes)

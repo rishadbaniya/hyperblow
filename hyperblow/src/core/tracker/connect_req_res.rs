@@ -13,7 +13,7 @@ use rand::Rng;
 /// 12      32-bit integer  transaction_id  A random number
 /// 16
 ///
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,)]
 pub struct ConnectRequest {
     pub protocol_id: i64,
     pub action: i32,
@@ -32,11 +32,11 @@ impl ConnectRequest {
     }
 
     // Gives a buffer view of the ConnectRequest
-    pub fn serializeToBytes(&self) -> BytesMut {
-        let mut bytes = BytesMut::with_capacity(16);
-        bytes.put_i64(self.protocol_id);
-        bytes.put_i32(self.action);
-        bytes.put_i32(self.transaction_id);
+    pub fn serializeToBytes(&self,) -> BytesMut {
+        let mut bytes = BytesMut::with_capacity(16,);
+        bytes.put_i64(self.protocol_id,);
+        bytes.put_i32(self.action,);
+        bytes.put_i32(self.transaction_id,);
         bytes
     }
 }
@@ -50,7 +50,7 @@ impl ConnectRequest {
 /// 4       32-bit integer  transaction_id
 /// 8       64-bit integer  connection_id
 /// 16
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,)]
 pub struct ConnectResponse {
     pub action: i32,
     pub transaction_id: i32,
@@ -58,18 +58,18 @@ pub struct ConnectResponse {
 }
 
 impl ConnectResponse {
-    pub fn from(v: &[u8]) -> Result<ConnectResponse, std::io::Error> {
+    pub fn from(v: &[u8],) -> Result<ConnectResponse, std::io::Error,> {
         let mut action_bytes = &v[0..=3];
         let mut transaction_id_bytes = &v[4..=7];
         let mut connection_id_bytes = &v[8..=15];
 
-        let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes)?;
-        let transaction_id = ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes)?;
-        let connection_id = ReadBytesExt::read_i64::<BigEndian>(&mut connection_id_bytes)?;
+        let action = ReadBytesExt::read_i32::<BigEndian,>(&mut action_bytes,)?;
+        let transaction_id = ReadBytesExt::read_i32::<BigEndian,>(&mut transaction_id_bytes,)?;
+        let connection_id = ReadBytesExt::read_i64::<BigEndian,>(&mut connection_id_bytes,)?;
         Ok(Self {
             action,
             transaction_id,
             connection_id,
-        })
+        },)
     }
 }

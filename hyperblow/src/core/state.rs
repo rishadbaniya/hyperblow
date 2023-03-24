@@ -5,8 +5,7 @@ use crossbeam::atomic::AtomicCell;
 use hyperblow_parser::torrent_parser::FileMeta;
 use paste::paste;
 
-use std::cell::Cell;
-use std::sync::Arc;
+use std::{cell::Cell, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 
 /// Used to generate getter and setter for Cell<T> types
@@ -23,7 +22,7 @@ use tokio::sync::{Mutex, RwLock};
 /// pub fn set_xyz(&self, value){/*...*/}
 macro_rules! cell_get_set {
     ($field:ident: $ty:ty) => {
-        pub fn $field(&self) -> $ty {
+        pub fn $field(&self,) -> $ty {
             self.$field.load()
         }
 
@@ -38,7 +37,7 @@ macro_rules! cell_get_set {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug,)]
 pub enum DownState {
     /// It means the torrent is currently downloading
     Downloading,
@@ -52,42 +51,42 @@ pub enum DownState {
 /// A thread shareable state of the torrent being downloaded.
 ///
 /// Data that can be showed to the user is stored in [State]
-#[derive(Debug)]
+#[derive(Debug,)]
 pub struct State {
     pub meta_info: FileMeta,
 
     pub d_state: DownState,
 
     /// The entire file tree of the torrent files to be downloaded
-    pub file_tree: Option<Arc<Mutex<File>>>,
+    pub file_tree: Option<Arc<Mutex<File,>,>,>,
 
     /// The trackers of the torrent file
-    pub trackers: Arc<RwLock<Vec<Vec<Arc<Tracker>>>>>,
+    pub trackers: Arc<RwLock<Vec<Vec<Arc<Tracker,>,>,>,>,>,
 
     /// A list of UDP ports being used by this torrent being downloaded
     /// The port at index 0, is the port used for UDP Trackers and it always exists
-    pub udp_ports: Arc<Mutex<Vec<u16>>>,
+    pub udp_ports: Arc<Mutex<Vec<u16,>,>,>,
 
     /// A list of TCP ports being used by this torrent being downloaded
-    pub tcp_ports: Arc<Mutex<Vec<u16>>>,
+    pub tcp_ports: Arc<Mutex<Vec<u16,>,>,>,
 
     /// Info hash of the torrent
-    pub info_hash: Vec<u8>,
+    pub info_hash: Vec<u8,>,
 
     /// Stores the hash of each piece by its exact index extracted out of bencode encoded ".torrent" file
-    pub pieces_hash: Vec<[u8; 20]>,
+    pub pieces_hash: Vec<[u8; 20],>,
 
     /// All the peers of the current session
-    pub peers: Arc<Mutex<Vec<Peer>>>,
+    pub peers: Arc<Mutex<Vec<Peer,>,>,>,
 
     /// Total session time that torrent has been active in seconds
-    pub uptime: AtomicCell<usize>,
+    pub uptime: AtomicCell<usize,>,
 
     /// Total bytes downloaded
-    pub bytes_complete: AtomicCell<usize>,
+    pub bytes_complete: AtomicCell<usize,>,
 
     // Total downloaded pieces
-    pub pieces_downloaded: AtomicCell<usize>,
+    pub pieces_downloaded: AtomicCell<usize,>,
 }
 
 impl State {
