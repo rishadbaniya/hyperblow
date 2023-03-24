@@ -5,8 +5,8 @@ use super::{
     mouse::MouseEv,
     sections::{
         tabs_section::{
-            bandwidth_tab::BandwidthTab, details_tab::DetailsTab, files_tab::FilesTab, peers_tab::PeersTab,
-            pieces_tab::PiecesTab, trackers_tab::TrackersTab,
+            bandwidth_tab::BandwidthTab, details_tab::DetailsTab, files_tab::FilesTab, peers_tab::PeersTab, pieces_tab::PiecesTab,
+            trackers_tab::TrackersTab,
         },
         torrents_section::TorrentsSection,
     },
@@ -38,11 +38,7 @@ pub fn draw_ui(engine: Arc<Engine>) -> Result<(), Box<dyn std::error::Error>> {
 
     // Restoring the terminal
     terminal::disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        terminal::LeaveAlternateScreen,
-        event::DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), terminal::LeaveAlternateScreen, event::DisableMouseCapture)?;
     terminal.show_cursor()?;
 
     Ok(())

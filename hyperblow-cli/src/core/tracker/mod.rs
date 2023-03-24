@@ -18,6 +18,7 @@ use rand::{thread_rng, Rng};
 use reqwest::Url;
 use std::{
     cmp::PartialEq,
+    fmt::{write, Display},
     io,
     net::SocketAddr,
     sync::Arc,
@@ -46,58 +47,65 @@ pub enum TrackerProtocol {
 /// **TCP and UDP** - Tracker state for both UDP and TCP based tracker
 /// **TCP** - Tracker state for only TCP based tracker
 /// **UDP** - Tracker state for only UDP based tracker
-#[derive(Debug, PartialEq, Copy, Clone, Display)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum TrackerState {
+    /// Default state of the Tracker, where **NO** action is performed on the tracker
+    /// For : **TCP and UDP** Tracker
+    Idle,
+
     /// The DNS of the tracker is resolving
-    /// **TCP and UDP**
-    #[strum(serialize = "DNS Resolving")]
+    /// **TCP and UDP** Tracker
     DNSResolving,
 
-    /// The DNS of the tracker was not resolved
-    /// **TCP and UDP**
-    #[strum(serialize = "DNS Unresolved")]
-    DNSUnresolved,
+    /// The DNS of the tracker was not resolved on trying to resolve and it shall be tried again
+    /// to be resolved after **retry_time** which is usually
+    /// 30 secs
+    /// TODO : Figure out if it was not resolved because internet was not there
+    /// For : **TCP and UDP** Tracker
+    DNSUnresolved { retry_time: Instant },
 
     /// The DNS of the tracker was resolved
-    /// **TCP and UDP**
-    #[strum(serialize = "DNS Resolved")]
+    /// For : **TCP and UDP** Tracker
     DNSResolved,
 
     /// DNS was resolved and a Connect Request was sent to the tracker, for which
     /// we are now waiting to get a response
-    /// **UDP**
-    #[strum(serialize = "Waiting For Connect Response")]
+    /// For : **UDP** Tracker
     WaitingForConnectResponse,
 
     /// ConnectResponse was received and AnnounceRequest was sent to the tracker, for which
     /// we are now waiting to get a response
-    /// **UDP**
-    #[strum(serialize = "Waiting For Announce Response")]
+    /// For : **UDP** Tracker
     WaitingForAnnounceResponse,
 
     /// A ScrapeRequest was sent to the tracker, for which we are now watiing to get
     /// a response
-    /// **UDP**
-    #[strum(serialize = "Waiting For Scrape Response")]
+    /// For : **UDP** Tracker
     WaitingForScrapeResponse,
 }
 
-///
-///
-///
-///
-///
-///
-///
-///
-///
-///
-///
-///
-///
-///
-///
-///
+//impl Display {}
+//impl Display for{}
+impl Display for TrackerState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::Idle => write!(f, "Idle"),
+            Self::DNSResolving => write!(f, "DNS Resolving"),
+            Self::DNSResolved => write!(f, "DNS Resolved"),
+            Self::WaitingForConnectResponse => write!(f, "Waiting for Connect Response"),
+            Self::WaitingForAnnounceResponse => write!(f, "Waiting for Announce Response"),
+            Self::WaitingForScrapeResponse => write!(f, "Waiting for Scrape Response"),
+            Self::DNSUnresolved {
+                ref retry_time,
+            } => write!(
+                f,
+                "DNSUnresolved ({:?}/30 sec)",
+                Instant::now().duration_since(retry_time.clone()).as_secs()
+            ),
+        }
+    }
+}
+
 /// A tracker in BitTorrent is simply, a "URL", that uses certian request and response technique in
 /// order to get information about peers
 ///
@@ -174,7 +182,7 @@ impl Tracker {
             TrackerProtocol::TCP => None,
         };
 
-        let tracker_state = ACell!(TrackerState::DNSUnresolved);
+        let tracker_state = ACell!(TrackerState::Idle);
 
         Ok(Tracker {
             torrent_state,
@@ -193,25 +201,26 @@ impl Tracker {
         })
     }
 
-    /// Tries to resolve the DNS of the tracker's URL
-    async fn resolveDNS(&self) -> bool {
-        if let Ok(addrs) = self.address.socket_addrs(|| None) {
-            *self.socketAddrs.lock().await = addrs;
-            true
-        } else {
-            false
-        }
-    }
-
     /// Initially we are only given the URL of the tracker, in order to check if the tracker is even
     /// alive or not, we must check if it's IP is availaible or not by simply resolving the
     /// tracker's DNS, that's what this method does, it resolves the DNS of the tracker
     pub async fn resolveTracker(&self) {
+        let resolveDNS = || async {
+            if let Ok(addrs) = self.address.socket_addrs(|| None) {
+                *self.socketAddrs.lock().await = addrs;
+                true
+            } else {
+                false
+            }
+        };
+
         self.tracker_state.store(TrackerState::DNSResolving);
-        if self.resolveDNS().await {
+        if resolveDNS().await {
             self.tracker_state.store(TrackerState::DNSResolved);
         } else {
-            self.tracker_state.store(TrackerState::DNSUnresolved);
+            self.tracker_state.store(TrackerState::DNSUnresolved {
+                retry_time: Instant::now(),
+            });
         }
     }
 
@@ -228,9 +237,13 @@ impl Tracker {
         false
     }
 
+    pub async fn run(&self, socket: Arc<UdpSocket>) {
+        //self.resolveTracker()
+    }
+
     /// Starts running the tracker
     /// socket => Socket through which the tracker will send UDP request and receive UDP response
-    pub async fn run(&self, socket: Arc<UdpSocket>) {
+    pub async fn run_me(&self, socket: Arc<UdpSocket>) {
         // A timeout duration for all types of responses
         let timeout_duration = |n: u64| Duration::from_secs(15 + 2 ^ n);
 
