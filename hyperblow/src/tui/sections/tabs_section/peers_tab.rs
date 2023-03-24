@@ -5,12 +5,13 @@ use ratatui::{
     terminal::Frame,
     widgets::{Block, BorderType, Borders, Cell, Row, Table},
 };
-use std::rc::Rc;
+
+use std::rc::{Rc, Weak};
 
 /// Data for the Bandwidth Tab Section of TUI
-pub struct DetailsTab;
+pub struct PeersTab;
 
-impl DetailsTab {
+impl PeersTab {
     pub fn draw<B: Backend,>(frame: &mut Frame<B,>, area: Rect, state: Rc<TUIState,>,) {
         //// Create and render the border first
         //let widget_border = Block::default()

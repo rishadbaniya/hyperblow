@@ -1,2 +1,11 @@
 edition = "2021"
-max_width = 160
+max_width = 120 
+
+
+#Only availiable on the nightly compiler
+unstable_features = true
+
+imports_granularity = "Crate"
+struct_lit_single_line = false
+trailing_comma = "Always"
+

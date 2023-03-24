@@ -5,17 +5,19 @@ use super::mouse::Mouse;
 use crate::engine::Engine;
 use ratatui::{
     backend::Backend,
-    layout::Rect,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     terminal::Frame,
     text::Text,
     widgets,
     widgets::{Block, BorderType, Borders, Gauge},
 };
-use std::cell::RefCell;
-use std::fmt::format;
-use std::{cell::Cell, rc::Rc, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    fmt::format,
+    rc::Rc,
+    sync::Arc,
+};
 
 pub enum Tab {
     Details,
@@ -210,44 +212,44 @@ impl Default for Tab {
 /// One can simply use Rc<TUIState> Or Arc<TUIState>, update and get the state
 pub struct TUIState {
     /// The maximum tab index in TabSection
-    max_tab_index: Cell<usize>,
+    max_tab_index: Cell<usize,>,
 
     /// The selected tab index in TabSection
-    selected_tab_index: Cell<usize>,
+    selected_tab_index: Cell<usize,>,
 
     /// An Arc Pointer to Engine, on which we can operate without using its mutable reference as
     /// it works on interior mutability
-    pub engine: Arc<Engine>,
+    pub engine: Arc<Engine,>,
 
     /// An Rc Pointer to Mouse State, it be modified to hold different Mouse data
-    pub mouse: Rc<Mouse>,
+    pub mouse: Rc<Mouse,>,
 
-    pub tab: Rc<RefCell<Tab>>,
+    pub tab: Rc<RefCell<Tab,>,>,
 
-    torrent_index: Cell<usize>,
+    torrent_index: Cell<usize,>,
 
-    max_torrent_index: Cell<usize>,
+    max_torrent_index: Cell<usize,>,
 }
 
 impl TUIState {
     /// Creates a new TUIState
-    pub fn new(engine: Arc<Engine>) -> Self {
+    pub fn new(engine: Arc<Engine,>,) -> Self {
         // Initially we set the max tab index to 0, inside the drawTabsSection it will be
         // set to the max index automatically, the only time max_tab_index's value is extracted is
         // in the crosstern::event::poll function, which is called after the drawTabsSection
-        let max_tab_index = Cell::new(0);
+        let max_tab_index = Cell::new(0,);
 
         // Default selected tab index of Tabs Section
-        let selected_tab_index = Cell::new(0);
+        let selected_tab_index = Cell::new(0,);
 
         // Mouse details and events for TUI
-        let mouse = Rc::new(Mouse::default());
+        let mouse = Rc::new(Mouse::default(),);
 
         let tab = Rc::default();
 
-        let torrent_index = Cell::new(0);
+        let torrent_index = Cell::new(0,);
 
-        let max_torrent_index = Cell::new(0);
+        let max_torrent_index = Cell::new(0,);
 
         TUIState {
             max_tab_index,
@@ -261,54 +263,54 @@ impl TUIState {
     }
 
     // Gets you the current tab index
-    pub fn tab_index(&self) -> usize {
+    pub fn tab_index(&self,) -> usize {
         self.selected_tab_index.get()
     }
 
     // Sets the current tab index
-    pub fn set_tab_index(&self, index: usize) {
-        self.selected_tab_index.set(index);
+    pub fn set_tab_index(&self, index: usize,) {
+        self.selected_tab_index.set(index,);
         self.loadTab();
     }
 
-    pub fn torrent_index(&self) -> usize {
+    pub fn torrent_index(&self,) -> usize {
         self.torrent_index.get()
     }
 
-    pub fn set_torrent_index(&self, index: usize) {
-        self.torrent_index.set(index);
+    pub fn set_torrent_index(&self, index: usize,) {
+        self.torrent_index.set(index,);
     }
 
     // Gets you the maximum tab index that can be achieved
-    pub fn max_tab_index(&self) -> usize {
+    pub fn max_tab_index(&self,) -> usize {
         self.max_tab_index.get()
     }
 
     // Sets the maximum tab index
-    pub fn set_max_tab_index(&self, index: usize) {
-        self.max_tab_index.set(index);
+    pub fn set_max_tab_index(&self, index: usize,) {
+        self.max_tab_index.set(index,);
     }
 
     // Increments the tab index by 1
-    pub fn increment_tab_index(&self) {
+    pub fn increment_tab_index(&self,) {
         let current_tab_index = self.tab_index();
         if current_tab_index == self.max_tab_index() {
-            self.set_tab_index(0);
+            self.set_tab_index(0,);
         } else {
-            self.set_tab_index(current_tab_index + 1);
+            self.set_tab_index(current_tab_index + 1,);
         }
     }
 
     // TODO : Make use of crossterm key combination for Decrementing the tab index
     // Decrements the tab index by 1
-    pub fn decrement_tab_index(&self) {}
+    pub fn decrement_tab_index(&self,) {}
 
     //    pub fn getTorrentsData() {}
     //
 
     /// Toggles either pause or resume of the torrent, which means that when this method is called
     /// with an index of torrent, it shall be paused or resumed
-    pub fn toggle_torrent(&self, index: usize) {}
+    pub fn toggle_torrent(&self, index: usize,) {}
     // Gets the data to be displayed on the TorrentsSection
     // It has following structure of HashMap represented in JSON Structure:
     // {
@@ -319,7 +321,7 @@ impl TUIState {
     // }
     //
 
-    pub fn loadTab(&self) {
+    pub fn loadTab(&self,) {
         if self.tab_index() == 0 {
             *self.tab.borrow_mut() = Tab::Details;
         } else if self.tab_index() == 1 {

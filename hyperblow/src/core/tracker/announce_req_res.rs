@@ -1,8 +1,6 @@
 use byteorder::{BigEndian, ReadBytesExt};
-use bytes::BufMut;
-use bytes::BytesMut;
-use std::net::SocketAddr;
-use std::net::{IpAddr, Ipv4Addr};
+use bytes::{BufMut, BytesMut};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 /// Struct to handle "Announce" request message
 /// Used to create a "98 byte" buffer to make "Announce Request"
@@ -24,21 +22,21 @@ use std::net::{IpAddr, Ipv4Addr};
 /// 92      32-bit integer  num_want        The maximum number of peers you want in the reply. Use -1 for default.
 /// 96      16-bit integer  port            The port you're listening on.
 /// 98
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,)]
 pub struct AnnounceRequest {
-    connection_id: Option<i64>,
+    connection_id: Option<i64,>,
     action: i32,
-    pub transaction_id: Option<i32>,
-    info_hash: Option<Vec<u8>>,
-    peer_id: Option<[u8; 20]>,
-    downloaded: Option<i64>,
-    left: Option<i64>,
-    uploaded: Option<i64>,
-    event: Option<i32>,
+    pub transaction_id: Option<i32,>,
+    info_hash: Option<Vec<u8,>,>,
+    peer_id: Option<[u8; 20],>,
+    downloaded: Option<i64,>,
+    left: Option<i64,>,
+    uploaded: Option<i64,>,
+    event: Option<i32,>,
     ip_address: i32,
-    key: Option<i32>,
+    key: Option<i32,>,
     num_want: i32,
-    port: Option<i16>,
+    port: Option<i16,>,
 }
 
 impl AnnounceRequest {
@@ -46,7 +44,7 @@ impl AnnounceRequest {
     pub fn new() -> Self {
         let peer_id_slice = b"-HBYxxx-QMAXYDGHQAHF";
         let mut peer_id = [0u8; 20];
-        for (index, value) in peer_id_slice.iter().enumerate() {
+        for (index, value,) in peer_id_slice.iter().enumerate() {
             peer_id[index] = *value;
         }
         AnnounceRequest {
@@ -54,11 +52,11 @@ impl AnnounceRequest {
             action: 1,
             transaction_id: None,
             info_hash: None,
-            peer_id: Some(peer_id),
+            peer_id: Some(peer_id,),
             downloaded: None,
             left: None,
             uploaded: None,
-            event: Some(1),
+            event: Some(1,),
             ip_address: 0,
             key: None,
             num_want: -1,
@@ -68,54 +66,54 @@ impl AnnounceRequest {
 
     // Consumes the Announce instance and gives you a Buffer of 98 bytes that you
     // can use to make Announce Request in UDP
-    pub fn serialize_to_bytes(&self) -> Option<BytesMut> {
-        let mut bytes = BytesMut::with_capacity(98);
-        bytes.put_i64(self.connection_id?);
-        bytes.put_i32(self.action);
-        bytes.put_i32(self.transaction_id?);
-        bytes.put_slice(&self.info_hash.as_ref()?[..]);
-        bytes.put_slice(&self.peer_id?);
-        bytes.put_i64(self.downloaded?);
-        bytes.put_i64(self.left?);
-        bytes.put_i64(self.uploaded?);
-        bytes.put_i32(self.event?);
-        bytes.put_i32(self.ip_address);
-        bytes.put_i32(self.key?);
-        bytes.put_i32(self.num_want);
-        bytes.put_i16(self.port?);
-        Some(bytes)
+    pub fn serialize_to_bytes(&self,) -> Option<BytesMut,> {
+        let mut bytes = BytesMut::with_capacity(98,);
+        bytes.put_i64(self.connection_id?,);
+        bytes.put_i32(self.action,);
+        bytes.put_i32(self.transaction_id?,);
+        bytes.put_slice(&self.info_hash.as_ref()?[..],);
+        bytes.put_slice(&self.peer_id?,);
+        bytes.put_i64(self.downloaded?,);
+        bytes.put_i64(self.left?,);
+        bytes.put_i64(self.uploaded?,);
+        bytes.put_i32(self.event?,);
+        bytes.put_i32(self.ip_address,);
+        bytes.put_i32(self.key?,);
+        bytes.put_i32(self.num_want,);
+        bytes.put_i16(self.port?,);
+        Some(bytes,)
     }
 
-    pub fn set_connection_id(&mut self, v: i64) {
-        self.connection_id = Some(v);
+    pub fn set_connection_id(&mut self, v: i64,) {
+        self.connection_id = Some(v,);
     }
 
-    pub fn set_transaction_id(&mut self, v: i32) {
-        self.transaction_id = Some(v);
+    pub fn set_transaction_id(&mut self, v: i32,) {
+        self.transaction_id = Some(v,);
     }
 
-    pub fn set_info_hash(&mut self, v: &[u8]) {
-        self.info_hash = Some(v.to_vec());
+    pub fn set_info_hash(&mut self, v: &[u8],) {
+        self.info_hash = Some(v.to_vec(),);
     }
 
-    pub fn set_downloaded(&mut self, v: i64) {
-        self.downloaded = Some(v);
+    pub fn set_downloaded(&mut self, v: i64,) {
+        self.downloaded = Some(v,);
     }
 
-    pub fn set_uploaded(&mut self, v: i64) {
-        self.uploaded = Some(v);
+    pub fn set_uploaded(&mut self, v: i64,) {
+        self.uploaded = Some(v,);
     }
 
-    pub fn set_left(&mut self, v: i64) {
-        self.left = Some(v);
+    pub fn set_left(&mut self, v: i64,) {
+        self.left = Some(v,);
     }
 
-    pub fn set_port(&mut self, v: i16) {
-        self.port = Some(v);
+    pub fn set_port(&mut self, v: i16,) {
+        self.port = Some(v,);
     }
 
-    pub fn set_key(&mut self, v: i32) {
-        self.key = Some(v);
+    pub fn set_key(&mut self, v: i32,) {
+        self.key = Some(v,);
     }
 }
 
@@ -132,14 +130,14 @@ impl AnnounceRequest {
 /// 20 + 6 * Ns
 ///
 /// Struct to handle the response received by sending "Announce" request
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,)]
 pub struct AnnounceResponse {
     pub action: i32,
     pub transaction_id: i32,
     pub interval: i32,
     pub leechers: i32,
     pub seeders: i32,
-    pub peersAddresses: Vec<SocketAddr>, // TODO : Replace SocketAddr with some struct created like Peer
+    pub peersAddresses: Vec<SocketAddr,>, // TODO : Replace SocketAddr with some struct created like Peer
 }
 
 impl AnnounceResponse {
@@ -147,29 +145,32 @@ impl AnnounceResponse {
     ///
     /// The error produced here are the IO errors from parsing the given buffer bytes into
     /// respective types
-    pub fn from(v: &[u8]) -> Result<Self, std::io::Error> {
+    pub fn from(v: &[u8],) -> Result<Self, std::io::Error,> {
         let mut action_bytes = &v[0..=3];
         let mut transaction_id_bytes = &v[4..=7];
         let mut interval_bytes = &v[8..=11];
         let mut leechers_bytes = &v[12..=15];
         let mut seeder_bytes = &v[16..=19];
 
-        let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes)?;
-        let transaction_id = ReadBytesExt::read_i32::<BigEndian>(&mut transaction_id_bytes)?;
-        let interval = ReadBytesExt::read_i32::<BigEndian>(&mut interval_bytes)?;
-        let leechers = ReadBytesExt::read_i32::<BigEndian>(&mut leechers_bytes)?;
-        let seeders = ReadBytesExt::read_i32::<BigEndian>(&mut seeder_bytes)?;
+        let action = ReadBytesExt::read_i32::<BigEndian,>(&mut action_bytes,)?;
+        let transaction_id = ReadBytesExt::read_i32::<BigEndian,>(&mut transaction_id_bytes,)?;
+        let interval = ReadBytesExt::read_i32::<BigEndian,>(&mut interval_bytes,)?;
+        let leechers = ReadBytesExt::read_i32::<BigEndian,>(&mut leechers_bytes,)?;
+        let seeders = ReadBytesExt::read_i32::<BigEndian,>(&mut seeder_bytes,)?;
 
         // Range where all the (IP:PORT) are situated
         let x = 20..v.len();
 
         let mut peersAddresses = vec![];
-        for i in x.step_by(6) {
+        for i in x.step_by(6,) {
             let port_bytes = vec![v[i + 4], v[i + 5]];
             let mut port_bytes = &port_bytes[..];
-            let port = ReadBytesExt::read_i16::<BigEndian>(&mut port_bytes)?;
-            let socket_adr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(v[i], v[i + 1], v[i + 2], v[i + 3])), port as u16);
-            peersAddresses.push(socket_adr);
+            let port = ReadBytesExt::read_i16::<BigEndian,>(&mut port_bytes,)?;
+            let socket_adr = SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(v[i], v[i + 1], v[i + 2], v[i + 3],),),
+                port as u16,
+            );
+            peersAddresses.push(socket_adr,);
         }
 
         Ok(AnnounceResponse {
@@ -179,6 +180,6 @@ impl AnnounceResponse {
             leechers,
             seeders,
             peersAddresses,
-        })
+        },)
     }
 }

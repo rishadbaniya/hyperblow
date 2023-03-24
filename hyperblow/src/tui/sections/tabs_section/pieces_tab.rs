@@ -8,9 +8,9 @@ use ratatui::{
 use std::rc::Rc;
 
 /// Data for the Bandwidth Tab Section of TUI
-pub struct DetailsTab;
+pub struct PiecesTab;
 
-impl DetailsTab {
+impl PiecesTab {
     pub fn draw<B: Backend,>(frame: &mut Frame<B,>, area: Rect, state: Rc<TUIState,>,) {
         //// Create and render the border first
         //let widget_border = Block::default()

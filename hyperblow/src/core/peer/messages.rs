@@ -28,58 +28,58 @@ use std::sync::Arc;
 
 /// Messages sent to the peer and recieved form the peer takes
 /// the following forms
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone,)]
 pub enum Message {
-    Handshake(Handshake),
+    Handshake(Handshake,),
     KeepAlive,
     Choke,
     Unchoke,
     Interested,
     NotInterested,
-    Bitfield(Bitfield),
+    Bitfield(Bitfield,),
     //    EXTENDED(Extended)
-    Have(Have),
-    Request(Request),
-    Piece(Block),
-    Cancel(Cancel),
-    Port(Port),
+    Have(Have,),
+    Request(Request,),
+    Piece(Block,),
+    Cancel(Cancel,),
+    Port(Port,),
 }
 
 impl Message {
     /// Converts a Message into Bytes
-    pub fn to_bytes(&self) -> BytesMut {
+    pub fn to_bytes(&self,) -> BytesMut {
         let mut buf = BytesMut::new();
         match *self {
-            Message::Handshake(ref handshake) => {
-                buf.put_u8(handshake.pstrlen);
-                buf.put_slice(&handshake.pstr);
-                buf.put_slice(&handshake.reserved);
-                buf.put_slice(&handshake.info_hash);
-                buf.put_slice(&handshake.peer_id);
+            Message::Handshake(ref handshake,) => {
+                buf.put_u8(handshake.pstrlen,);
+                buf.put_slice(&handshake.pstr,);
+                buf.put_slice(&handshake.reserved,);
+                buf.put_slice(&handshake.info_hash,);
+                buf.put_slice(&handshake.peer_id,);
             }
 
             Message::KeepAlive => {
-                buf.put_u32(0);
+                buf.put_u32(0,);
             }
 
             Message::Choke => {
-                buf.put_u32(1);
-                buf.put_u8(1);
+                buf.put_u32(1,);
+                buf.put_u8(1,);
             }
 
             Message::Unchoke => {
-                buf.put_u32(1);
-                buf.put_u8(2);
+                buf.put_u32(1,);
+                buf.put_u8(2,);
             }
 
             Message::Interested => {
-                buf.put_u32(1);
-                buf.put_u8(3);
+                buf.put_u32(1,);
+                buf.put_u8(3,);
             }
 
             Message::NotInterested => {
-                buf.put_u32(1);
-                buf.put_u8(4);
+                buf.put_u32(1,);
+                buf.put_u8(4,);
             }
             // TODO : Do it for all messages
 
@@ -90,8 +90,8 @@ impl Message {
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Handshake Message Frame
-    pub fn is_handshake_message(src: &BytesMut) -> bool {
-        let _expected_pstr = String::from("BitTorrent protocol");
+    pub fn is_handshake_message(src: &BytesMut,) -> bool {
+        let _expected_pstr = String::from("BitTorrent protocol",);
         // First check if there is enough bytes to be a Handshake Message Frame
         if src.len() >= 68 {
             let pstr_len = src[0];
@@ -126,21 +126,21 @@ impl Message {
     /// Because, no other Message Frame has a message that starts with bytes 0000, so there is no chance
     /// for this collide with other messages as far as i know
     ///
-    pub fn is_keep_alive_message(src: &BytesMut) -> bool {
+    pub fn is_keep_alive_message(src: &BytesMut,) -> bool {
         if src.len() >= 4 {
             let mut length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
             return length_prefix == 0;
         }
         return false;
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Choke Message Frame
-    pub fn is_choke_message(src: &BytesMut) -> bool {
+    pub fn is_choke_message(src: &BytesMut,) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
             let mut length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Choke Message Frame and the message id is 0
             if length_prefix == 0 && src.len() >= 5 {
@@ -152,11 +152,11 @@ impl Message {
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Unchoke Message Frame
-    pub fn is_unchoke_message(src: &BytesMut) -> bool {
+    pub fn is_unchoke_message(src: &BytesMut,) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
             let mut length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Unchoke Message Frame and the message id is 1
             if length_prefix == 0 && src.len() >= 5 {
@@ -168,11 +168,11 @@ impl Message {
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Interested Message Frame
-    pub fn is_interested_message(src: &BytesMut) -> bool {
+    pub fn is_interested_message(src: &BytesMut,) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
             let mut length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Unchoke Message Frame and the message id is 2
             if length_prefix == 0 && src.len() >= 5 {
@@ -184,11 +184,11 @@ impl Message {
     }
 
     /// Checks in the given src buffer if the first Message Frame is A NotInterested Message Frame
-    pub fn is_not_interested_message(src: &BytesMut) -> bool {
+    pub fn is_not_interested_message(src: &BytesMut,) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
             let mut length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Unchoke Message Frame and the message id is 3
             if length_prefix == 0 && src.len() >= 5 {
@@ -200,11 +200,11 @@ impl Message {
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Have Message Frame
-    pub fn is_have_message(src: &BytesMut) -> bool {
+    pub fn is_have_message(src: &BytesMut,) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
             let mut length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
 
             // Once we get the length prefix, then we simply check if the length_prefix matches
             // or not and the source is atleast (4 + length_prefix) i.e (4 + 5) bytes or not
@@ -217,10 +217,10 @@ impl Message {
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Bitfield Message Frame
-    pub fn is_bitfield_message(src: &BytesMut) -> bool {
+    pub fn is_bitfield_message(src: &BytesMut,) -> bool {
         if src.len() >= 4 {
             let mut length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
 
             // Expected length of the entire Bitfield Message Frame
             let expected_frame_length = 4 + length_prefix;
@@ -236,11 +236,11 @@ impl Message {
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Request Message Frame
-    pub fn is_request_message(src: &BytesMut) -> bool {
+    pub fn is_request_message(src: &BytesMut,) -> bool {
         // First check if there is enough bytes to get the length prefix
         if src.len() >= 4 {
             let mut length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
 
             // Once we get the length prefix, then we simply check if the source is atleast
             // (4 + lengthprefix) bytes or not
@@ -253,10 +253,10 @@ impl Message {
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Piece Message Frame
-    pub fn is_piece_message(src: &BytesMut) -> bool {
+    pub fn is_piece_message(src: &BytesMut,) -> bool {
         if src.len() >= 4 {
             let mut length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
 
             // Expected length of the entire message
             let expected_length = 4 + length_prefix;
@@ -271,10 +271,10 @@ impl Message {
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Cancel Message Frame
-    pub fn is_cancel_message(src: &BytesMut) -> bool {
+    pub fn is_cancel_message(src: &BytesMut,) -> bool {
         if src.len() >= 4 {
             let mut length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
 
             // Once we get the length prefix, then we simply check if the source is atleast
             // (4 + lengthprefix) bytes or not
@@ -287,10 +287,10 @@ impl Message {
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Port Message Frame
-    pub fn is_port_message(src: &BytesMut) -> bool {
+    pub fn is_port_message(src: &BytesMut,) -> bool {
         if src.len() >= 4 {
             let mut length_prefix_bytes = &src[0..=3];
-            let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+            let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
 
             // Once we get the length prefix, then we simply check if the source is atleast
             // (4 + lengthprefix) bytes or not
@@ -303,37 +303,40 @@ impl Message {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq,)]
 pub struct Bitfield {
     /// Represents the pieces that peer have
-    pub have: Vec<usize>,
+    pub have: Vec<usize,>,
 
     /// Represents the pieces that peer doesn't have
-    pub not_have: Vec<usize>,
+    pub not_have: Vec<usize,>,
 }
 
 impl Bitfield {
-    pub fn from_bytes(src: &mut BytesMut) -> Self {
+    pub fn from_bytes(src: &mut BytesMut,) -> Self {
         let mut have = Vec::new();
         let mut not_have = Vec::new();
 
         let mut length_prefix_bytes = &src[0..=3];
-        let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+        let length_prefix = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
 
         let bitfield_frame_length = (length_prefix + 4) as usize;
 
         let bitfield_bytes = &src[5..bitfield_frame_length];
-        let bitfield = BytesMut::from(bitfield_bytes);
+        let bitfield = BytesMut::from(bitfield_bytes,);
 
-        for (index, bit) in bitfield.iter().enumerate() {
+        for (index, bit,) in bitfield.iter().enumerate() {
             match bit {
-                0 => not_have.push(index),
-                1 => have.push(index),
+                0 => not_have.push(index,),
+                1 => have.push(index,),
                 _ => {}
             }
         }
-        src.split_to(bitfield_frame_length as usize);
-        Self { have, not_have }
+        src.split_to(bitfield_frame_length as usize,);
+        Self {
+            have,
+            not_have,
+        }
     }
 }
 
@@ -382,17 +385,19 @@ impl Bitfield {
 //
 /// HAVE Message :
 /// TODO : Add info about HAVE message
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone,)]
 pub struct Have {
     pub piece_index: u32,
 }
 
 impl Have {
-    pub fn from_bytes(src: &mut BytesMut) -> Self {
+    pub fn from_bytes(src: &mut BytesMut,) -> Self {
         let mut piece_index_bytes = &src[5..=8];
         // TODO : Make sure unpwrap here is safe
-        let piece_index = ReadBytesExt::read_u32::<BigEndian>(&mut piece_index_bytes).unwrap();
-        Self { piece_index }
+        let piece_index = ReadBytesExt::read_u32::<BigEndian,>(&mut piece_index_bytes,).unwrap();
+        Self {
+            piece_index,
+        }
     }
 }
 
@@ -430,23 +435,23 @@ impl Have {
 ///
 /// For More : https://wiki.theory.org/indx.php/BitTorrentSpecification#Handshakee
 ///
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq,)]
 pub struct Handshake {
     pstrlen: u8,
-    pstr: Vec<u8>,
-    reserved: Vec<u8>,
-    info_hash: Vec<u8>,
-    peer_id: Vec<u8>,
+    pstr: Vec<u8,>,
+    reserved: Vec<u8,>,
+    info_hash: Vec<u8,>,
+    peer_id: Vec<u8,>,
 }
 
 impl Handshake {
     /// Creates a instance of Handshake in order to send it to a peer.
-    pub fn new(state: Arc<State>) -> Self {
+    pub fn new(state: Arc<State,>,) -> Self {
         let pstrlen: u8 = 19;
         let pstr = b"BitTorrent protocol".to_vec();
         let reserved = vec![0; 8];
         let info_hash = state.info_hash.clone();
-        let peer_id = b"-HYBLOW-110011001100".map(|v| v).into_iter().collect();
+        let peer_id = b"-HYBLOW-110011001100".map(|v| v,).into_iter().collect();
         // TODO : Create a Peer Id field in state field and use that field here
         Self {
             pstrlen,
@@ -458,14 +463,14 @@ impl Handshake {
     }
 
     /// Deserializes given bytes into Handshake instance
-    pub fn from(v: &mut BytesMut) -> Self {
-        let pstrlen = v.split_to(1).to_vec()[0];
-        let pstr = v.split_to(19).to_vec();
-        let reserved = v.split_to(8).to_vec();
-        let info_hash = v.split_to(20).to_vec();
-        let peer_id = v.split_to(20).to_vec();
+    pub fn from(v: &mut BytesMut,) -> Self {
+        let pstrlen = v.split_to(1,).to_vec()[0];
+        let pstr = v.split_to(19,).to_vec();
+        let reserved = v.split_to(8,).to_vec();
+        let info_hash = v.split_to(20,).to_vec();
+        let peer_id = v.split_to(20,).to_vec();
 
-        v.split_to(68);
+        v.split_to(68,);
         Self {
             pstrlen,
             pstr,
@@ -490,8 +495,8 @@ pub struct Unchoke;
 impl Unchoke {
     pub fn to_bytes() -> BytesMut {
         let mut bytes_mut = BytesMut::new();
-        bytes_mut.put_u32(1);
-        bytes_mut.put_u8(1);
+        bytes_mut.put_u32(1,);
+        bytes_mut.put_u8(1,);
         bytes_mut
     }
 }
@@ -516,8 +521,8 @@ pub struct Interested;
 impl Interested {
     pub fn to_bytes() -> BytesMut {
         let mut bytes_mut = BytesMut::new();
-        bytes_mut.put_u32(1); // Length Prefix
-        bytes_mut.put_u8(2); // Message ID
+        bytes_mut.put_u32(1,); // Length Prefix
+        bytes_mut.put_u8(2,); // Message ID
         bytes_mut
     }
 }
@@ -536,7 +541,7 @@ impl Interested {
 ///  length - A u32 integer, which specifies the requested length
 ///
 /// It has a total frame length of (4 + 13) bytes
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq,)]
 pub struct Request {
     /// Zero based piece index
     index: u32,
@@ -552,17 +557,21 @@ impl Request {
     ///
     /// src - It must be validated by using is_request_message() method
     /// before calling this from_bytes() method
-    pub fn from_bytes(src: &mut BytesMut) -> Self {
+    pub fn from_bytes(src: &mut BytesMut,) -> Self {
         let mut index_bytes = &src[5..=8];
         let mut begin_bytes = &src[9..=12];
         let mut length_bytes = &src[13..=16];
 
-        let index = ReadBytesExt::read_u32::<BigEndian>(&mut index_bytes).unwrap();
-        let begin = ReadBytesExt::read_u32::<BigEndian>(&mut begin_bytes).unwrap();
-        let length = ReadBytesExt::read_u32::<BigEndian>(&mut length_bytes).unwrap();
+        let index = ReadBytesExt::read_u32::<BigEndian,>(&mut index_bytes,).unwrap();
+        let begin = ReadBytesExt::read_u32::<BigEndian,>(&mut begin_bytes,).unwrap();
+        let length = ReadBytesExt::read_u32::<BigEndian,>(&mut length_bytes,).unwrap();
 
-        src.split_to(17);
-        Self { index, begin, length }
+        src.split_to(17,);
+        Self {
+            index,
+            begin,
+            length,
+        }
     }
 }
 
@@ -584,7 +593,7 @@ impl Request {
 ///  block - Bytes, which is the block of data that make up the piece
 ///
 /// It has a total frame length of (4 + 9 + X) bytes, where X is the length of the block
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq,)]
 pub struct Block {
     /// Zero based piece index
     pub piece_index: u32,
@@ -597,21 +606,21 @@ pub struct Block {
 impl Block {
     //  /// Creates a "Block" instance from the raw "Piece" message sent by the client
     //  /// NOTE : It removes the data it read from the buffer
-    pub fn from_bytes(src: &mut BytesMut) -> Self {
+    pub fn from_bytes(src: &mut BytesMut,) -> Self {
         let mut length_prefix_bytes = &src[0..=3];
         let mut piece_index_bytes = &src[5..=8];
         let mut bytes_index_bytes = &src[9..=12];
 
-        let length_prefix: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
-        let piece_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut piece_index_bytes).unwrap();
-        let byte_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut bytes_index_bytes).unwrap();
+        let length_prefix: u32 = ReadBytesExt::read_u32::<BigEndian,>(&mut length_prefix_bytes,).unwrap();
+        let piece_index: u32 = ReadBytesExt::read_u32::<BigEndian,>(&mut piece_index_bytes,).unwrap();
+        let byte_index: u32 = ReadBytesExt::read_u32::<BigEndian,>(&mut bytes_index_bytes,).unwrap();
 
         let block_length = (length_prefix - 9) as usize;
         let block_bytes = &src[13..block_length];
-        let raw_block = BytesMut::from(block_bytes);
+        let raw_block = BytesMut::from(block_bytes,);
 
         let total_frame_length = 4 + length_prefix;
-        src.split_to(total_frame_length as usize);
+        src.split_to(total_frame_length as usize,);
         Self {
             piece_index,
             byte_index,
@@ -635,7 +644,7 @@ impl Block {
 ///  length - A u32 integer specifying the requested length
 ///
 /// It has a total frame length of 4 + 13 = 17 bytes
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone,)]
 pub struct Cancel {
     index: u32,
     begin: u32,
@@ -648,18 +657,22 @@ impl Cancel {
     /// Cancel::is_cancel_message() function before actually creating it
     ///
     /// It will consume the Cancel Message Frame bytes and create the Cancel instance
-    pub fn from_bytes(src: &mut BytesMut) -> Self {
+    pub fn from_bytes(src: &mut BytesMut,) -> Self {
         // TODO : Add some sort of error handling by using is_cancel_message() method
         let mut index_bytes = &src[5..=8];
         let mut begin_bytes = &src[9..=12];
         let mut length_bytes = &src[13..=16];
 
-        let index = ReadBytesExt::read_u32::<BigEndian>(&mut index_bytes).unwrap();
-        let begin = ReadBytesExt::read_u32::<BigEndian>(&mut begin_bytes).unwrap();
-        let length = ReadBytesExt::read_u32::<BigEndian>(&mut length_bytes).unwrap();
+        let index = ReadBytesExt::read_u32::<BigEndian,>(&mut index_bytes,).unwrap();
+        let begin = ReadBytesExt::read_u32::<BigEndian,>(&mut begin_bytes,).unwrap();
+        let length = ReadBytesExt::read_u32::<BigEndian,>(&mut length_bytes,).unwrap();
 
-        src.split_to(17);
-        Self { index, begin, length }
+        src.split_to(17,);
+        Self {
+            index,
+            begin,
+            length,
+        }
     }
 }
 
@@ -676,7 +689,7 @@ impl Cancel {
 /// listen-port : A u16 integer, specifying port that peer's DHT node is listening on
 ///
 /// It has a total length of 4 + 3 = 7 bytes
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone,)]
 pub struct Port {
     listen_port: u16,
 }
@@ -687,12 +700,14 @@ impl Port {
     /// Port::is_port_message() function before actually creating it.
     ///
     /// It will consume the Port Message Frame bytes and create the Port instance
-    pub fn from_bytes(src: &mut BytesMut) -> Self {
+    pub fn from_bytes(src: &mut BytesMut,) -> Self {
         // TODO : Add some sort of error handling by using is_por_message() method
         let mut listen_port_bytes = &src[4..=6];
 
-        let listen_port = ReadBytesExt::read_u16::<BigEndian>(&mut listen_port_bytes).unwrap();
-        src.split_to(7);
-        Self { listen_port }
+        let listen_port = ReadBytesExt::read_u16::<BigEndian,>(&mut listen_port_bytes,).unwrap();
+        src.split_to(7,);
+        Self {
+            listen_port,
+        }
     }
 }
