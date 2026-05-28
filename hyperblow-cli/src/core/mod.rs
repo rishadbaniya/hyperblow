@@ -1,4 +1,6 @@
 pub mod peer;
+pub mod piece_picker;
+pub mod protocol;
 pub mod state;
 pub mod torrentFile;
 pub mod tracker;

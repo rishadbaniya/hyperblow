@@ -5,11 +5,11 @@ mod connect_req_res;
 mod error_res;
 
 use self::{
-    announce_req_res::{AnnounceRequest, AnnounceResponse, PEER_ID},
+    announce_req_res::{AnnounceRequest, AnnounceResponse},
     connect_req_res::{ConnectRequest, ConnectResponse},
 };
 use crate::{
-    core::{peer::Peer, state::State},
+    core::{peer::Peer, protocol::PEER_ID, state::State},
     ACell, ArcMutex,
 };
 use byteorder::{BigEndian, ReadBytesExt};

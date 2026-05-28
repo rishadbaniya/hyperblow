@@ -2,7 +2,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-pub const PEER_ID: [u8; 20] = *b"-HBYxxx-QMAXYDGHQAHF";
+use crate::core::protocol::PEER_ID;
 
 /// Struct to handle "Announce" request message
 /// Used to create a "98 byte" buffer to make "Announce Request"

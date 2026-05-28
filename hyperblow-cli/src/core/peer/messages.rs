@@ -20,7 +20,10 @@
 //
 //use byteorder::{BigEndian, ReadBytesExt};
 //use bytes::{BufMut, BytesMut};
-use crate::core::state::State;
+use crate::core::{
+    protocol::{PEER_ID, PROTOCOL_IDENTIFIER, PROTOCOL_IDENTIFIER_LEN, RESERVED_BYTES},
+    state::State,
+};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use std::sync::Arc;
@@ -95,7 +98,7 @@ impl Message {
         // First check if there is enough bytes to be a Handshake Message Frame
         if src.len() >= 68 {
             let pstr_len = src[0];
-            if pstr_len == 19 && &src[1..20] == b"BitTorrent protocol" {
+            if pstr_len == PROTOCOL_IDENTIFIER_LEN && &src[1..20] == PROTOCOL_IDENTIFIER {
                 return true;
             }
         }
@@ -437,11 +440,10 @@ impl Handshake {
     /// Creates a instance of Handshake in order to send it to a peer.
     pub fn new(state: Arc<State>) -> Self {
         let pstrlen: u8 = 19;
-        let pstr = b"BitTorrent protocol".to_vec();
-        let reserved = vec![0; 8];
+        let pstr = PROTOCOL_IDENTIFIER.to_vec();
+        let reserved = RESERVED_BYTES.to_vec();
         let info_hash = state.info_hash.clone();
-        let peer_id = b"-HYBLOW-110011001100".map(|v| v).into_iter().collect();
-        // TODO : Create a Peer Id field in state field and use that field here
+        let peer_id = PEER_ID.to_vec();
         Self {
             pstrlen,
             pstr,
