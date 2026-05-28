@@ -64,22 +64,22 @@ impl Message {
 
             Message::Choke => {
                 buf.put_u32(1);
-                buf.put_u8(1);
+                buf.put_u8(0);
             }
 
             Message::Unchoke => {
                 buf.put_u32(1);
-                buf.put_u8(2);
+                buf.put_u8(1);
             }
 
             Message::Interested => {
                 buf.put_u32(1);
-                buf.put_u8(3);
+                buf.put_u8(2);
             }
 
             Message::NotInterested => {
                 buf.put_u32(1);
-                buf.put_u8(4);
+                buf.put_u8(3);
             }
             // TODO : Do it for all messages
 
@@ -95,15 +95,8 @@ impl Message {
         // First check if there is enough bytes to be a Handshake Message Frame
         if src.len() >= 68 {
             let pstr_len = src[0];
-            // TODO : Check pstr
-            // let pstr: Vec<u8> = [1..=19].iter().collect();
-            //let pstr = String::from_utf8(pstr).unwrap();
-            if pstr_len == 19 {
+            if pstr_len == 19 && &src[1..20] == b"BitTorrent protocol" {
                 return true;
-                //   return pstr == expected_pstr;
-                // TODO : Check for info hash
-                // TODO : Check the peer id
-                // Then only validate the Handshake Message Frame
             }
         }
         false
@@ -143,7 +136,7 @@ impl Message {
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Choke Message Frame and the message id is 0
-            if length_prefix == 0 && src.len() >= 5 {
+            if length_prefix == 1 && src.len() >= 5 {
                 let message_id = src[4];
                 return message_id == 0;
             }
@@ -159,7 +152,7 @@ impl Message {
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Unchoke Message Frame and the message id is 1
-            if length_prefix == 0 && src.len() >= 5 {
+            if length_prefix == 1 && src.len() >= 5 {
                 let message_id = src[4];
                 return message_id == 1;
             }
@@ -175,7 +168,7 @@ impl Message {
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Unchoke Message Frame and the message id is 2
-            if length_prefix == 0 && src.len() >= 5 {
+            if length_prefix == 1 && src.len() >= 5 {
                 let message_id = src[4];
                 return message_id == 2;
             }
@@ -191,7 +184,7 @@ impl Message {
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
             // Once we get the length prefix, we check if its value is equal to 1, and has enough
             // bytes for the entire Unchoke Message Frame and the message id is 3
-            if length_prefix == 0 && src.len() >= 5 {
+            if length_prefix == 1 && src.len() >= 5 {
                 let message_id = src[4];
                 return message_id == 3;
             }
@@ -323,13 +316,16 @@ impl Bitfield {
         let bitfield_frame_length = (length_prefix + 4) as usize;
 
         let bitfield_bytes = &src[5..bitfield_frame_length];
-        let bitfield = BytesMut::from(bitfield_bytes);
 
-        for (index, bit) in bitfield.iter().enumerate() {
-            match bit {
-                0 => not_have.push(index),
-                1 => have.push(index),
-                _ => {}
+        for (byte_index, byte) in bitfield_bytes.iter().enumerate() {
+            for bit_index in 0..8 {
+                let piece_index = byte_index * 8 + bit_index;
+                let mask = 1_u8 << (7 - bit_index);
+                if *byte & mask == mask {
+                    have.push(piece_index);
+                } else {
+                    not_have.push(piece_index);
+                }
             }
         }
         src.split_to(bitfield_frame_length);
@@ -392,6 +388,7 @@ impl Have {
         let mut piece_index_bytes = &src[5..=8];
         // TODO : Make sure unpwrap here is safe
         let piece_index = ReadBytesExt::read_u32::<BigEndian>(&mut piece_index_bytes).unwrap();
+        src.split_to(9);
         Self { piece_index }
     }
 }
@@ -462,7 +459,6 @@ impl Handshake {
         let info_hash = v.split_to(20).to_vec();
         let peer_id = v.split_to(20).to_vec();
 
-        v.split_to(68);
         Self {
             pstrlen,
             pstr,
@@ -604,7 +600,7 @@ impl Block {
         let byte_index: u32 = ReadBytesExt::read_u32::<BigEndian>(&mut bytes_index_bytes).unwrap();
 
         let block_length = (length_prefix - 9) as usize;
-        let block_bytes = &src[13..block_length];
+        let block_bytes = &src[13..13 + block_length];
         let raw_block = BytesMut::from(block_bytes);
 
         let total_frame_length = 4 + length_prefix;
@@ -686,10 +682,101 @@ impl Port {
     /// It will consume the Port Message Frame bytes and create the Port instance
     pub fn from_bytes(src: &mut BytesMut) -> Self {
         // TODO : Add some sort of error handling by using is_por_message() method
-        let mut listen_port_bytes = &src[4..=6];
+        let mut listen_port_bytes = &src[5..=6];
 
         let listen_port = ReadBytesExt::read_u16::<BigEndian>(&mut listen_port_bytes).unwrap();
         src.split_to(7);
         Self { listen_port }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Bitfield, Block, Handshake, Have, Message, Port};
+    use bytes::{BufMut, BytesMut};
+
+    #[test]
+    fn encodes_standard_message_ids() {
+        assert_eq!(Message::Choke.to_bytes().as_ref(), &[0, 0, 0, 1, 0]);
+        assert_eq!(Message::Unchoke.to_bytes().as_ref(), &[0, 0, 0, 1, 1]);
+        assert_eq!(Message::Interested.to_bytes().as_ref(), &[0, 0, 0, 1, 2]);
+        assert_eq!(Message::NotInterested.to_bytes().as_ref(), &[0, 0, 0, 1, 3]);
+    }
+
+    #[test]
+    fn parses_and_consumes_handshake() {
+        let mut bytes = BytesMut::new();
+        bytes.put_u8(19);
+        bytes.put_slice(b"BitTorrent protocol");
+        bytes.put_slice(&[0; 8]);
+        bytes.put_slice(&[1; 20]);
+        bytes.put_slice(&[2; 20]);
+
+        assert!(Message::is_handshake_message(&bytes));
+        let handshake = Handshake::from(&mut bytes);
+
+        assert!(bytes.is_empty());
+        assert_eq!(handshake.pstrlen, 19);
+        assert_eq!(handshake.pstr, b"BitTorrent protocol");
+        assert_eq!(handshake.info_hash, vec![1; 20]);
+        assert_eq!(handshake.peer_id, vec![2; 20]);
+    }
+
+    #[test]
+    fn have_parser_consumes_frame() {
+        let mut bytes = BytesMut::new();
+        bytes.put_u32(5);
+        bytes.put_u8(4);
+        bytes.put_u32(123);
+
+        let have = Have::from_bytes(&mut bytes);
+
+        assert_eq!(have.piece_index, 123);
+        assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn bitfield_parser_reads_bits_most_significant_first() {
+        let mut bytes = BytesMut::new();
+        bytes.put_u32(2);
+        bytes.put_u8(5);
+        bytes.put_u8(0b1010_0000);
+
+        let bitfield = Bitfield::from_bytes(&mut bytes);
+
+        assert_eq!(bitfield.have, vec![0, 2]);
+        assert!(bitfield.not_have.contains(&1));
+        assert!(bitfield.not_have.contains(&3));
+        assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn block_parser_extracts_full_payload_and_consumes_frame() {
+        let mut bytes = BytesMut::new();
+        bytes.put_u32(13);
+        bytes.put_u8(7);
+        bytes.put_u32(4);
+        bytes.put_u32(16);
+        bytes.put_slice(&[9, 8, 7, 6]);
+
+        let block = Block::from_bytes(&mut bytes);
+
+        assert_eq!(block.piece_index, 4);
+        assert_eq!(block.byte_index, 16);
+        assert_eq!(block.raw_block.as_ref(), &[9, 8, 7, 6]);
+        assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn port_parser_uses_payload_bytes_only() {
+        let mut bytes = BytesMut::new();
+        bytes.put_u32(3);
+        bytes.put_u8(9);
+        bytes.put_u16(6881);
+
+        let port = Port::from_bytes(&mut bytes);
+
+        assert_eq!(port.listen_port, 6881);
+        assert!(bytes.is_empty());
     }
 }
