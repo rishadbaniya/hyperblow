@@ -9,7 +9,7 @@
 // TODO : Find the folder to save the data
 // TODO : Create the DataStructure in such a way that it could resume the download later on as well
 // TODO : Return error on error generated rather than this Option<T> on TorrentFile::new()
-use super::peer::Peer;
+use super::peer::{MagnetMetadataError, MagnetMetadataFetcher, Peer};
 use crate::{
     core::{
         state::{DownState, State},
@@ -30,6 +30,7 @@ use tokio::{
         Mutex, RwLock,
     },
 };
+use tracing::{debug, warn};
 
 const TRANS_ID: i32 = 10;
 
@@ -43,6 +44,9 @@ pub enum TError {
 
     #[error("socket error")]
     Socket(#[from] io::Error),
+
+    #[error("magnet metadata error")]
+    MagnetMetadata(#[from] MagnetMetadataError),
 }
 
 #[derive(Debug)]
@@ -320,6 +324,47 @@ impl TorrentFile {
             }
         }
         // TODO: Run in a loop, but never return anything
+    }
+
+    pub(crate) async fn fetch_magnet_metadata(&self) -> Result<Vec<u8>, TError> {
+        let trackers_udp_socket = self.getUDPSocket().await?;
+
+        tokio::select! {
+            _ = self.runTrackers(trackers_udp_socket) => Err(TError::NoTrackerResolved),
+            metadata = self.run_magnet_metadata_fetch() => metadata,
+        }
+    }
+
+    async fn run_magnet_metadata_fetch(&self) -> Result<Vec<u8>, TError> {
+        let (metadata_sender, mut metadata_receiver) = unbounded_channel::<Result<Vec<u8>, MagnetMetadataError>>();
+        let peers_rcv = &self.peers_channel.1;
+        let mut peers_rcv = peers_rcv.lock().await;
+
+        loop {
+            tokio::select! {
+                Some(peer) = peers_rcv.recv() => {
+                    let socket_addr = peer.socket_adr;
+                    let info_hash = self.state.info_hash.clone();
+                    let metadata_sender = metadata_sender.clone();
+                    debug!(peer = %socket_addr, "requesting magnet metadata from peer");
+                    tokio::spawn(async move {
+                        let result = MagnetMetadataFetcher::fetch(socket_addr, &info_hash).await;
+                        let _ = metadata_sender.send(result);
+                    });
+                }
+                Some(result) = metadata_receiver.recv() => {
+                    match result {
+                        Ok(metadata) => {
+                            return Ok(metadata);
+                        }
+                        Err(error) => {
+                            warn!(error = %error, "metadata peer failed");
+                        }
+                    }
+                }
+                else => return Err(TError::NoTrackerResolved),
+            }
+        }
     }
 
     /// TODO : Add examples for the rust docs

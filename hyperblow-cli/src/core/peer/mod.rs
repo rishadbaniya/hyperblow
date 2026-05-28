@@ -1,5 +1,6 @@
 mod codec;
 mod messages;
+mod metadata;
 mod piece;
 
 use super::state::State;
@@ -16,6 +17,8 @@ use tokio::{
 };
 
 use tokio_util::codec::Framed;
+
+pub(crate) use metadata::{MagnetMetadataError, MagnetMetadataFetcher};
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(16);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);

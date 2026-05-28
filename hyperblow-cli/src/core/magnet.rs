@@ -3,9 +3,11 @@ use hyperblow::parser::{
     magnet_uri_parser::MagnetURIMeta,
     torrent_parser::{FileMeta, Info},
 };
+use sha1::{Digest, Sha1};
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{debug, info};
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Error)]
 pub enum MagnetTorrentError {
@@ -20,6 +22,12 @@ pub enum MagnetTorrentError {
 
     #[error("magnet tracker session could not be created")]
     Session(#[from] TError),
+
+    #[error("metadata info hash did not match magnet BTIH")]
+    MetadataHashMismatch,
+
+    #[error("metadata bencode could not be decoded")]
+    MetadataBencode(#[from] serde_bencode::Error),
 }
 
 #[derive(Debug)]
@@ -27,6 +35,7 @@ pub struct MagnetTorrent {
     meta: Arc<MagnetURIMeta>,
     session: TorrentFile,
     info_hash: [u8; 20],
+    resolved: Arc<RwLock<Option<Arc<TorrentFile>>>>,
 }
 
 impl MagnetTorrent {
@@ -41,12 +50,22 @@ impl MagnetTorrent {
             meta: Arc::new(meta),
             session,
             info_hash,
+            resolved: Arc::new(RwLock::new(None)),
         })
     }
 
     pub async fn run(&self) {
-        debug!(tracker_count = self.tracker_addresses().len(), "running magnet tracker session");
-        self.session.run().await;
+        debug!(tracker_count = self.tracker_addresses().len(), "running magnet metadata session");
+        match self.resolve_metadata().await {
+            Ok(torrent) => {
+                info!(torrent = %self.display_name(), "magnet metadata fetched");
+                *self.resolved.write().await = Some(torrent.clone());
+                torrent.run().await;
+            }
+            Err(error) => {
+                warn!(error = %error, "magnet metadata fetch failed");
+            }
+        }
     }
 
     pub fn meta(&self) -> &MagnetURIMeta {
@@ -54,6 +73,11 @@ impl MagnetTorrent {
     }
 
     pub fn state(&self) -> Arc<State> {
+        if let Ok(resolved) = self.resolved.try_read() {
+            if let Some(torrent) = resolved.as_ref() {
+                return torrent.state.clone();
+            }
+        }
         self.session.state.clone()
     }
 
@@ -62,6 +86,11 @@ impl MagnetTorrent {
     }
 
     pub fn bytes_total(&self) -> Option<usize> {
+        if let Ok(resolved) = self.resolved.try_read() {
+            if let Some(torrent) = resolved.as_ref() {
+                return Some(torrent.state.meta_info.total_length().max(0) as usize);
+            }
+        }
         self.meta.xl.map(|size| size as usize)
     }
 
@@ -72,9 +101,40 @@ impl MagnetTorrent {
     pub fn status_label(&self) -> String {
         if self.tracker_addresses().is_empty() {
             "No magnet trackers".to_string()
+        } else if self
+            .resolved
+            .try_read()
+            .ok()
+            .and_then(|resolved| resolved.as_ref().map(|_| ()))
+            .is_some()
+        {
+            "Metadata fetched".to_string()
         } else {
             "Fetching metadata".to_string()
         }
+    }
+
+    async fn resolve_metadata(&self) -> Result<Arc<TorrentFile>, MagnetTorrentError> {
+        let metadata = self.session.fetch_magnet_metadata().await?;
+        self.validate_metadata_hash(&metadata)?;
+        let info = serde_bencode::de::from_bytes::<Info>(&metadata)?;
+        let file_meta = MagnetFileMeta::from_info(self.meta(), info);
+        Ok(Arc::new(
+            TorrentFile::from_metadata_with_info_hash("magnet".to_string(), file_meta, self.info_hash.to_vec(), true).await?,
+        ))
+    }
+
+    fn validate_metadata_hash(&self, metadata: &[u8]) -> Result<(), MagnetTorrentError> {
+        let actual_hash: [u8; 20] = Sha1::digest(metadata).into();
+        if actual_hash == self.info_hash {
+            Ok(())
+        } else {
+            Err(MagnetTorrentError::MetadataHashMismatch)
+        }
+    }
+
+    fn display_name(&self) -> String {
+        self.meta.dn.clone().unwrap_or_else(|| "Magnet torrent".to_string())
     }
 }
 
@@ -95,6 +155,20 @@ impl MagnetFileMeta {
             },
             creation_data: None,
             comment: Some("magnet metadata pending".to_string()),
+            encoding: None,
+            created_by: None,
+            acceptable_source: None,
+        }
+    }
+
+    fn from_info(meta: &MagnetURIMeta, info: Info) -> FileMeta {
+        let trackers = meta.tr.clone().unwrap_or_default();
+        FileMeta {
+            announce: trackers.first().cloned().unwrap_or_default(),
+            announce_list: (!trackers.is_empty()).then_some(vec![trackers]),
+            info,
+            creation_data: None,
+            comment: Some("magnet metadata fetched".to_string()),
             encoding: None,
             created_by: None,
             acceptable_source: None,
