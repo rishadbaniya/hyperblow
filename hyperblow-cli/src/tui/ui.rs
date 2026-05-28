@@ -323,7 +323,7 @@ impl AppRenderer {
             Line::from("Press : and run file or magnet"),
             Line::styled(":file /path/to/file.torrent", Style::default().fg(Color::White)),
             Line::styled(":magnet magnet:?xt=...", Style::default().fg(Color::White)),
-            Line::styled(":q", Style::default().fg(Color::White)),
+            Line::styled(":q or :quit to quit the application", Style::default().fg(Color::White)),
         ]);
 
         frame.render_widget(
@@ -660,7 +660,7 @@ mod tests {
         assert!(rendered.contains("No torrents loaded"));
         assert!(rendered.contains(":file /path/to/file.torrent"));
         assert!(rendered.contains(":magnet magnet:?xt=..."));
-        assert!(rendered.contains(":q"));
+        assert!(rendered.contains(":q or :quit to quit the application"));
     }
 
     #[test]

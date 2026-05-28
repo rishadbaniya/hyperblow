@@ -29,7 +29,7 @@ impl CommandAction {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub(crate) enum CommandInputError {
-    #[error("type :file <path>, :magnet <uri>, or :q")]
+    #[error("type :file <path>, :magnet <uri>, :q, or :quit")]
     Empty,
 
     #[error("unknown command :{0}")]
@@ -117,11 +117,11 @@ impl CommandSuggester {
     pub(crate) fn suggestions(input: &str, limit: usize) -> Vec<String> {
         let input = input.trim_start();
         if input.is_empty() {
-            return vec!["file ".to_string(), "magnet ".to_string(), "q".to_string()];
+            return vec!["file ".to_string(), "magnet ".to_string(), "q".to_string(), "quit".to_string()];
         }
 
         if !input.contains(char::is_whitespace) {
-            return ["file ", "magnet ", "q"]
+            return ["file ", "magnet ", "q", "quit"]
                 .into_iter()
                 .filter(|command| command.trim_end().starts_with(input))
                 .map(ToOwned::to_owned)
@@ -427,6 +427,12 @@ mod tests {
     fn parses_quit_command() {
         assert_eq!(CommandParser::parse("q"), Ok(CommandAction::Quit));
         assert_eq!(CommandParser::parse("quit"), Ok(CommandAction::Quit));
+    }
+
+    #[test]
+    fn suggests_quit_commands() {
+        assert!(CommandSuggester::suggestions("", 8).contains(&"quit".to_string()));
+        assert_eq!(CommandSuggester::suggestions("qu", 8), vec!["quit".to_string()]);
     }
 
     #[test]
