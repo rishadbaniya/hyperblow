@@ -5,7 +5,7 @@ mod connect_req_res;
 mod error_res;
 
 use self::{
-    announce_req_res::{AnnounceRequest, AnnounceResponse},
+    announce_req_res::{AnnounceRequest, AnnounceResponse, PEER_ID},
     connect_req_res::{ConnectRequest, ConnectResponse},
 };
 use crate::{
@@ -14,13 +14,17 @@ use crate::{
 };
 use byteorder::{BigEndian, ReadBytesExt};
 use crossbeam::atomic::AtomicCell;
+use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
+use serde::Deserialize;
 use std::{
     fmt::Display,
+    fmt::Write,
     io,
-    net::SocketAddr,
+    net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
 };
+use thiserror::Error;
 use tokio::{
     net::UdpSocket,
     sync::{
@@ -33,6 +37,176 @@ use tokio::{
 use url::Url;
 
 type UdpTrackerChannel = (UnboundedSender<Vec<u8>>, Arc<Mutex<UnboundedReceiver<Vec<u8>>>>);
+type TrackerResult<T> = Result<T, TrackerError>;
+
+#[derive(Debug, Error)]
+pub enum TrackerError {
+    #[error("unsupported tracker protocol: {0}")]
+    UnsupportedProtocol(String),
+
+    #[error("invalid tracker URL")]
+    InvalidUrl(#[from] url::ParseError),
+
+    #[error("HTTP tracker request failed")]
+    HttpRequest(#[from] reqwest::Error),
+
+    #[error("tracker bencode response could not be decoded")]
+    Bencode(#[from] serde_bencode::Error),
+
+    #[error("tracker returned failure: {0}")]
+    TrackerFailure(String),
+
+    #[error("invalid peer IP address in tracker response: {ip}")]
+    InvalidPeerIp { ip: String, source: AddrParseError },
+
+    #[error("compact {family} peer list length must be a multiple of {chunk_size}, got {len}")]
+    InvalidCompactPeerList {
+        family: &'static str,
+        chunk_size: usize,
+        len: usize,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct HttpAnnounceResponse {
+    interval: Option<i64>,
+    complete: Option<i64>,
+    incomplete: Option<i64>,
+    peers: Option<HttpPeers>,
+    #[serde(rename = "peers6", with = "serde_bytes", default)]
+    peers6: Vec<u8>,
+    #[serde(rename = "failure reason")]
+    failure_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum HttpPeers {
+    Compact(#[serde(with = "serde_bytes")] Vec<u8>),
+    Dictionary(Vec<HttpPeer>),
+}
+
+#[derive(Debug, Deserialize)]
+struct HttpPeer {
+    ip: String,
+    port: u16,
+}
+
+fn build_http_announce_url(address: &Url, state: &State, port: u16) -> String {
+    let downloaded = state.bytes_complete() as i64;
+    let left = state.meta_info.total_length().saturating_sub(downloaded);
+    build_http_announce_url_with_values(address, &state.info_hash, downloaded, left, port)
+}
+
+fn build_http_announce_url_with_values(address: &Url, info_hash: &[u8], downloaded: i64, left: i64, port: u16) -> String {
+    let mut base = address.clone();
+    let original_query = base.query().map(str::to_owned);
+    base.set_query(None);
+    base.set_fragment(None);
+
+    let mut query = original_query.unwrap_or_default();
+    append_bytes_query_pair(&mut query, "info_hash", info_hash);
+    append_bytes_query_pair(&mut query, "peer_id", &PEER_ID);
+    append_query_pair(&mut query, "port", port);
+    append_query_pair(&mut query, "uploaded", 0);
+    append_query_pair(&mut query, "downloaded", downloaded.max(0));
+    append_query_pair(&mut query, "left", left.max(0));
+    append_query_pair(&mut query, "compact", 1);
+    append_query_pair(&mut query, "numwant", 80);
+    append_query_pair(&mut query, "event", "started");
+
+    let mut announce_url = base.to_string();
+    announce_url.push('?');
+    announce_url.push_str(&query);
+    announce_url
+}
+
+fn append_query_pair(query: &mut String, key: &str, value: impl Display) {
+    if !query.is_empty() {
+        query.push('&');
+    }
+    let _ = write!(query, "{key}={value}");
+}
+
+fn append_bytes_query_pair(query: &mut String, key: &str, value: &[u8]) {
+    if !query.is_empty() {
+        query.push('&');
+    }
+    let encoded = percent_encode(value, NON_ALPHANUMERIC);
+    let _ = write!(query, "{key}={encoded}");
+}
+
+fn parse_http_announce_response(bytes: &[u8]) -> TrackerResult<AnnounceResponse> {
+    let response: HttpAnnounceResponse = serde_bencode::de::from_bytes(bytes)?;
+    if let Some(reason) = response.failure_reason {
+        return Err(TrackerError::TrackerFailure(reason));
+    }
+
+    let mut peers_addresses = Vec::new();
+    if let Some(peers) = response.peers {
+        match peers {
+            HttpPeers::Compact(bytes) => peers_addresses.extend(parse_compact_ipv4_peers(&bytes)?),
+            HttpPeers::Dictionary(peers) => {
+                for peer in peers {
+                    let ip = peer.ip.parse::<IpAddr>().map_err(|source| TrackerError::InvalidPeerIp {
+                        ip: peer.ip.clone(),
+                        source,
+                    })?;
+                    peers_addresses.push(SocketAddr::new(ip, peer.port));
+                }
+            }
+        }
+    }
+    peers_addresses.extend(parse_compact_ipv6_peers(&response.peers6)?);
+
+    Ok(AnnounceResponse {
+        action: 1,
+        transaction_id: 0,
+        interval: response.interval.unwrap_or(1800).max(1) as i32,
+        leechers: response.incomplete.unwrap_or_default().max(0) as i32,
+        seeders: response.complete.unwrap_or_default().max(0) as i32,
+        peersAddresses: peers_addresses,
+    })
+}
+
+fn parse_compact_ipv4_peers(bytes: &[u8]) -> TrackerResult<Vec<SocketAddr>> {
+    if !bytes.len().is_multiple_of(6) {
+        return Err(TrackerError::InvalidCompactPeerList {
+            family: "IPv4",
+            chunk_size: 6,
+            len: bytes.len(),
+        });
+    }
+
+    Ok(bytes
+        .chunks_exact(6)
+        .map(|peer| {
+            SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(peer[0], peer[1], peer[2], peer[3])),
+                u16::from_be_bytes([peer[4], peer[5]]),
+            )
+        })
+        .collect())
+}
+
+fn parse_compact_ipv6_peers(bytes: &[u8]) -> TrackerResult<Vec<SocketAddr>> {
+    if !bytes.len().is_multiple_of(18) {
+        return Err(TrackerError::InvalidCompactPeerList {
+            family: "IPv6",
+            chunk_size: 18,
+            len: bytes.len(),
+        });
+    }
+
+    Ok(bytes
+        .chunks_exact(18)
+        .map(|peer| {
+            let mut ip_bytes = [0_u8; 16];
+            ip_bytes.copy_from_slice(&peer[..16]);
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::from(ip_bytes)), u16::from_be_bytes([peer[16], peer[17]]))
+        })
+        .collect())
+}
 
 ///Type of protocol used to connect to the tracker
 #[derive(PartialEq, Debug, Clone)]
@@ -156,11 +330,7 @@ pub struct Tracker {
 
 impl Tracker {
     /// Tries to create a Tracker instance by parsing the given url
-    pub fn new(
-        address: &str,
-        torrent_state: Arc<State>,
-        peer_sender: Arc<UnboundedSender<Peer>>,
-    ) -> Result<Tracker, Box<dyn std::error::Error>> {
+    pub fn new(address: &str, torrent_state: Arc<State>, peer_sender: Arc<UnboundedSender<Peer>>) -> Result<Tracker, TrackerError> {
         let address = Url::parse(address)?;
 
         let connect_request = ArcMutex!(TrackerRequest::None);
@@ -173,9 +343,7 @@ impl Tracker {
         let protocol = match address.scheme() {
             "udp" => TrackerProtocol::Udp,
             "http" | "https" => TrackerProtocol::Http,
-            scheme => {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unsupported tracker protocol: {scheme}")).into());
-            }
+            scheme => return Err(TrackerError::UnsupportedProtocol(scheme.to_string())),
         };
         let (sd, rv) = mpsc::unbounded_channel::<Vec<u8>>();
 
@@ -233,6 +401,10 @@ impl Tracker {
         self.protocol == TrackerProtocol::Udp
     }
 
+    pub fn is_http(&self) -> bool {
+        self.protocol == TrackerProtocol::Http
+    }
+
     pub async fn isEqualTo(&self, sAdr1: &SocketAddr) -> bool {
         let socket_addresses = self.socketAddrs.lock().await;
         socket_addresses.iter().any(|sAdr2| sAdr1 == sAdr2)
@@ -240,6 +412,52 @@ impl Tracker {
 
     pub async fn run(&self, _socket: Arc<UdpSocket>) {
         //self.resolveTracker()
+    }
+
+    pub async fn run_http(&self) {
+        let client = reqwest::Client::new();
+        let mut retry_delay = Duration::from_secs(15);
+
+        loop {
+            match self.send_http_announce_request(&client).await {
+                Ok(response) => {
+                    retry_delay = Duration::from_secs(15);
+                    let interval = response.interval.max(30) as u64;
+                    {
+                        let mut announce_response = self.announce_response.lock().await;
+                        *announce_response = TrackerResponse::AnnounceResponse(response);
+                    }
+                    sleep(Duration::from_secs(interval)).await;
+                }
+                Err(_) => {
+                    self.tracker_state.store(TrackerState::DNSUnresolved {
+                        retry_time: Instant::now(),
+                    });
+                    sleep(retry_delay).await;
+                    retry_delay = (retry_delay * 2).min(Duration::from_secs(300));
+                }
+            }
+        }
+    }
+
+    async fn send_http_announce_request(&self, client: &reqwest::Client) -> TrackerResult<AnnounceResponse> {
+        self.tracker_state.store(TrackerState::WaitingForAnnounceResponse);
+        let announce_url = build_http_announce_url(&self.address, &self.torrent_state, self.announce_port().await);
+        let response_bytes = client.get(announce_url).send().await?.error_for_status()?.bytes().await?;
+        let announce_response = parse_http_announce_response(&response_bytes)?;
+
+        for peer_socket_adr in announce_response.peersAddresses.clone() {
+            let peer = Peer::new(peer_socket_adr, self.torrent_state.clone());
+            let _ = self.peer_sender.send(peer);
+        }
+
+        self.tracker_state.store(TrackerState::DNSResolved);
+        Ok(announce_response)
+    }
+
+    async fn announce_port(&self) -> u16 {
+        let ports = self.torrent_state.udp_ports.lock().await;
+        ports.first().copied().unwrap_or(6881)
     }
 
     /// Starts running the tracker
@@ -586,4 +804,95 @@ pub enum TrackerRequest {
     AnnounceRequest(AnnounceRequest),
     #[default]
     None,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_http_announce_url_with_values, parse_compact_ipv4_peers, parse_compact_ipv6_peers, parse_http_announce_response};
+    use bytes::{BufMut, BytesMut};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    use url::Url;
+
+    #[test]
+    fn http_announce_url_percent_encodes_binary_fields() {
+        let url = Url::parse("https://tracker.example.test/announce?existing=1").expect("valid URL");
+        let info_hash = [
+            0x00, 0x01, 0x02, 0x03, 0x04, b'a', b'b', b'c', b'd', b'e', b'f', 0x7f, 0x80, 0x81, 0xfe, 0xff, b'1', b'2', b'3', b'4',
+        ];
+
+        let announce_url = build_http_announce_url_with_values(&url, &info_hash, 25, 75, 6881);
+
+        assert!(announce_url.starts_with("https://tracker.example.test/announce?existing=1&"));
+        assert!(announce_url.contains("info_hash=%00%01%02%03%04abcdef%7F%80%81%FE%FF1234"));
+        assert!(announce_url.contains("peer_id=%2DHBYxxx%2DQMAXYDGHQAHF"));
+        assert!(announce_url.contains("downloaded=25"));
+        assert!(announce_url.contains("left=75"));
+        assert!(announce_url.contains("compact=1"));
+    }
+
+    #[test]
+    fn parses_http_compact_ipv4_peers() {
+        let peers = parse_compact_ipv4_peers(&[127, 0, 0, 1, 0x1a, 0xe1]).expect("valid compact peers");
+
+        assert_eq!(peers, vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6881)]);
+    }
+
+    #[test]
+    fn rejects_malformed_http_compact_ipv4_peers() {
+        assert!(parse_compact_ipv4_peers(&[127, 0, 0, 1, 0x1a]).is_err());
+    }
+
+    #[test]
+    fn parses_http_compact_ipv6_peers() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&Ipv6Addr::LOCALHOST.octets());
+        bytes.extend_from_slice(&6881_u16.to_be_bytes());
+
+        let peers = parse_compact_ipv6_peers(&bytes).expect("valid compact IPv6 peers");
+
+        assert_eq!(peers, vec![SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 6881)]);
+    }
+
+    #[test]
+    fn parses_http_announce_response_with_compact_peers() {
+        let mut peers = BytesMut::new();
+        peers.put_slice(&[10, 0, 0, 1]);
+        peers.put_u16(51413);
+
+        let mut response = BytesMut::new();
+        response.put_slice(b"d8:intervali1800e8:completei2e10:incompletei3e5:peers");
+        response.put_slice(peers.len().to_string().as_bytes());
+        response.put_u8(b':');
+        response.put_slice(&peers);
+        response.put_u8(b'e');
+
+        let response = parse_http_announce_response(&response).expect("valid HTTP announce response");
+
+        assert_eq!(response.interval, 1800);
+        assert_eq!(response.seeders, 2);
+        assert_eq!(response.leechers, 3);
+        assert_eq!(
+            response.peersAddresses,
+            vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 51413)]
+        );
+    }
+
+    #[test]
+    fn parses_http_announce_response_with_dictionary_peers() {
+        let response = b"d8:intervali30e5:peersld2:ip9:127.0.0.14:porti6881eeee";
+
+        let response = parse_http_announce_response(response).expect("valid dictionary peer response");
+
+        assert_eq!(
+            response.peersAddresses,
+            vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6881)]
+        );
+    }
+
+    #[test]
+    fn rejects_http_tracker_failure_response() {
+        let response = b"d14:failure reason12:tracker downe";
+
+        assert!(parse_http_announce_response(response).is_err());
+    }
 }

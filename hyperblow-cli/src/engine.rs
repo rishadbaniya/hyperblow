@@ -15,7 +15,7 @@
 /// 1. It has its own internal thread(s), runtime, to dowload the torrent.
 /// 2. The only abstraction engine is going to share is EngineHandle,
 ///    which can control core behaviours of engine such as shut it down
-use crate::core::{tracker::TrackerState, TorrentFile};
+use crate::core::{tracker::TrackerState, TError, TorrentFile};
 use hyperblow::parser::magnet_uri_parser::MagnetURIMeta;
 use std::{sync::Arc, thread::JoinHandle};
 use thiserror::Error;
@@ -46,8 +46,8 @@ pub enum EngineError {
     #[error("engine response channel closed")]
     ResponseChannelClosed,
 
-    #[error("invalid torrent file: {0}")]
-    InvalidTorrentFile(String),
+    #[error("invalid torrent file")]
+    InvalidTorrentFile(#[from] TError),
 
     #[error("invalid magnet URI")]
     InvalidMagnetUri,
@@ -145,9 +145,7 @@ impl TorrentHandle {
     pub async fn new(src: TorrentSource) -> Result<Arc<TorrentHandle>, EngineError> {
         match src {
             TorrentSource::FilePath(ref path) => {
-                let torrent = TorrentFile::new(path)
-                    .await
-                    .map_err(|error| EngineError::InvalidTorrentFile(format!("{error:?}")))?;
+                let torrent = TorrentFile::new(path).await?;
                 Ok(Arc::new(Self {
                     inner: Torrent::FileTorrent(Arc::new(torrent)),
                 }))

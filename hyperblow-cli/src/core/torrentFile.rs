@@ -19,8 +19,9 @@ use crate::{
     ACell, ArcMutex, ArcRwLock,
 };
 use crossbeam::atomic::AtomicCell;
-use hyperblow::parser::torrent_parser::FileMeta;
+use hyperblow::parser::torrent_parser::{FileMeta, FileMetaError};
 use std::{io, sync::Arc};
+use thiserror::Error;
 use tokio::{
     join,
     net::UdpSocket,
@@ -32,11 +33,16 @@ use tokio::{
 
 const TRANS_ID: i32 = 10;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum TError {
+    #[error("no tracker resolved")]
     NoTrackerResolved,
-    InvalidTorrentFile(String),
-    Socket(io::Error),
+
+    #[error("invalid torrent file")]
+    InvalidTorrentFile(#[from] FileMetaError),
+
+    #[error("socket error")]
+    Socket(#[from] io::Error),
 }
 
 #[derive(Debug)]
@@ -74,50 +80,44 @@ impl TorrentFile {
     /// It will try to parse the given the path of the torrent file and create a new data structure
     /// from the Torrent file
     pub async fn new(path: &str) -> Result<Self, TError> {
-        match FileMeta::fromTorrentFile(path) {
-            Ok(meta_info) => {
-                let info_hash = meta_info.generateInfoHash();
-                let pieces_hash = meta_info
-                    .getPiecesHash()
-                    .map_err(|error| TError::InvalidTorrentFile(error.to_string()))?;
-                let pieces_count = pieces_hash.len();
-                let d_state = DownState::Unknown;
-                let file_tree = Some(Self::generateFileTree(&meta_info).await);
-                let trackers = ArcRwLock!(Vec::new());
-                let udp_ports = ArcMutex!(Vec::new());
-                let tcp_ports = ArcMutex!(Vec::new());
-                let peers = ArcMutex!(Vec::new());
-                let bytes_complete = ACell!(0);
-                let pieces_downloaded = ACell!(0);
-                let uptime = ACell!(0);
+        let meta_info = FileMeta::fromTorrentFile(path)?;
+        let info_hash = meta_info.generateInfoHash();
+        let pieces_hash = meta_info.getPiecesHash()?;
+        let pieces_count = pieces_hash.len();
+        let d_state = DownState::Unknown;
+        let file_tree = Some(Self::generateFileTree(&meta_info).await);
+        let trackers = ArcRwLock!(Vec::new());
+        let udp_ports = ArcMutex!(Vec::new());
+        let tcp_ports = ArcMutex!(Vec::new());
+        let peers = ArcMutex!(Vec::new());
+        let bytes_complete = ACell!(0);
+        let pieces_downloaded = ACell!(0);
+        let uptime = ACell!(0);
 
-                let peers_channel = unbounded_channel::<Peer>();
-                let peers_channel = (Arc::new(peers_channel.0), ArcMutex!(peers_channel.1));
+        let peers_channel = unbounded_channel::<Peer>();
+        let peers_channel = (Arc::new(peers_channel.0), ArcMutex!(peers_channel.1));
 
-                let state = Arc::new(State {
-                    pieces_downloaded,
-                    bytes_complete,
-                    meta_info,
-                    d_state,
-                    file_tree,
-                    trackers,
-                    udp_ports,
-                    tcp_ports,
-                    info_hash,
-                    pieces_hash,
-                    peers,
-                    uptime,
-                });
+        let state = Arc::new(State {
+            pieces_downloaded,
+            bytes_complete,
+            meta_info,
+            d_state,
+            file_tree,
+            trackers,
+            udp_ports,
+            tcp_ports,
+            info_hash,
+            pieces_hash,
+            peers,
+            uptime,
+        });
 
-                Ok(Self {
-                    path: path.to_string(),
-                    pieces_count,
-                    state,
-                    peers_channel,
-                })
-            }
-            Err(error) => Err(TError::InvalidTorrentFile(error.to_string())),
-        }
+        Ok(Self {
+            path: path.to_string(),
+            pieces_count,
+            state,
+            peers_channel,
+        })
     }
 
     //// NOTE : This function is assumed to be called once in the download session
@@ -226,6 +226,8 @@ impl TorrentFile {
                                 tracker_cloned.resolveTracker().await;
                                 if tracker_cloned.is_udp() {
                                     tracker_cloned.run_me(socket).await;
+                                } else if tracker_cloned.is_http() {
+                                    tracker_cloned.run_http().await;
                                 }
                             });
                             _trackers.push(tracker);
@@ -243,6 +245,8 @@ impl TorrentFile {
                         tracker_cloned.resolveTracker().await;
                         if tracker_cloned.is_udp() {
                             tracker_cloned.run_me(socket).await;
+                        } else if tracker_cloned.is_http() {
+                            tracker_cloned.run_http().await;
                         }
                     });
                     tracker_s.push(vec![tracker])

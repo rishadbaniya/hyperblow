@@ -19,6 +19,10 @@ crossbeam = "0.8.4"
 async-recursion = "1.1.1"
 ratatui = { version = "0.30.0", features = ["crossterm_0_29"] }
 thiserror = "2.0.18"
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_bytes = "0.11.19"
+serde_bencode = "0.2.4"
 
 [features]
 async_closure = []

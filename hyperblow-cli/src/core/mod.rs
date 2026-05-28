@@ -8,7 +8,7 @@ use hyperblow::parser::torrent_parser::FileMeta;
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use std::{sync::Arc, vec};
 use tokio::sync::Mutex;
-pub use torrentFile::TorrentFile;
+pub use torrentFile::{TError, TorrentFile};
 
 #[macro_export]
 macro_rules! ArcMutex {

@@ -2,6 +2,8 @@ use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+pub const PEER_ID: [u8; 20] = *b"-HBYxxx-QMAXYDGHQAHF";
+
 /// Struct to handle "Announce" request message
 /// Used to create a "98 byte" buffer to make "Announce Request"
 /// Reference : http://www.bittorrent.org/beps/bep_0015.html
@@ -42,17 +44,12 @@ pub struct AnnounceRequest {
 impl AnnounceRequest {
     // Creates an empty Announce instance
     pub fn new() -> Self {
-        let peer_id_slice = b"-HBYxxx-QMAXYDGHQAHF";
-        let mut peer_id = [0u8; 20];
-        for (index, value) in peer_id_slice.iter().enumerate() {
-            peer_id[index] = *value;
-        }
         AnnounceRequest {
             connection_id: None,
             action: 1,
             transaction_id: None,
             info_hash: None,
-            peer_id: Some(peer_id),
+            peer_id: Some(PEER_ID),
             downloaded: None,
             left: None,
             uploaded: None,
@@ -146,6 +143,19 @@ impl AnnounceResponse {
     /// The error produced here are the IO errors from parsing the given buffer bytes into
     /// respective types
     pub fn from(v: &[u8]) -> Result<Self, std::io::Error> {
+        if v.len() < 20 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("announce response must be at least 20 bytes, got {}", v.len()),
+            ));
+        }
+        if !(v.len() - 20).is_multiple_of(6) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("compact peer payload length must be a multiple of 6, got {}", v.len() - 20),
+            ));
+        }
+
         let mut action_bytes = &v[0..=3];
         let mut transaction_id_bytes = &v[4..=7];
         let mut interval_bytes = &v[8..=11];
@@ -165,8 +175,8 @@ impl AnnounceResponse {
         for i in x.step_by(6) {
             let port_bytes = [v[i + 4], v[i + 5]];
             let mut port_bytes = &port_bytes[..];
-            let port = ReadBytesExt::read_i16::<BigEndian>(&mut port_bytes)?;
-            let socket_adr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(v[i], v[i + 1], v[i + 2], v[i + 3])), port as u16);
+            let port = ReadBytesExt::read_u16::<BigEndian>(&mut port_bytes)?;
+            let socket_adr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(v[i], v[i + 1], v[i + 2], v[i + 3])), port);
             peersAddresses.push(socket_adr);
         }
 
@@ -178,5 +188,45 @@ impl AnnounceResponse {
             seeders,
             peersAddresses,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AnnounceResponse;
+    use bytes::{BufMut, BytesMut};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    #[test]
+    fn parses_udp_announce_response_peers_without_port_overflow() {
+        let mut bytes = BytesMut::new();
+        bytes.put_i32(1);
+        bytes.put_i32(42);
+        bytes.put_i32(1800);
+        bytes.put_i32(3);
+        bytes.put_i32(5);
+        bytes.put_slice(&[127, 0, 0, 1]);
+        bytes.put_u16(51413);
+
+        let response = AnnounceResponse::from(&bytes).expect("valid announce response");
+
+        assert_eq!(response.transaction_id, 42);
+        assert_eq!(
+            response.peersAddresses,
+            vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 51413)]
+        );
+    }
+
+    #[test]
+    fn rejects_truncated_udp_announce_response_peers() {
+        let mut bytes = BytesMut::new();
+        bytes.put_i32(1);
+        bytes.put_i32(42);
+        bytes.put_i32(1800);
+        bytes.put_i32(3);
+        bytes.put_i32(5);
+        bytes.put_slice(&[127, 0, 0]);
+
+        assert!(AnnounceResponse::from(&bytes).is_err());
     }
 }
