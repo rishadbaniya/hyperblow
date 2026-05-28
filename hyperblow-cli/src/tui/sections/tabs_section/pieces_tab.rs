@@ -1,9 +1,8 @@
-use crate::tui::tui_state::TUIState;
+use crate::{tui::tui_state::TUIState, utils};
 use ratatui::{
-    backend::Backend,
-    layout::{Constraint, Layout, Rect},
-    terminal::Frame,
-    widgets::{Block, BorderType, Borders, Cell, Row, Table},
+    layout::{Constraint, Rect},
+    widgets::{Block, BorderType, Borders, Paragraph, Row, Table},
+    Frame,
 };
 use std::rc::Rc;
 
@@ -11,30 +10,30 @@ use std::rc::Rc;
 pub struct PiecesTab;
 
 impl PiecesTab {
-    pub fn draw<B: Backend>(frame: &mut Frame<B>, area: Rect, state: Rc<TUIState>) {
-        //// Create and render the border first
-        //let widget_border = Block::default()
-        //.border_type(BorderType::Thick)
-        //.borders(Borders::ALL)
-        //.border_type(BorderType::Rounded);
+    pub fn draw(frame: &mut Frame, area: Rect, state: Rc<TUIState>) {
+        let block = Block::default()
+            .title(" Pieces ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded);
 
-        //frame.render_widget(widget_border, area.clone());
+        let torrent_handles = state.engine.torrents.blocking_lock();
+        let Some(handle) = torrent_handles.get(state.torrent_index()) else {
+            frame.render_widget(Paragraph::new("No torrent selected").block(block), area);
+            return;
+        };
 
-        //// Recalculate the area after border is built
-        //let area: Rect = Layout::default().constraints([Constraint::Min(0)]).margin(2).split(area)[0];
+        let rows = [
+            Row::new(["Total".to_string(), handle.pieces_total().to_string()]),
+            Row::new(["Downloaded".to_string(), handle.pieces_downloaded().to_string()]),
+            Row::new([
+                "Remaining".to_string(),
+                handle.pieces_total().saturating_sub(handle.pieces_downloaded()).to_string(),
+            ]),
+            Row::new(["Piece size".to_string(), utils::bytes_to_human_readable(handle.piece_size())]),
+        ];
 
-        //// Split the area for header row and torrents row
-        //let area: Vec<Rect> = Layout::default()
-        //.constraints([Constraint::Length(2), Constraint::Min(0)])
-        //.split(area)
-        //.iter()
-        //.cloned()
-        //.collect();
-        //.into_iter()
-        //.collect();
-
-        //Self::draw_header_row(frame, area[0]);
-        //Self::draw_tracker_rows(frame, area[1], state.clone());
+        let table = Table::new(rows, [Constraint::Length(16), Constraint::Min(10)]).block(block);
+        frame.render_widget(table, area);
     }
     /*pub fn renderWidget<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {*/
     /*let datasets = vec![*/

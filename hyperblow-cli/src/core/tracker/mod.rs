@@ -14,17 +14,13 @@ use crate::{
 };
 use byteorder::{BigEndian, ReadBytesExt};
 use crossbeam::atomic::AtomicCell;
-use rand::{thread_rng, Rng};
-use reqwest::Url;
 use std::{
-    cmp::PartialEq,
-    fmt::{write, Display},
+    fmt::Display,
     io,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
-use strum_macros::Display;
 use tokio::{
     net::UdpSocket,
     sync::{
@@ -34,12 +30,15 @@ use tokio::{
     },
     time::{sleep, timeout},
 };
+use url::Url;
+
+type UdpTrackerChannel = (UnboundedSender<Vec<u8>>, Arc<Mutex<UnboundedReceiver<Vec<u8>>>>);
 
 ///Type of protocol used to connect to the tracker
 #[derive(PartialEq, Debug, Clone)]
 pub enum TrackerProtocol {
-    UDP,
-    TCP,
+    Udp,
+    Http,
 }
 
 /// List of all the states that a **UDP or TCP** Tracker can be in
@@ -95,12 +94,10 @@ impl Display for TrackerState {
             Self::WaitingForConnectResponse => write!(f, "Waiting for Connect Response"),
             Self::WaitingForAnnounceResponse => write!(f, "Waiting for Announce Response"),
             Self::WaitingForScrapeResponse => write!(f, "Waiting for Scrape Response"),
-            Self::DNSUnresolved {
-                ref retry_time,
-            } => write!(
+            Self::DNSUnresolved { ref retry_time } => write!(
                 f,
                 "DNSUnresolved ({:?}/30 sec)",
-                Instant::now().duration_since(retry_time.clone()).as_secs()
+                Instant::now().duration_since(*retry_time).as_secs()
             ),
         }
     }
@@ -133,7 +130,7 @@ pub struct Tracker {
     /// from other trackers.
     pub peer_sender: Arc<UnboundedSender<Peer>>,
 
-    pub udp_channel: Option<(UnboundedSender<Vec<u8>>, Arc<Mutex<UnboundedReceiver<Vec<u8>>>>)>,
+    pub udp_channel: Option<UdpTrackerChannel>,
 
     /// Data to make connect request
     pub connect_request: Arc<Mutex<TrackerRequest>>,
@@ -160,7 +157,7 @@ pub struct Tracker {
 impl Tracker {
     /// Tries to create a Tracker instance by parsing the given url
     pub fn new(
-        address: &String,
+        address: &str,
         torrent_state: Arc<State>,
         peer_sender: Arc<UnboundedSender<Peer>>,
     ) -> Result<Tracker, Box<dyn std::error::Error>> {
@@ -173,13 +170,18 @@ impl Tracker {
         let scrape_request = ArcMutex!(TrackerRequest::None);
         let scrape_response = ArcMutex!(TrackerResponse::None);
 
-        // TODO: Find out the protocol, if its TCP or UDP for the tracker
-        let protocol = TrackerProtocol::UDP;
+        let protocol = match address.scheme() {
+            "udp" => TrackerProtocol::Udp,
+            "http" | "https" => TrackerProtocol::Http,
+            scheme => {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unsupported tracker protocol: {scheme}")).into());
+            }
+        };
         let (sd, rv) = mpsc::unbounded_channel::<Vec<u8>>();
 
         let udp_channel = match protocol {
-            TrackerProtocol::UDP => Some((sd, ArcMutex!(rv))),
-            TrackerProtocol::TCP => None,
+            TrackerProtocol::Udp => Some((sd, ArcMutex!(rv))),
+            TrackerProtocol::Http => None,
         };
 
         let tracker_state = ACell!(TrackerState::Idle);
@@ -227,17 +229,16 @@ impl Tracker {
     // Compares given socket address to the trackers list of socket addresses,
     // if it matches any one of it, then we can say that the given socket address belongs
     // to the tracker i.e the socket address is equal to the Tracker
-    pub fn isEqualTo(&self, sAdr1: &SocketAddr) -> bool {
-        // TODO: Make it functional after brekage
-        //if let Some(ref sAdresses) = self.socketAddrs {
-        //for sAdr2 in sAdresses {
-        //return *sAdr1 == *sAdr2;
-        //}
-        //}
-        false
+    pub fn is_udp(&self) -> bool {
+        self.protocol == TrackerProtocol::Udp
     }
 
-    pub async fn run(&self, socket: Arc<UdpSocket>) {
+    pub async fn isEqualTo(&self, sAdr1: &SocketAddr) -> bool {
+        let socket_addresses = self.socketAddrs.lock().await;
+        socket_addresses.iter().any(|sAdr2| sAdr1 == sAdr2)
+    }
+
+    pub async fn run(&self, _socket: Arc<UdpSocket>) {
         //self.resolveTracker()
     }
 
@@ -245,7 +246,7 @@ impl Tracker {
     /// socket => Socket through which the tracker will send UDP request and receive UDP response
     pub async fn run_me(&self, socket: Arc<UdpSocket>) {
         // A timeout duration for all types of responses
-        let timeout_duration = |n: u64| Duration::from_secs(15 + 2 ^ n);
+        let timeout_duration = |n: u64| Duration::from_secs(15_u64.saturating_mul(1_u64 << n.min(8)));
 
         let mut no_of_times_connect_request_timeout = 0;
 
@@ -254,8 +255,8 @@ impl Tracker {
             match timeout(timeout_duration(no_of_times_connect_request_timeout), sendConReq).await {
                 Ok(v) => match v {
                     // TODO : Replace with get_connect_response();
-                    Ok(_) => match self.getResponse().await {
-                        Some(res) => {
+                    Ok(_) => {
+                        if let Some(res) = self.getResponse().await {
                             // Save the received ConnectResponse in self.connect_response
                             {
                                 let mut connect_response = self.connect_response.lock().await;
@@ -267,12 +268,12 @@ impl Tracker {
                             // This means we can't use the connection_id stored inside of ConnectResponse after 1 minute
                             let connection_id_timeout_duration = Duration::from_secs(60);
                             let duration_since_connect_response = Instant::now();
+                            let mut no_of_times_announce_request_timeout = 0;
 
                             'announce: loop {
                                 let now = Instant::now();
                                 let now = now.duration_since(duration_since_connect_response);
 
-                                let mut no_of_times_announce_request_timeout = 0;
                                 if now <= connection_id_timeout_duration {
                                     match timeout(
                                         timeout_duration(no_of_times_announce_request_timeout),
@@ -291,7 +292,7 @@ impl Tracker {
                                                             {
                                                                 for peer_socket_adr in ar.peersAddresses.clone() {
                                                                     let peer = Peer::new(peer_socket_adr, self.torrent_state.clone());
-                                                                    self.peer_sender.send(peer);
+                                                                    let _ = self.peer_sender.send(peer);
                                                                 }
                                                                 let mut announce_response = self.announce_response.lock().await;
                                                                 *announce_response = res;
@@ -306,7 +307,7 @@ impl Tracker {
                                                         //println!("GOT ERROR");
                                                     }
                                                 },
-                                                Err(e) => {
+                                                Err(_e) => {
                                                     // Error while sending AnnounceRequest, probably some kind of socket issue
                                                     //println!("CONNECT REQUEST SOCKET ISSUE {:?}", e.to_string());
                                                     sleep(Duration::from_secs(1000)).await;
@@ -324,9 +325,8 @@ impl Tracker {
                                 }
                             }
                         }
-                        None => {}
-                    },
-                    Err(e) => {
+                    }
+                    Err(_e) => {
                         // Error while sending ConnectRequest, probably some kind of socket issue
                         //println!("CONNECT REQUEST SOCKET ISSUE {:?}", e.to_string());
                         sleep(Duration::from_secs(1000)).await;
@@ -373,7 +373,12 @@ impl Tracker {
         let socketAddrs = {
             let socket_addresses = self.socketAddrs.lock().await;
             // TODO : Make choosable among other indices too
-            socket_addresses[0]
+            socket_addresses.first().copied().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::AddrNotAvailable,
+                    "tracker has no resolved socket addresses for connect request",
+                )
+            })?
         };
 
         return match socket.send_to(connect_req_bytes.as_ref(), socketAddrs).await {
@@ -394,17 +399,18 @@ impl Tracker {
                 announce_req.set_connection_id(c_res.connection_id);
                 announce_req.set_transaction_id(c_res.transaction_id);
                 announce_req.set_info_hash(&self.torrent_state.info_hash);
-                announce_req.set_downloaded(1000); // TODO : Replace with actual downloaded bytes
-                announce_req.set_uploaded(1000); // TODO : Replace with actual uploaded bytes
-                announce_req.set_left(5000); // TODO : Replace with actual left bytes
+                let downloaded = self.torrent_state.bytes_complete() as i64;
+                let total = self.torrent_state.meta_info.total_length();
+                announce_req.set_downloaded(downloaded);
+                announce_req.set_uploaded(0);
+                announce_req.set_left(total.saturating_sub(downloaded));
                 {
                     let ports = self.torrent_state.udp_ports.lock().await;
-                    if let Some(port) = ports.get(0) {
+                    if let Some(port) = ports.first() {
                         announce_req.set_port(*port as i16);
                     }
                 }
-                let mut rng = thread_rng();
-                announce_req.set_key(rng.gen());
+                announce_req.set_key(rand::random());
             }
         }
 
@@ -412,7 +418,12 @@ impl Tracker {
             let socketAddrs = {
                 let socket_addresses = self.socketAddrs.lock().await;
                 // TODO : Make choosable among other indices too
-                socket_addresses[0]
+                socket_addresses.first().copied().ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::AddrNotAvailable,
+                        "tracker has no resolved socket addresses for announce request",
+                    )
+                })?
             };
             return match socket.send_to(&announce_req_bytes, socketAddrs).await {
                 Ok(_) => {
@@ -443,7 +454,7 @@ impl Tracker {
         let mut DOES_PEER_ALREADY_EXIST = false;
 
         for peer in &(*peers) {
-            DOES_PEER_ALREADY_EXIST = (peer.socket_adr == peer_socket_adr);
+            DOES_PEER_ALREADY_EXIST = peer.socket_adr == peer_socket_adr;
         }
 
         if !DOES_PEER_ALREADY_EXIST {
@@ -515,7 +526,7 @@ impl Tracker {
                 }
             }
         }
-        return IS_CONNECT_RESPONSE;
+        IS_CONNECT_RESPONSE
     }
 
     /// Checks from the given buffer, if it's a ConnectResponse or not
@@ -547,15 +558,15 @@ impl Tracker {
             }
         }
 
-        return IS_ANNOUNCE_RESPONSE;
+        IS_ANNOUNCE_RESPONSE
     }
 
-    pub async fn isScrapeResponse(&self, d: &[u8]) -> bool {
+    pub async fn isScrapeResponse(&self, _d: &[u8]) -> bool {
         false // Dummy
     }
 
     /// Checks from the given buffer, if the given response is an Error or not
-    pub async fn isErrorResponse(&self, d: &[u8]) -> bool {
+    pub async fn isErrorResponse(&self, _d: &[u8]) -> bool {
         //let action = ReadBytesExt::read_i32::<BigEndian>(&mut action_bytes);
         false //dummy
     }
@@ -569,15 +580,10 @@ pub enum TrackerResponse {
     None,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum TrackerRequest {
     ConnectRequest(ConnectRequest),
     AnnounceRequest(AnnounceRequest),
+    #[default]
     None,
-}
-
-impl Default for TrackerRequest {
-    fn default() -> Self {
-        TrackerRequest::None
-    }
 }

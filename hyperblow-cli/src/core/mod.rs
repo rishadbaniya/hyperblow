@@ -89,8 +89,8 @@ impl File {
             let mut currentFile = rootFile.clone();
             for f in files {
                 // The eventual path of the file, will also include the directory
-                let ref path_s = f.path;
-                for (ind, path) in path_s.into_iter().enumerate() {
+                let path_s = &f.path;
+                for (ind, path) in path_s.iter().enumerate() {
                     let containsAtDepthOne = {
                         let current_file = currentFile.lock().await;
                         current_file.containsAtDepthOne(path).await
@@ -112,11 +112,7 @@ impl File {
                                     FileType::Directory
                                 };
 
-                                let size = if file_type == FileType::Regular {
-                                    Some(f.length)
-                                } else {
-                                    None
-                                };
+                                let size = if file_type == FileType::Regular { Some(f.length) } else { None };
                                 currentFileLock.constructDirectoryOrFile(path, file_type, size);
                                 let inner_files = currentFileLock.inner_files.as_ref().unwrap();
                                 inner_files[inner_files.len() - 1].clone()
@@ -148,13 +144,9 @@ impl File {
                 name: fileOrFolderName.to_owned(),
                 progressPerc: 0_f32,
                 should_download: true,
-                size: size, // TODO : Use actual size
+                size, // TODO : Use actual size
                 isDownloaded: false,
-                inner_files: if file_type == FileType::Regular {
-                    None
-                } else {
-                    Some(Vec::new())
-                },
+                inner_files: if file_type == FileType::Regular { None } else { Some(Vec::new()) },
                 file_type,
             }));
         }
@@ -162,24 +154,22 @@ impl File {
 
     async fn containsAtDepthOne(&self, fileOrFolderName: &String) -> Option<usize> {
         if let Some(ref inner_files) = self.inner_files {
-            for (i, file) in inner_files.into_iter().enumerate() {
+            for (i, file) in inner_files.iter().enumerate() {
                 let name = { file.lock().await.name.clone() };
                 if name == *fileOrFolderName {
                     return Some(i);
                 }
             }
-        } else {
-            if self.name == *fileOrFolderName {
-                return Some(0);
-            }
+        } else if self.name == *fileOrFolderName {
+            return Some(0);
         }
-        return None;
+        None
     }
 
     #[async_recursion]
     pub async fn tabs_traverse_names(&self, depth: usize) -> Vec<String> {
         let mut x = vec![];
-        let spaces = std::iter::repeat(" ").take(depth).collect::<String>();
+        let spaces = std::iter::repeat_n(" ", depth).collect::<String>();
         match self.file_type {
             FileType::Regular => {
                 x.push(format!("{}{}", spaces, self.name));
@@ -195,6 +185,26 @@ impl File {
             }
         };
         x
+    }
+
+    pub fn tabs_traverse_names_blocking(&self, depth: usize) -> Vec<String> {
+        let mut names = vec![];
+        let spaces = std::iter::repeat_n(" ", depth).collect::<String>();
+        match self.file_type {
+            FileType::Regular => {
+                names.push(format!("{}{}", spaces, self.name));
+            }
+            FileType::Directory => {
+                names.push(format!("{}{}", spaces, self.name));
+                if let Some(ref inner_files) = self.inner_files {
+                    for file in inner_files {
+                        let mut files = file.blocking_lock().tabs_traverse_names_blocking(depth + 1);
+                        names.append(&mut files);
+                    }
+                }
+            }
+        };
+        names
     }
 }
 

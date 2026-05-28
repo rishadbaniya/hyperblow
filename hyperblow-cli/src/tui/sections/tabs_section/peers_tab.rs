@@ -1,9 +1,8 @@
 use crate::tui::tui_state::TUIState;
 use ratatui::{
-    backend::Backend,
     layout::{Constraint, Layout, Rect},
-    terminal::Frame,
-    widgets::{Block, BorderType, Borders},
+    widgets::{Block, BorderType, Borders, Paragraph, Row, Table},
+    Frame,
 };
 
 use std::rc::Rc;
@@ -12,8 +11,8 @@ use std::rc::Rc;
 pub struct PeersTab;
 
 impl PeersTab {
-    pub fn draw<B: Backend>(frame: &mut Frame<B>, area: Rect, state: Rc<TUIState>) {
-        let area = Self::drawBorder(frame, area.clone());
+    pub fn draw(frame: &mut Frame, area: Rect, state: Rc<TUIState>) {
+        let area = Self::drawBorder(frame, area);
 
         // Split the area for header row and torrents row
         let area: Vec<Rect> = Layout::default()
@@ -23,26 +22,39 @@ impl PeersTab {
             .cloned()
             .collect();
 
-        //Self::draw_header_row(frame, area[0]);
-        //Self::draw_tracker_rows(frame, area[1], state.clone());
+        let header = Table::new([Row::new(["Peer address"])], [Constraint::Percentage(100)]);
+        frame.render_widget(header, area[0]);
+
+        let torrent_handles = state.engine.torrents.blocking_lock();
+        let Some(handle) = torrent_handles.get(state.torrent_index()) else {
+            frame.render_widget(Paragraph::new("No torrent selected"), area[1]);
+            return;
+        };
+
+        let addresses = handle.peer_addresses();
+        if addresses.is_empty() {
+            frame.render_widget(Paragraph::new("No peers discovered yet"), area[1]);
+            return;
+        }
+
+        let rows = addresses.into_iter().map(|address| Row::new([address]));
+        let table = Table::new(rows, [Constraint::Percentage(100)]);
+        frame.render_widget(table, area[1]);
     }
 
     // Given an area, it draws border around that area and then it simply returns a new area with a
     // a padding of 2
-    fn drawBorder<B: Backend>(frame: &mut Frame<B>, area: Rect) -> Rect {
+    fn drawBorder(frame: &mut Frame, area: Rect) -> Rect {
         // Builds the border around the given area
         let border_widget = Block::default()
             .border_type(BorderType::Thick)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded);
 
-        frame.render_widget(border_widget, area.clone());
+        frame.render_widget(border_widget, area);
 
         // Recalculate the area inside, after border is built
-        let area: Rect = Layout::default()
-            .constraints([Constraint::Min(0)])
-            .margin(2)
-            .split(area)[0];
+        let area: Rect = Layout::default().constraints([Constraint::Min(0)]).margin(2).split(area)[0];
 
         area
     }

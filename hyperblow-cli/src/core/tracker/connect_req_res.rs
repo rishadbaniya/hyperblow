@@ -1,6 +1,5 @@
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
-use rand::Rng;
 
 /// Struct to handle the message to be sent to "Connect" on the UDP Tracker
 /// Used to create a "16 byte" buffer to make "Connect Request"
@@ -23,11 +22,10 @@ pub struct ConnectRequest {
 impl ConnectRequest {
     // Creates a fresh ConnectRequest instance
     pub fn new() -> Self {
-        let mut rng = rand::thread_rng();
         Self {
             protocol_id: 0x41727101980,
             action: 0,
-            transaction_id: rng.gen(),
+            transaction_id: rand::random(),
         }
     }
 

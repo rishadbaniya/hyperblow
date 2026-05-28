@@ -1,11 +1,2 @@
 edition = "2021"
-max_width = 140 
-
-
-#Only availiable on the nightly compiler
-unstable_features = true
-
-imports_granularity = "Crate"
-struct_lit_single_line = false
-brace_style = "PreferSameLine"
-
+max_width = 140

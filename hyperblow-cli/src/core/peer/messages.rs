@@ -86,7 +86,7 @@ impl Message {
             //Message::Have(ref have) => {}
             _ => {}
         }
-        return buf;
+        buf
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Handshake Message Frame
@@ -106,7 +106,7 @@ impl Message {
                 // Then only validate the Handshake Message Frame
             }
         }
-        return false;
+        false
     }
 
     /// Checks in the given src buffer if the first Message Frame is A KeepAlive Message Frame
@@ -132,7 +132,7 @@ impl Message {
             let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
             return length_prefix == 0;
         }
-        return false;
+        false
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Choke Message Frame
@@ -148,7 +148,7 @@ impl Message {
                 return message_id == 0;
             }
         }
-        return false;
+        false
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Unchoke Message Frame
@@ -164,7 +164,7 @@ impl Message {
                 return message_id == 1;
             }
         }
-        return false;
+        false
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Interested Message Frame
@@ -180,7 +180,7 @@ impl Message {
                 return message_id == 2;
             }
         }
-        return false;
+        false
     }
 
     /// Checks in the given src buffer if the first Message Frame is A NotInterested Message Frame
@@ -196,7 +196,7 @@ impl Message {
                 return message_id == 3;
             }
         }
-        return false;
+        false
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Have Message Frame
@@ -213,7 +213,7 @@ impl Message {
                 return message_id == 4;
             }
         }
-        return false;
+        false
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Bitfield Message Frame
@@ -232,7 +232,7 @@ impl Message {
                 return message_id == 5;
             }
         }
-        return false;
+        false
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Request Message Frame
@@ -249,7 +249,7 @@ impl Message {
                 return message_id == 6;
             }
         }
-        return false;
+        false
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Piece Message Frame
@@ -267,7 +267,7 @@ impl Message {
                 return message_id == 7;
             }
         }
-        return false;
+        false
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Cancel Message Frame
@@ -283,7 +283,7 @@ impl Message {
                 return message_id == 8;
             }
         }
-        return false;
+        false
     }
 
     /// Checks in the given src buffer if the first Message Frame is A Port Message Frame
@@ -299,7 +299,7 @@ impl Message {
                 return message_id == 9;
             }
         }
-        return false;
+        false
     }
 }
 
@@ -332,11 +332,8 @@ impl Bitfield {
                 _ => {}
             }
         }
-        src.split_to(bitfield_frame_length as usize);
-        Self {
-            have,
-            not_have,
-        }
+        src.split_to(bitfield_frame_length);
+        Self { have, not_have }
     }
 }
 
@@ -395,9 +392,7 @@ impl Have {
         let mut piece_index_bytes = &src[5..=8];
         // TODO : Make sure unpwrap here is safe
         let piece_index = ReadBytesExt::read_u32::<BigEndian>(&mut piece_index_bytes).unwrap();
-        Self {
-            piece_index,
-        }
+        Self { piece_index }
     }
 }
 
@@ -417,20 +412,17 @@ impl Have {
 /// NOTE : If a peer sends a Handshake message with different info hash, then we are suppose to
 /// drop the connection right there. Even if we send a different info hash in the Handshake
 /// message, there is always a chance that connection is to be dropped.
-///
-///
-
 /// Structure :
 /// Handshake : <pstrlen><pstr><reserved><info_hash><peer_id>  WHERE
 ///
 /// - pstrlen : String length of <pstr>, as a single raw byte, in BitTorrent V1, pstrlen = 19
 /// - pstr : String identifier of the protocol, in BitTorrent V1, pstr = "BitTorrent protocol"
 /// - reserved : Eight(8) reserved bytes, which is all zeroes. Each bit in this field can be
-///              used to changte the behaviour of the protocol
+///   used to changte the behaviour of the protocol
 /// - info_hash : 20 byte SHA1 hash of the info key in the metainfo file i.e ".torrent" file
 /// - peer_id : 20 byte String, used as a unique ID for the client. This is usually the same
-///             peer_id transmitted in tracker requests(not always, there is an anonymitiy
-///             option in Azureus BitTorrent Client)
+///   peer_id transmitted in tracker requests(not always, there is an anonymitiy
+///   option in Azureus BitTorrent Client)
 ///
 ///
 /// For More : https://wiki.theory.org/indx.php/BitTorrentSpecification#Handshakee
@@ -567,11 +559,7 @@ impl Request {
         let length = ReadBytesExt::read_u32::<BigEndian>(&mut length_bytes).unwrap();
 
         src.split_to(17);
-        Self {
-            index,
-            begin,
-            length,
-        }
+        Self { index, begin, length }
     }
 }
 
@@ -668,11 +656,7 @@ impl Cancel {
         let length = ReadBytesExt::read_u32::<BigEndian>(&mut length_bytes).unwrap();
 
         src.split_to(17);
-        Self {
-            index,
-            begin,
-            length,
-        }
+        Self { index, begin, length }
     }
 }
 
@@ -706,8 +690,6 @@ impl Port {
 
         let listen_port = ReadBytesExt::read_u16::<BigEndian>(&mut listen_port_bytes).unwrap();
         src.split_to(7);
-        Self {
-            listen_port,
-        }
+        Self { listen_port }
     }
 }

@@ -24,7 +24,8 @@ impl error::Error for MagnetURIMetaError {}
 ///
 /// Some of the fields from the crate "magnet_url" itself
 ///
-struct MagnetURIMeta {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MagnetURIMeta {
     /// **(Required)** Exact Topic : Info Hash of the torrent and the type of hash being used is
     /// also kept here
     pub xt: Option<String>,
@@ -62,28 +63,32 @@ struct MagnetURIMeta {
 
 impl MagnetURIMeta {
     /// Tries to create [MagnetURIMeta] from given magnet URI
-    fn fromMagnetURI(uri: &String) -> Result<MagnetURIMeta, MagnetURIMetaError> {
-        return match Magnet::new(uri) {
-            Ok(d) => Ok(MagnetURIMeta {
-                xt: d.xt,
-                dn: d.dn,
-                xl: d.xl,
-                tr: Some(d.tr),
-                ws: d.ws,
-                xs: d.xs,
-                kt: d.kt,
-                mt: d.mt,
-                acceptable_source: d.acceptable_source,
-            }),
+    pub fn fromMagnetURI(uri: &str) -> Result<MagnetURIMeta, MagnetURIMetaError> {
+        match Magnet::new(uri) {
+            Ok(d) => {
+                let xt = match (d.hash_type(), d.hash()) {
+                    (Some(hash_type), Some(hash)) => Some(format!("urn:{hash_type}:{hash}")),
+                    _ => None,
+                };
+
+                Ok(MagnetURIMeta {
+                    xt,
+                    dn: d.display_name().map(ToOwned::to_owned),
+                    xl: d.length(),
+                    tr: Some(d.trackers().to_vec()),
+                    ws: d.web_seed().map(ToOwned::to_owned),
+                    xs: d.source().map(ToOwned::to_owned),
+                    kt: d.search_keywords().map(ToOwned::to_owned),
+                    mt: d.manifest().map(ToOwned::to_owned),
+                    acceptable_source: d.acceptable_source().map(ToOwned::to_owned),
+                })
+            }
             Err(_) => Err(MagnetURIMetaError::InvalidURI),
-        };
+        }
     }
 
     /// Checks if the Magnet URI is valid or not
-    fn checkIfMagnetURIIsValid(uri: &String) -> bool {
-        return match Magnet::new(uri) {
-            Ok(_) => true,
-            Err(_) => false,
-        };
+    pub fn checkIfMagnetURIIsValid(uri: &str) -> bool {
+        Magnet::new(uri).is_ok()
     }
 }

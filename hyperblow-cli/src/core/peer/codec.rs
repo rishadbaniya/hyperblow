@@ -12,7 +12,7 @@ impl Decoder for PeerMessageCodec {
     type Item = Message;
     type Error = std::io::Error;
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        return if src.len() == 0 {
+        if src.is_empty() {
             Ok(None)
         } else if Message::is_handshake_message(src) {
             Ok(Some(Message::Handshake(Handshake::from(src))))
@@ -44,8 +44,8 @@ impl Decoder for PeerMessageCodec {
         } else if Message::is_port_message(src) {
             Ok(Some(Message::Port(Port::from_bytes(src))))
         } else {
-            return Ok(None);
-        };
+            Ok(None)
+        }
     }
 }
 

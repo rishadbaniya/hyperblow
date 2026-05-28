@@ -3,19 +3,15 @@
 // widget, only text data can be rendered inside of Table widget
 
 //use super::{mouse::MouseEv, tabs::bandwidth_tab::TabSectionBandwidth};
-use crate::{core::tracker::Tracker, tui::tui_state::TUIState, utils};
+use crate::{tui::tui_state::TUIState, utils};
 use ratatui::{
-    backend::{Backend, CrosstermBackend},
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    terminal::Frame,
     text::Span,
-    widgets::{Block, BorderType, Borders, Cell, Gauge, List, ListItem, Row, Table},
+    widgets::{Block, BorderType, Borders, Gauge, Paragraph, Row, Table},
+    Frame,
 };
-use std::{
-    fmt::{format, Display},
-    rc::Rc,
-};
+use std::rc::Rc;
 
 /// Constants that define, the division percentage of the column in
 /// Torrents Section of TUI
@@ -59,7 +55,7 @@ impl TorrentsSection {
     /// - In - "12 GiB/s" Total Download Speed
     /// - Out - "1 GiB/s" Total Upload Speed
     /// - Time Left - "00:02:12" Time Left in HH:MM:SS
-    pub(crate) fn draw<B: Backend>(frame: &mut Frame<B>, area: Rect, state: Rc<TUIState>) {
+    pub(crate) fn draw(frame: &mut Frame, area: Rect, state: Rc<TUIState>) {
         // Create and render the border first
         let border = Block::default()
             .border_type(BorderType::Thick)
@@ -67,13 +63,10 @@ impl TorrentsSection {
             .border_type(BorderType::Rounded)
             .title(Span::styled(" Hyperblow ", Style::default().fg(Color::Yellow)))
             .title_alignment(Alignment::Center);
-        frame.render_widget(border, area.clone());
+        frame.render_widget(border, area);
 
         // Recalculate the area after border is built
-        let area = Layout::default()
-            .constraints([Constraint::Min(0)])
-            .margin(2)
-            .split(area)[0];
+        let area = Layout::default().constraints([Constraint::Min(0)]).margin(2).split(area)[0];
 
         // Split the area for header row and torrents row
         let area = Layout::default()
@@ -86,24 +79,24 @@ impl TorrentsSection {
     }
 
     // Displays only the header column
-    fn draw_header_column<B: Backend>(frame: &mut Frame<B>, area: Rect) {
+    fn draw_header_column(frame: &mut Frame, area: Rect) {
         let table = Table::new(
             [Row::new(vec![NAME, PROGRESS, STATUS, BYTES, IN, OUT, TIME_LEFT])], //Row::new([Cell::from("ABC")),
-        )
-        .widths(&[
-            Constraint::Percentage(NAME_PERC),
-            Constraint::Percentage(PROGRESS_PERC),
-            Constraint::Percentage(STATUS_PERC),
-            Constraint::Percentage(BYTES_PERC),
-            Constraint::Percentage(IN_PERC),
-            Constraint::Percentage(OUT_PERC),
-            Constraint::Percentage(TIME_LEFT_PERC),
-        ]);
+            [
+                Constraint::Percentage(NAME_PERC),
+                Constraint::Percentage(PROGRESS_PERC),
+                Constraint::Percentage(STATUS_PERC),
+                Constraint::Percentage(BYTES_PERC),
+                Constraint::Percentage(IN_PERC),
+                Constraint::Percentage(OUT_PERC),
+                Constraint::Percentage(TIME_LEFT_PERC),
+            ],
+        );
         frame.render_widget(table, area);
     }
 
     // Displays the contents relatable to header column
-    fn draw_torrents_columns<B: Backend>(frame: &mut Frame<B>, area: Rect, state: Rc<TUIState>) {
+    fn draw_torrents_columns(frame: &mut Frame, area: Rect, state: Rc<TUIState>) {
         // Height of the column of each item in torrens section
         const ROW_HEIGHT: u16 = 1;
 
@@ -137,49 +130,61 @@ impl TorrentsSection {
                     .iter()
                     .cloned()
                     .collect();
-                y = y + ROW_HEIGHT;
+                y += ROW_HEIGHT;
                 columns_area.push(column_area);
             }
             columns_area
         };
 
         //println!("{}", column_areas.len());
-        let ref torrent_handles = *state.engine.torrents.blocking_lock();
+        let torrent_handles = state.engine.torrents.blocking_lock();
+        if torrent_handles.is_empty() {
+            state.set_max_torrent_index(0);
+            frame.render_widget(
+                Paragraph::new("No torrents loaded. Start with --file <path> or --magnet <uri>."),
+                area,
+            );
+            return;
+        }
+        state.set_max_torrent_index(torrent_handles.len().saturating_sub(1));
+        let selected_index = state.torrent_index();
 
         for (index, handle) in torrent_handles.iter().enumerate() {
+            if index >= column_areas.len() {
+                break;
+            }
+
             // Widget to dispaly the full name of the torrent downloaded
             let widget_name = {
-                let name = handle.name();
+                let name = if index == selected_index {
+                    format!("> {}", handle.name())
+                } else {
+                    format!("  {}", handle.name())
+                };
                 Block::default().title(name).title_alignment(Alignment::Left)
             };
 
             // Widget to display progress in percentage
             let widget_progress = {
-                let progress_perc = 10;
+                let bytes_total = handle.bytes_total();
+                let progress_perc = if bytes_total == 0 {
+                    0
+                } else {
+                    ((handle.bytes_complete().saturating_mul(100)) / bytes_total).min(100) as u16
+                };
                 Gauge::default()
-                    .percent(1)
-                    .gauge_style(
-                        Style::default()
-                            .fg(Color::White)
-                            .bg(Color::Black)
-                            .add_modifier(Modifier::BOLD),
-                    )
+                    .gauge_style(Style::default().fg(Color::White).bg(Color::Black).add_modifier(Modifier::BOLD))
                     .percent(progress_perc)
             };
 
             // Widget to display status to show either the torrent session is Paused, Downloading
             // or Seeding
             let widget_status = {
-                let status = TorrentStatus::Downloading;
-                let (title, fg_color) = match status {
-                    TorrentStatus::Downloading => (status.to_string(), Color::Green),
-                    TorrentStatus::Seeding => (status.to_string(), Color::Red),
-                    TorrentStatus::Paused => (status.to_string(), Color::Blue),
-                };
+                let title = handle.status_label();
                 Block::default()
                     .title(title)
                     .title_alignment(Alignment::Center)
-                    .style(Style::default().bg(fg_color).fg(Color::Black))
+                    .style(Style::default().bg(Color::Cyan).fg(Color::Black))
             };
 
             // Widget to display the Amount of data downloaded Of Total data
@@ -202,16 +207,10 @@ impl TorrentsSection {
             // Widget to display the Upload speed
             let widget_out = {
                 let upload_speed = utils::bytes_to_human_readable(handle.upload_speed());
-                Block::default()
-                    .title(format!("{upload_speed}/s"))
-                    .title_alignment(Alignment::Left)
+                Block::default().title(format!("{upload_speed}/s")).title_alignment(Alignment::Left)
             };
 
-            let widget_time_left = {
-                Block::default()
-                    .title(format!("00:20:21"))
-                    .title_alignment(Alignment::Left)
-            };
+            let widget_time_left = { Block::default().title("-").title_alignment(Alignment::Left) };
 
             // Render all widgets
             frame.render_widget(widget_name, column_areas[index][0]);
@@ -222,22 +221,5 @@ impl TorrentsSection {
             frame.render_widget(widget_out, column_areas[index][5]);
             frame.render_widget(widget_time_left, column_areas[index][6]);
         }
-    }
-}
-
-enum TorrentStatus {
-    Downloading,
-    Seeding,
-    Paused,
-}
-
-impl Display for TorrentStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            TorrentStatus::Downloading => write!(f, "Downloading"),
-            TorrentStatus::Seeding => write!(f, "Seeding"),
-            TorrentStatus::Paused => write!(f, "Paused"),
-        }?;
-        Ok(())
     }
 }

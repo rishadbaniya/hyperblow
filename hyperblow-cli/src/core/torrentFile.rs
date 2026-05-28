@@ -9,7 +9,6 @@
 // TODO : Find the folder to save the data
 // TODO : Create the DataStructure in such a way that it could resume the download later on as well
 // TODO : Return error on error generated rather than this Option<T> on TorrentFile::new()
-#![allow(unused_must_use)]
 use super::peer::Peer;
 use crate::{
     core::{
@@ -20,9 +19,8 @@ use crate::{
     ACell, ArcMutex, ArcRwLock,
 };
 use crossbeam::atomic::AtomicCell;
-use futures::future::{join, join_all};
 use hyperblow::parser::torrent_parser::FileMeta;
-use std::{cell::Cell, sync::Arc};
+use std::{io, sync::Arc};
 use tokio::{
     join,
     net::UdpSocket,
@@ -30,7 +28,6 @@ use tokio::{
         mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
         Mutex, RwLock,
     },
-    task::JoinHandle,
 };
 
 const TRANS_ID: i32 = 10;
@@ -38,6 +35,8 @@ const TRANS_ID: i32 = 10;
 #[derive(Debug)]
 pub enum TError {
     NoTrackerResolved,
+    InvalidTorrentFile(String),
+    Socket(io::Error),
 }
 
 #[derive(Debug)]
@@ -74,11 +73,13 @@ struct Peers {
 impl TorrentFile {
     /// It will try to parse the given the path of the torrent file and create a new data structure
     /// from the Torrent file
-    pub async fn new(path: &String) -> Option<Self> {
-        match FileMeta::fromTorrentFile(&path) {
+    pub async fn new(path: &str) -> Result<Self, TError> {
+        match FileMeta::fromTorrentFile(path) {
             Ok(meta_info) => {
                 let info_hash = meta_info.generateInfoHash();
-                let pieces_hash = meta_info.getPiecesHash();
+                let pieces_hash = meta_info
+                    .getPiecesHash()
+                    .map_err(|error| TError::InvalidTorrentFile(error.to_string()))?;
                 let pieces_count = pieces_hash.len();
                 let d_state = DownState::Unknown;
                 let file_tree = Some(Self::generateFileTree(&meta_info).await);
@@ -86,8 +87,8 @@ impl TorrentFile {
                 let udp_ports = ArcMutex!(Vec::new());
                 let tcp_ports = ArcMutex!(Vec::new());
                 let peers = ArcMutex!(Vec::new());
-                let bytes_complete = ACell!(3000000000);
-                let pieces_downloaded = ACell!(120);
+                let bytes_complete = ACell!(0);
+                let pieces_downloaded = ACell!(0);
                 let uptime = ACell!(0);
 
                 let peers_channel = unbounded_channel::<Peer>();
@@ -108,14 +109,14 @@ impl TorrentFile {
                     uptime,
                 });
 
-                Some(Self {
+                Ok(Self {
                     path: path.to_string(),
                     pieces_count,
                     state,
                     peers_channel,
                 })
             }
-            _ => None,
+            Err(error) => Err(TError::InvalidTorrentFile(error.to_string())),
         }
     }
 
@@ -176,28 +177,27 @@ impl TorrentFile {
         File::new(meta, &".".to_owned()).await.unwrap()
     }
 
-    async fn getUDPSocket(&self) -> Arc<UdpSocket> {
-        // TODO : Currently this function exhaustively checks for each port and tries to
-        // give one of the ports incrementing from 6881
-        let mut port = 6881;
-        // TODO: Get a list of all the ports used by the entire application as well,
-        // i.e store a global use  of entire sockets somewhere in a global state
-        //
-        // Gets a port that is not used by the application
-        loop {
+    async fn getUDPSocket(&self) -> Result<Arc<UdpSocket>, io::Error> {
+        for port in 6881..=6999 {
             let adr = format!("0.0.0.0:{port}");
             match UdpSocket::bind(adr).await {
                 Ok(socket) => {
                     let mut udp_ports = self.state.udp_ports.lock().await;
                     udp_ports.push(port);
-                    return Arc::new(socket);
+                    return Ok(Arc::new(socket));
                 }
-                Err(e) => {
-                    //println!("{:?}", e.to_string());
-                    port = port + 1;
+                Err(_e) => {
+                    continue;
                 }
             }
         }
+
+        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        if let Ok(address) = socket.local_addr() {
+            let mut udp_ports = self.state.udp_ports.lock().await;
+            udp_ports.push(address.port());
+        }
+        Ok(Arc::new(socket))
     }
 
     // Running of trackers is divided into two sub tasks
@@ -221,8 +221,12 @@ impl TorrentFile {
                         if let Ok(tracker) = Tracker::new(announce_url, self.state.clone(), self.peers_channel.0.clone()) {
                             let tracker = Arc::new(tracker);
                             let tracker_cloned = tracker.clone();
+                            let socket = socket.clone();
                             tokio::spawn(async move {
                                 tracker_cloned.resolveTracker().await;
+                                if tracker_cloned.is_udp() {
+                                    tracker_cloned.run_me(socket).await;
+                                }
                             });
                             _trackers.push(tracker);
                         }
@@ -230,9 +234,18 @@ impl TorrentFile {
                     tracker_s.push(_trackers);
                 }
             } else {
-                let ref announce_url = self.state.meta_info.announce;
+                let announce_url = &self.state.meta_info.announce;
                 if let Ok(tracker) = Tracker::new(announce_url, self.state.clone(), self.peers_channel.0.clone()) {
-                    tracker_s.push(vec![Arc::new(tracker)])
+                    let tracker = Arc::new(tracker);
+                    let tracker_cloned = tracker.clone();
+                    let socket = socket.clone();
+                    tokio::spawn(async move {
+                        tracker_cloned.resolveTracker().await;
+                        if tracker_cloned.is_udp() {
+                            tracker_cloned.run_me(socket).await;
+                        }
+                    });
+                    tracker_s.push(vec![tracker])
                 }
             }
             tracker_s
@@ -253,12 +266,12 @@ impl TorrentFile {
                     let trackers = self.state.trackers.read().await;
                     for trackers in trackers.iter() {
                         for tracker in trackers {
-                            if tracker.isEqualTo(s_addrs) {
+                            if tracker.isEqualTo(s_addrs).await {
                                 if let Some((ref sd, _)) = tracker.udp_channel {
                                     if !sd.is_closed() {
                                         let mut buf = buf.to_vec();
                                         buf.truncate(len);
-                                        sd.send(buf); // TODO : send() return Result<T>, might need to make use of Err ?. Figure out
+                                        let _ = sd.send(buf);
                                     }
                                 }
                             }
@@ -273,12 +286,13 @@ impl TorrentFile {
     }
 
     pub async fn runDownload(&self) {
-        let ref peers_rcv = self.peers_channel.1;
+        let peers_rcv = &self.peers_channel.1;
         let mut peers_rcv = peers_rcv.lock().await;
         while let Some(peer) = peers_rcv.recv().await {
-            //println!("--------------------------------------------",);
-            //println!("{:?}", peer.socket_adr);
-            //println!("--------------------------------------------",);
+            let mut peers = self.state.peers.lock().await;
+            if !peers.iter().any(|stored| stored.socket_adr == peer.socket_adr) {
+                peers.push(peer);
+            }
         }
         // TODO: Run in a loop, but never return anything
     }
@@ -292,7 +306,9 @@ impl TorrentFile {
     /// so that they can use it later on to display the UI or the data changed
     pub async fn run(&self) {
         // A UDP socket for all the Trackers to send requests and receive responses
-        let trackers_udp_socket = self.getUDPSocket().await;
+        let Ok(trackers_udp_socket) = self.getUDPSocket().await else {
+            return;
+        };
 
         let run_trackers = self.runTrackers(trackers_udp_socket.clone());
         let run_download = self.runDownload();

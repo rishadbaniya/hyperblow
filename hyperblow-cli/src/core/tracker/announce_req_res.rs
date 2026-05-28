@@ -163,13 +163,10 @@ impl AnnounceResponse {
 
         let mut peersAddresses = vec![];
         for i in x.step_by(6) {
-            let port_bytes = vec![v[i + 4], v[i + 5]];
+            let port_bytes = [v[i + 4], v[i + 5]];
             let mut port_bytes = &port_bytes[..];
             let port = ReadBytesExt::read_i16::<BigEndian>(&mut port_bytes)?;
-            let socket_adr = SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::new(v[i], v[i + 1], v[i + 2], v[i + 3])),
-                port as u16,
-            );
+            let socket_adr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(v[i], v[i + 1], v[i + 2], v[i + 3])), port as u16);
             peersAddresses.push(socket_adr);
         }
 

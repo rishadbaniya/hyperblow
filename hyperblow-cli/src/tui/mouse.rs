@@ -9,20 +9,22 @@ pub struct Mouse {
     pub event: Cell<MouseEv>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MouseEv {
     Clicked,
     NotClicked,
 }
 
-impl Mouse {
-    // Used to create MouseOffset instance initially
-    pub fn default() -> Self {
+impl Default for Mouse {
+    fn default() -> Self {
         Self {
             offset: (Cell::new(0), Cell::new(0)),
             event: Cell::new(MouseEv::NotClicked),
         }
     }
+}
 
+impl Mouse {
     pub fn get_x(&self) -> u16 {
         self.offset.0.get()
     }

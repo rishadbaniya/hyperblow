@@ -6,7 +6,7 @@ mod engine;
 mod tui;
 mod utils;
 
-use arguments::Arguments;
+use arguments::{Arguments, TorrentInput};
 use clap::Parser;
 use engine::{Engine, TorrentSource};
 use std::sync::Arc;
@@ -18,11 +18,12 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn main() -> Result<()> {
     let args = Arguments::parse();
-    args.check();
 
     // Creates engine
     let engine = Engine::new();
-    spawn_in_engine(engine.clone(), &args);
+    if let Some(source) = args.source()? {
+        spawn_in_engine(engine.clone(), source)?;
+    }
 
     tui::ui::draw_ui(engine.clone())?;
 
@@ -30,9 +31,11 @@ fn main() -> Result<()> {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn spawn_in_engine(engine: Arc<Engine>, args: &Arguments) -> Result<()> {
-    engine
-        .spawn(TorrentSource::FilePath(args.torrent_file.clone().unwrap()))
-        .await;
+async fn spawn_in_engine(engine: Arc<Engine>, input: TorrentInput) -> Result<()> {
+    let source = match input {
+        TorrentInput::FilePath(path) => TorrentSource::FilePath(path),
+        TorrentInput::MagnetUri(uri) => TorrentSource::MagnetURI(uri),
+    };
+    engine.spawn(source).await?;
     Ok(())
 }

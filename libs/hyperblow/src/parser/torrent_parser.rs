@@ -2,7 +2,7 @@
 
 use serde_derive::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
-use std::{error, fmt, fs, io};
+use std::{fs, io};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -11,10 +11,10 @@ pub enum FileMetaError {
     InvalidFile { path: String, error: io::Error },
 
     #[error("InvalidEncoding - encoding : {encoding:?}, error : {error:?}")]
-    InvalidEncoding {
-        encoding: String,
-        error: serde_bencode::Error,
-    },
+    InvalidEncoding { encoding: String, error: serde_bencode::Error },
+
+    #[error("InvalidPiecesLength - pieces length must be a multiple of 20 bytes, got {len}")]
+    InvalidPiecesLength { len: usize },
 }
 
 /// DataStructure that maps all the data inside of bencode encoded ".torrent" file
@@ -92,7 +92,7 @@ impl FileMeta {
     ///
     /// ```
     ///
-    pub fn fromTorrentFile(file_path: &String) -> Result<FileMeta, FileMetaError> {
+    pub fn fromTorrentFile(file_path: &str) -> Result<FileMeta, FileMetaError> {
         // Creates a buffer to store the bytes of the file
         match fs::read(file_path) {
             Ok(bytes) => match Self::fromRawTorrentFile(bytes) {
@@ -100,7 +100,7 @@ impl FileMeta {
                 Err(err) => Err(err),
             },
             Err(err) => Err(FileMetaError::InvalidFile {
-                path: file_path.clone(),
+                path: file_path.to_string(),
                 error: err,
             }),
         }
@@ -172,15 +172,32 @@ impl FileMeta {
 
     // Gets all the hash of the pieces stored in the bencode encoded ".torrent" file's
     // "pieces" field
-    pub fn getPiecesHash(&self) -> Vec<[u8; 20]> {
+    pub fn total_length(&self) -> i64 {
+        self.info
+            .length
+            .or_else(|| self.info.files.as_ref().map(|files| files.iter().map(|file| file.length).sum()))
+            .unwrap_or(0)
+    }
+
+    pub fn piece_count(&self) -> usize {
+        self.info.pieces.len() / 20
+    }
+
+    pub fn getPiecesHash(&self) -> Result<Vec<[u8; 20]>, FileMetaError> {
+        if !self.info.pieces.len().is_multiple_of(20) {
+            return Err(FileMetaError::InvalidPiecesLength {
+                len: self.info.pieces.len(),
+            });
+        }
+
         let mut pieces_hash: Vec<[u8; 20]> = Vec::new();
 
         // Extract the hash of each piece
         // Jump 20 steps ahead to extract the entire hash of each piece
-        for (i, _) in self.info.pieces.iter().enumerate().step_by(20) {
-            let hash: [u8; 20] = self.info.pieces[i..i + 20].try_into().unwrap();
+        for piece in self.info.pieces.chunks_exact(20) {
+            let hash: [u8; 20] = piece.try_into().expect("chunks_exact(20) always yields 20-byte chunks");
             pieces_hash.push(hash);
         }
-        pieces_hash
+        Ok(pieces_hash)
     }
 }

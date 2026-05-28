@@ -1,4 +1,4 @@
-use bytes::{BufMut, BytesMut};
+use bytes::BytesMut;
 
 /// Holds all the raw data of a piece and the piece's metadata
 pub struct Piece {

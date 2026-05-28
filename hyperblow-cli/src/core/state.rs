@@ -1,11 +1,9 @@
-#![feature(concat_idents)]
-
 use crate::core::{peer::Peer, tracker::Tracker, File};
 use crossbeam::atomic::AtomicCell;
 use hyperblow::parser::torrent_parser::FileMeta;
 use paste::paste;
 
-use std::{cell::Cell, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 /// Used to generate getter and setter for Cell<T> types
