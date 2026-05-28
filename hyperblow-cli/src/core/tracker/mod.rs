@@ -808,9 +808,22 @@ pub enum TrackerRequest {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_http_announce_url_with_values, parse_compact_ipv4_peers, parse_compact_ipv6_peers, parse_http_announce_response};
+    use super::{
+        build_http_announce_url_with_values, parse_compact_ipv4_peers, parse_compact_ipv6_peers, parse_http_announce_response, Tracker,
+    };
+    use crate::core::state::{DownState, State};
     use bytes::{BufMut, BytesMut};
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    use crossbeam::atomic::AtomicCell;
+    use hyperblow::parser::torrent_parser::{FileMeta, Info};
+    use std::{
+        net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+        sync::Arc,
+    };
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        sync::{mpsc, Mutex, RwLock},
+    };
     use url::Url;
 
     #[test]
@@ -894,5 +907,94 @@ mod tests {
         let response = b"d14:failure reason12:tracker downe";
 
         assert!(parse_http_announce_response(response).is_err());
+    }
+
+    #[tokio::test]
+    async fn http_announce_request_reaches_tracker_and_sends_peers_to_channel() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("HTTP tracker should bind");
+        let tracker_address = format!("http://{}/announce", listener.local_addr().expect("tracker should have address"));
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("client should connect");
+            let mut request = Vec::new();
+            let mut buf = [0_u8; 1024];
+            loop {
+                let read = socket.read(&mut buf).await.expect("request should be readable");
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            let mut peers = BytesMut::new();
+            peers.put_slice(&[127, 0, 0, 1]);
+            peers.put_u16(51413);
+            let mut body = BytesMut::new();
+            body.put_slice(b"d8:intervali30e5:peers");
+            body.put_slice(peers.len().to_string().as_bytes());
+            body.put_u8(b':');
+            body.put_slice(&peers);
+            body.put_u8(b'e');
+
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+            socket.write_all(response.as_bytes()).await.expect("response header should write");
+            socket.write_all(&body).await.expect("response body should write");
+
+            String::from_utf8(request).expect("request should be UTF-8")
+        });
+
+        let (peer_sender, mut peer_receiver) = mpsc::unbounded_channel();
+        let tracker = Tracker::new(&tracker_address, test_state(vec![3; 20]), Arc::new(peer_sender)).expect("tracker should construct");
+
+        let response = tracker
+            .send_http_announce_request(&reqwest::Client::new())
+            .await
+            .expect("HTTP announce should succeed");
+
+        assert_eq!(
+            response.peersAddresses,
+            vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 51413)]
+        );
+        let peer = peer_receiver.recv().await.expect("peer should be sent to download channel");
+        assert_eq!(peer.socket_adr, SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 51413));
+
+        let request = server.await.expect("server should finish");
+        assert!(request.starts_with("GET /announce?"));
+        assert!(request.contains("info_hash=%03%03%03%03"));
+        assert!(request.contains("compact=1"));
+    }
+
+    fn test_state(info_hash: Vec<u8>) -> Arc<State> {
+        Arc::new(State {
+            meta_info: FileMeta {
+                announce: "http://tracker.example.test/announce".to_string(),
+                announce_list: None,
+                info: Info {
+                    name: Some("tracker-test".to_string()),
+                    length: Some(1024),
+                    files: None,
+                    piece_length: Some(16 * 1024),
+                    pieces: Vec::new(),
+                },
+                creation_data: None,
+                comment: None,
+                encoding: None,
+                created_by: None,
+                acceptable_source: None,
+            },
+            d_state: DownState::Unknown,
+            file_tree: None,
+            trackers: Arc::new(RwLock::new(Vec::new())),
+            udp_ports: Arc::new(Mutex::new(vec![6881])),
+            tcp_ports: Arc::new(Mutex::new(Vec::new())),
+            info_hash,
+            pieces_hash: Vec::new(),
+            peers: Arc::new(Mutex::new(Vec::new())),
+            uptime: AtomicCell::new(0),
+            bytes_complete: AtomicCell::new(0),
+            pieces_downloaded: AtomicCell::new(0),
+        })
     }
 }
