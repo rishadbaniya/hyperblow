@@ -206,6 +206,27 @@ impl File {
         };
         names
     }
+
+    pub fn try_tabs_traverse_names(&self, depth: usize) -> Vec<String> {
+        let mut names = vec![];
+        let spaces = std::iter::repeat_n(" ", depth).collect::<String>();
+        match self.file_type {
+            FileType::Regular => {
+                names.push(format!("{}{}", spaces, self.name));
+            }
+            FileType::Directory => {
+                names.push(format!("{}{}", spaces, self.name));
+                if let Some(ref inner_files) = self.inner_files {
+                    for file in inner_files {
+                        if let Ok(file) = file.try_lock() {
+                            names.append(&mut file.try_tabs_traverse_names(depth + 1));
+                        }
+                    }
+                }
+            }
+        };
+        names
+    }
 }
 
 // TODO: Make use of AsRef

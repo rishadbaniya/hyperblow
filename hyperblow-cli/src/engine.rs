@@ -133,6 +133,10 @@ impl Engine {
         self.torrents.lock().await.push(handle.clone());
         Ok(handle)
     }
+
+    pub fn torrent_snapshot(&self) -> Option<Vec<Arc<TorrentHandle>>> {
+        self.torrents.try_lock().ok().map(|handles| handles.clone())
+    }
 }
 
 #[derive(Debug)]
@@ -273,7 +277,9 @@ impl TorrentHandle {
     pub fn tracker_snapshots(&self) -> Vec<TrackerSnapshot> {
         match self.inner {
             Torrent::FileTorrent(ref file_trnt) => {
-                let trackers = file_trnt.state.trackers.blocking_read();
+                let Ok(trackers) = file_trnt.state.trackers.try_read() else {
+                    return Vec::new();
+                };
                 trackers
                     .iter()
                     .flat_map(|tier| tier.iter())
@@ -303,27 +309,26 @@ impl TorrentHandle {
 
     pub fn connected_peers(&self) -> usize {
         match self.inner {
-            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.peers.blocking_lock().len(),
+            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.peers.try_lock().map(|peers| peers.len()).unwrap_or_default(),
             Torrent::MagnetUriTorrent(_) => 0,
         }
     }
 
     pub fn peer_addresses(&self) -> Vec<String> {
         match self.inner {
-            Torrent::FileTorrent(ref file_trnt) => file_trnt
-                .state
-                .peers
-                .blocking_lock()
-                .iter()
-                .map(|peer| peer.socket_adr.to_string())
-                .collect(),
+            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.peers.try_lock().map_or_else(
+                |_| Vec::new(),
+                |peers| peers.iter().map(|peer| peer.socket_adr.to_string()).collect(),
+            ),
             Torrent::MagnetUriTorrent(_) => Vec::new(),
         }
     }
 
     pub fn file_tree_names(&self) -> Vec<String> {
         match self.getFileTree() {
-            Some(file_tree) => file_tree.blocking_lock().tabs_traverse_names_blocking(0),
+            Some(file_tree) => file_tree
+                .try_lock()
+                .map_or_else(|_| Vec::new(), |file_tree| file_tree.try_tabs_traverse_names(0)),
             None => Vec::new(),
         }
     }

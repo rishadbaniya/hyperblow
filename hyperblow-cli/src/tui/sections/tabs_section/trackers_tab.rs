@@ -65,7 +65,18 @@ impl TrackersTab {
         let mut row_s = Vec::default();
 
         let current_torrent_index = state.torrent_index();
-        let torrent_handles = state.engine.torrents.blocking_lock();
+        let Some(torrent_handles) = state.engine.torrent_snapshot() else {
+            let table = Table::new(
+                [Row::new(["", "Torrent state is updating...", ""])],
+                [
+                    Constraint::Percentage(SN_PERC),
+                    Constraint::Percentage(URL_PERC),
+                    Constraint::Percentage(STATUS_PERC),
+                ],
+            );
+            frame.render_widget(table, area);
+            return;
+        };
         let Some(current_torrent_handle) = torrent_handles.get(current_torrent_index) else {
             let table = Table::new(
                 [Row::new(["", "No torrent selected", ""])],

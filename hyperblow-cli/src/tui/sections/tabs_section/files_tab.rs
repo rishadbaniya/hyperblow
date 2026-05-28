@@ -26,7 +26,10 @@ impl FilesTab {
         let table = Table::new([Row::new(["Path"])], [Constraint::Percentage(100)]);
         frame.render_widget(table, area[0]);
 
-        let torrent_handles = state.engine.torrents.blocking_lock();
+        let Some(torrent_handles) = state.engine.torrent_snapshot() else {
+            frame.render_widget(Paragraph::new("Torrent state is updating..."), area[1]);
+            return;
+        };
         let Some(handle) = torrent_handles.get(state.torrent_index()) else {
             frame.render_widget(Paragraph::new("No torrent selected"), area[1]);
             return;

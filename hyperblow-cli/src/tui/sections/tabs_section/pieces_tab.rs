@@ -16,7 +16,10 @@ impl PiecesTab {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded);
 
-        let torrent_handles = state.engine.torrents.blocking_lock();
+        let Some(torrent_handles) = state.engine.torrent_snapshot() else {
+            frame.render_widget(Paragraph::new("Torrent state is updating...").block(block), area);
+            return;
+        };
         let Some(handle) = torrent_handles.get(state.torrent_index()) else {
             frame.render_widget(Paragraph::new("No torrent selected").block(block), area);
             return;

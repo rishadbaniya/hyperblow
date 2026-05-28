@@ -137,7 +137,10 @@ impl TorrentsSection {
         };
 
         //println!("{}", column_areas.len());
-        let torrent_handles = state.engine.torrents.blocking_lock();
+        let Some(torrent_handles) = state.engine.torrent_snapshot() else {
+            frame.render_widget(Paragraph::new("Torrent state is updating..."), area);
+            return;
+        };
         if torrent_handles.is_empty() {
             state.set_max_torrent_index(0);
             frame.render_widget(

@@ -209,7 +209,9 @@ fn select_torrent_at(torrent_rows: Rect, position: Position, state: &TUIState) -
         return false;
     };
 
-    let torrent_count = state.engine.torrents.blocking_lock().len();
+    let Some(torrent_count) = state.engine.torrent_snapshot().map(|torrents| torrents.len()) else {
+        return false;
+    };
     if torrent_index >= torrent_count {
         return false;
     }
