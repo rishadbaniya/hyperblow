@@ -42,4 +42,22 @@ A basic possible Engine Architecture :
 ![image](https://user-images.githubusercontent.com/54678051/216830912-81e0a44e-7fce-4700-97af-9db4b89b61df.png)\
 ![image](https://user-images.githubusercontent.com/54678051/216831243-e854c244-d39e-4662-be2d-91154fa0926f.png)
 
+## Current Core Boundaries
 
+The CLI crate still owns the runtime torrent engine, TUI, tracker tasks, and peer tasks. The parser library owns `.torrent` and magnet metadata parsing. The current core code is split by protocol responsibility:
+
+- `core::tracker` resolves UDP/HTTP trackers, announces, parses tracker peer responses, and publishes peers through the torrent peer channel.
+- `core::peer` owns TCP peer framing, handshake validation, interested-message startup, and peer inventory updates from `have` and `bitfield`.
+- `core::piece_picker` owns rarest-first piece selection state. It is intentionally pure and tested separately so peer I/O can call it without embedding scheduling policy in network code.
+- `core::protocol` contains shared BitTorrent constants such as the protocol identifier and peer id.
+- `engine` exposes snapshot methods for the TUI so rendering can avoid blocking the async runtime.
+
+## Runtime Model
+
+The main thread runs the TUI. Torrent work runs on the engine Tokio runtime. Tracker announces and peer sessions are spawned as async tasks and use timers/backoff instead of sleeping inside blocking loops. The TUI uses snapshot reads and `try_lock`-based access where possible; if a snapshot is temporarily unavailable, it renders an updating state and tries again on the next frame.
+
+## Verification
+
+Current tests cover parser integration, CLI argument validation, TUI rendering and mouse mapping, UDP tracker response parsing, HTTP tracker response parsing, local HTTP announce integration, peer message framing, peer handshake validation against a local TCP listener, and rarest-first piece selection.
+
+The remaining high-risk protocol work is piece request scheduling integration, block validation against SHA-1 piece hashes, file allocation/writes, resume data, choking/unchoking policy, and optional DHT/scrape support.
