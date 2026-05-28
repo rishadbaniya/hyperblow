@@ -200,8 +200,10 @@ impl CommandController {
     fn handle_key(key: event::KeyEvent, state: &TUIState, command_result_sender: Sender<CommandExecutionResult>) -> bool {
         match key.code {
             event::KeyCode::Esc => {
-                state.exit_command_mode();
-                debug!("exited command mode");
+                Self::cancel(state);
+            }
+            event::KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                Self::cancel(state);
             }
             event::KeyCode::Enter => {
                 return Self::submit(state, command_result_sender);
@@ -229,6 +231,14 @@ impl CommandController {
             _ => {}
         }
         false
+    }
+
+    fn cancel(state: &TUIState) {
+        state.clear_command_input();
+        state.set_command_suggestions(Vec::new());
+        state.clear_command_feedback();
+        state.exit_command_mode();
+        debug!("cancelled command mode");
     }
 
     fn submit(state: &TUIState, command_result_sender: Sender<CommandExecutionResult>) -> bool {
@@ -676,6 +686,22 @@ mod tests {
         let should_quit = CommandController::handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()), &state, sender);
 
         assert!(should_quit);
+    }
+
+    #[test]
+    fn ctrl_c_cancels_command_mode_without_quitting() {
+        let state = TUIState::new(Engine::new());
+        let (sender, _receiver) = mpsc::channel();
+        state.enter_command_mode();
+        state.set_command_input("magnet magnet:?xt=urn:btih:".to_string());
+        CommandController::refresh_suggestions(&state);
+
+        let should_quit = CommandController::handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), &state, sender);
+
+        assert!(!should_quit);
+        assert!(!state.is_command_mode());
+        assert!(state.command_input().is_empty());
+        assert!(state.command_suggestions().is_empty());
     }
 
     #[test]
