@@ -931,6 +931,7 @@ dependencies = [
  "serde",
  "serde_bencode",
  "serde_bytes",
+ "sha-1",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",

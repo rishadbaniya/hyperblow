@@ -1,4 +1,5 @@
 pub mod peer;
+pub mod piece_assembler;
 pub mod piece_picker;
 pub mod protocol;
 pub mod state;
