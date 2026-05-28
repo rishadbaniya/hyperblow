@@ -240,6 +240,13 @@ impl TorrentHandle {
         }
     }
 
+    fn current_state(&self) -> Arc<State> {
+        match self.inner {
+            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.clone(),
+            Torrent::MagnetUriTorrent(ref magnet) => magnet.state(),
+        }
+    }
+
     /// Gets the name of the torrent blockingly
     pub fn pause_resume(&self) -> String {
         match self.inner {
@@ -270,10 +277,7 @@ impl TorrentHandle {
 
     /// Gives the total "bytes" downloaded
     pub fn bytes_complete(&self) -> usize {
-        match self.inner {
-            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.bytes_complete(),
-            Torrent::MagnetUriTorrent(_) => 0,
-        }
+        self.current_state().bytes_complete()
     }
 
     /// Gives total size of entire torrent in "bytes"
@@ -301,32 +305,17 @@ impl TorrentHandle {
 
     /// Gives total no of pieces
     pub fn pieces_total(&self) -> usize {
-        match self.inner {
-            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.meta_info.piece_count(),
-            Torrent::MagnetUriTorrent(_) => 0,
-        }
+        self.current_state().meta_info.piece_count()
     }
 
     /// Gives the total pieces downloaded
     pub fn pieces_downloaded(&self) -> usize {
-        match self.inner {
-            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.pieces_downloaded(),
-            Torrent::MagnetUriTorrent(_) => 0,
-        }
+        self.current_state().pieces_downloaded()
     }
 
     /// Gives the size of torrent piece
     pub fn piece_size(&self) -> usize {
-        match self.inner {
-            Torrent::FileTorrent(ref file_trnt) => {
-                if let Some(size) = file_trnt.state.meta_info.info.piece_length {
-                    size as usize
-                } else {
-                    0
-                }
-            }
-            Torrent::MagnetUriTorrent(_) => 0,
-        }
+        self.current_state().piece_length().unwrap_or_default()
     }
 
     /// Gives the total download speed in "bytes/second".
@@ -351,10 +340,7 @@ impl TorrentHandle {
     }
 
     pub fn getFileTree(&self) -> Option<Arc<Mutex<crate::core::File>>> {
-        match self.inner {
-            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.file_tree.clone(),
-            Torrent::MagnetUriTorrent(_) => None,
-        }
+        self.current_state().file_tree.clone()
     }
 
     pub fn tracker_snapshots(&self) -> Vec<TrackerSnapshot> {
@@ -472,7 +458,14 @@ impl MagnetTitle {
 
 #[cfg(test)]
 mod tests {
-    use super::{Engine, TorrentSource};
+    use super::{Engine, Torrent, TorrentHandle, TorrentSource};
+    use crate::core::{magnet::MagnetTorrent, TorrentFile};
+    use hyperblow::parser::{
+        magnet_uri_parser::MagnetURIMeta,
+        torrent_parser::{FileMeta, Info},
+    };
+    use sha1::{Digest, Sha1};
+    use std::{path::PathBuf, sync::Arc};
 
     #[tokio::test]
     async fn spawns_magnet_handle_without_network_setup() {
@@ -504,5 +497,72 @@ mod tests {
             .expect("magnet should spawn");
 
         assert_eq!(handle.name(), "Magnet 08ada5a7a618");
+    }
+
+    #[tokio::test]
+    async fn magnet_handle_reports_resolved_download_progress() {
+        let download_directory = TestTorrent::download_directory();
+        let magnet = MagnetTorrent::new(
+            MagnetURIMeta::fromMagnetURI("magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Progress")
+                .expect("magnet should parse"),
+            download_directory.clone(),
+        )
+        .await
+        .expect("magnet should initialize");
+        let resolved = Arc::new(
+            TorrentFile::from_metadata_with_info_hash(
+                "magnet".to_string(),
+                TestTorrent::metadata(b"resolved data"),
+                vec![1; 20],
+                false,
+                download_directory.clone(),
+            )
+            .await
+            .expect("resolved torrent should initialize"),
+        );
+        resolved.state.set_bytes_complete(8);
+        resolved.state.set_pieces_downloaded(1);
+        magnet.set_resolved_for_test(resolved).await;
+        let handle = TorrentHandle {
+            inner: Torrent::MagnetUriTorrent(Arc::new(magnet)),
+            download_directory,
+        };
+
+        assert_eq!(handle.bytes_complete(), 8);
+        assert_eq!(handle.pieces_total(), 1);
+        assert_eq!(handle.pieces_downloaded(), 1);
+        assert_eq!(handle.piece_size(), "resolved data".len());
+    }
+
+    struct TestTorrent;
+
+    impl TestTorrent {
+        fn download_directory() -> PathBuf {
+            std::env::temp_dir().join(format!(
+                "hyperblow-engine-test-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ))
+        }
+
+        fn metadata(piece: &[u8]) -> FileMeta {
+            let piece_hash: [u8; 20] = Sha1::digest(piece).into();
+            FileMeta {
+                announce: String::new(),
+                announce_list: None,
+                info: Info {
+                    name: Some("resolved.bin".to_string()),
+                    length: Some(piece.len() as i64),
+                    files: None,
+                    piece_length: Some(piece.len() as i64),
+                    pieces: piece_hash.to_vec(),
+                },
+                creation_data: None,
+                comment: None,
+                encoding: None,
+                created_by: None,
+                acceptable_source: None,
+            }
+        }
     }
 }

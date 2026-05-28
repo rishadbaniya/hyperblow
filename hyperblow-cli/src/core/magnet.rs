@@ -152,6 +152,11 @@ impl MagnetTorrent {
     fn display_name(&self) -> String {
         self.meta.dn.clone().unwrap_or_else(|| "Magnet torrent".to_string())
     }
+
+    #[cfg(test)]
+    pub(crate) async fn set_resolved_for_test(&self, torrent: Arc<TorrentFile>) {
+        *self.resolved.write().await = Some(torrent);
+    }
 }
 
 struct MagnetFileMeta;
