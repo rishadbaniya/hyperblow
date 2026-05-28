@@ -1,6 +1,7 @@
 #![allow(non_snake_case, dead_code)]
 
 use magnet_url::Magnet;
+use percent_encoding::percent_decode_str;
 use std::{error, fmt};
 
 #[derive(Debug)]
@@ -73,7 +74,7 @@ impl MagnetURIMeta {
 
                 Ok(MagnetURIMeta {
                     xt,
-                    dn: d.display_name().map(ToOwned::to_owned),
+                    dn: d.display_name().map(MagnetValueDecoder::decode),
                     xl: d.length(),
                     tr: Some(d.trackers().to_vec()),
                     ws: d.web_seed().map(ToOwned::to_owned),
@@ -90,5 +91,13 @@ impl MagnetURIMeta {
     /// Checks if the Magnet URI is valid or not
     pub fn checkIfMagnetURIIsValid(uri: &str) -> bool {
         Magnet::new(uri).is_ok()
+    }
+}
+
+struct MagnetValueDecoder;
+
+impl MagnetValueDecoder {
+    fn decode(value: &str) -> String {
+        percent_decode_str(&value.replace('+', " ")).decode_utf8_lossy().into_owned()
     }
 }

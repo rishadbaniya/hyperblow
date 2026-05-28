@@ -33,6 +33,7 @@ use tokio::{
         Mutex,
     },
 };
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug)]
 enum Torrent {
@@ -43,6 +44,15 @@ enum Torrent {
 pub enum TorrentSource {
     MagnetURI(String),
     FilePath(String),
+}
+
+impl TorrentSource {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::MagnetURI(_) => "magnet",
+            Self::FilePath(_) => "file",
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -102,6 +112,7 @@ impl Engine {
     fn with_download_directory(download_directory: DownloadDirectory) -> Arc<Self> {
         let torrents = Arc::default();
         let engine_download_directory = download_directory.clone();
+        debug!(download_directory = %download_directory.path().display(), "creating engine");
 
         // Receivies the torrent source from ui_thread and sends it into the engine thread
         let (tsrc_sd, mut tsrc_rx) = unbounded_channel::<TorrentSource>();
@@ -114,16 +125,25 @@ impl Engine {
 
             tokio_rt.block_on(async move {
                 while let Some(src) = tsrc_rx.recv().await {
+                    let source_kind = src.kind();
+                    debug!(source = source_kind, "engine received torrent source");
                     // TODO : Check if there was any error in creating the torrent handle in this
                     // engine_thread and then only run the torrent on the engine thread and send its pointer to the ui_thread
                     let handle = TorrentHandle::new(src, engine_download_directory.path().to_path_buf()).await;
-                    if let Ok(ref handle) = handle {
-                        let tokio_handle = handle.clone();
-                        tokio::task::spawn(async move { tokio_handle.run().await });
+                    match &handle {
+                        Ok(handle) => {
+                            info!(source = source_kind, torrent = %handle.name(), "torrent handle created");
+                            let tokio_handle = handle.clone();
+                            tokio::task::spawn(async move { tokio_handle.run().await });
+                        }
+                        Err(error) => {
+                            error!(source = source_kind, error = %error, "failed to create torrent handle");
+                        }
                     }
 
                     // Send the handle back to the main thread
                     if thdl_sd.send(handle).is_err() {
+                        warn!(source = source_kind, "engine response receiver closed");
                         break;
                     }
                 }
@@ -150,10 +170,13 @@ impl Engine {
     ///
     ///  TODO : Return some verbose error i.e Result<T,G> rather than Option None
     pub async fn spawn(&self, src: TorrentSource) -> Result<Arc<TorrentHandle>, EngineError> {
+        let source_kind = src.kind();
+        debug!(source = source_kind, "queueing torrent spawn");
         // Sends the torrent source into the engine_thread that holds the tokio runtime
         self.trnt_thread_sender.send(src).map_err(|_| EngineError::CommandChannelClosed)?;
         let mut torrenthandle_receiver = self.trnt_handle_receiver.lock().await;
         let handle = torrenthandle_receiver.recv().await.ok_or(EngineError::ResponseChannelClosed)??;
+        info!(source = source_kind, torrent = %handle.name(), "torrent spawned");
         self.torrents.lock().await.push(handle.clone());
         Ok(handle)
     }
@@ -176,8 +199,10 @@ pub struct TorrentHandle {
 impl TorrentHandle {
     /// Consumes the torrent source, may it be a Path or a MagnetURI,
     pub async fn new(src: TorrentSource, download_directory: PathBuf) -> Result<Arc<TorrentHandle>, EngineError> {
+        debug!(source = src.kind(), download_directory = %download_directory.display(), "building torrent handle");
         match src {
             TorrentSource::FilePath(ref path) => {
+                debug!(source = "file", path = %path, "loading torrent file");
                 let torrent = TorrentFile::new(path).await?;
                 Ok(Arc::new(Self {
                     inner: Torrent::FileTorrent(Arc::new(torrent)),
@@ -185,6 +210,7 @@ impl TorrentHandle {
                 }))
             }
             TorrentSource::MagnetURI(ref uri) => {
+                debug!(source = "magnet", "parsing magnet URI");
                 let magnet = MagnetURIMeta::fromMagnetURI(uri).map_err(|_| EngineError::InvalidMagnetUri)?;
                 Ok(Arc::new(Self {
                     inner: Torrent::MagnetUriTorrent(Arc::new(magnet)),
@@ -213,7 +239,7 @@ impl TorrentHandle {
                 .name
                 .clone()
                 .unwrap_or_else(|| "Unnamed torrent".to_string()),
-            Torrent::MagnetUriTorrent(ref magnet) => magnet.dn.clone().unwrap_or_else(|| "Magnet torrent".to_string()),
+            Torrent::MagnetUriTorrent(ref magnet) => MagnetTitle::from_meta(magnet).display(),
         }
     }
 
@@ -227,11 +253,7 @@ impl TorrentHandle {
                     String::from("Name Not Found!")
                 }
             }
-            Torrent::MagnetUriTorrent(ref magnet) => magnet
-                .dn
-                .clone()
-                .or_else(|| magnet.xt.clone())
-                .unwrap_or_else(|| "Magnet torrent".to_string()),
+            Torrent::MagnetUriTorrent(ref magnet) => MagnetTitle::from_meta(magnet).display(),
         }
     }
 
@@ -369,6 +391,42 @@ impl TorrentHandle {
     }
 }
 
+struct MagnetTitle {
+    display: String,
+}
+
+impl MagnetTitle {
+    fn from_meta(meta: &MagnetURIMeta) -> Self {
+        if let Some(display_name) = meta.dn.as_deref().map(str::trim).filter(|name| !name.is_empty()) {
+            return Self {
+                display: display_name.to_string(),
+            };
+        }
+
+        if let Some(hash) = meta.xt.as_deref().and_then(Self::hash_from_exact_topic) {
+            return Self {
+                display: format!("Magnet {}", Self::short_hash(hash)),
+            };
+        }
+
+        Self {
+            display: "Magnet torrent".to_string(),
+        }
+    }
+
+    fn display(self) -> String {
+        self.display
+    }
+
+    fn hash_from_exact_topic(exact_topic: &str) -> Option<&str> {
+        exact_topic.rsplit_once(':').map(|(_, hash)| hash).filter(|hash| !hash.is_empty())
+    }
+
+    fn short_hash(hash: &str) -> String {
+        hash.chars().take(12).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Engine, TorrentSource};
@@ -388,5 +446,18 @@ mod tests {
         assert!(engine.download_directory().is_dir());
         assert_eq!(handle.tracker_snapshots().len(), 1);
         assert_eq!(engine.torrents.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn magnet_title_is_readable_without_display_name() {
+        let engine = Engine::new();
+        let handle = engine
+            .spawn(TorrentSource::MagnetURI(
+                "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10".to_string(),
+            ))
+            .await
+            .expect("magnet should spawn");
+
+        assert_eq!(handle.name(), "Magnet 08ada5a7a618");
     }
 }

@@ -8,16 +8,28 @@ use std::{
 };
 use thiserror::Error;
 use tokio::runtime::Builder;
+use tracing::{debug, error, info};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CommandAction {
     File(PathBuf),
     Magnet(String),
+    Quit,
+}
+
+impl CommandAction {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::File(_) => "file",
+            Self::Magnet(_) => "magnet",
+            Self::Quit => "quit",
+        }
+    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub(crate) enum CommandInputError {
-    #[error("type :file <path> or :magnet <uri>")]
+    #[error("type :file <path>, :magnet <uri>, or :q")]
     Empty,
 
     #[error("unknown command :{0}")]
@@ -58,6 +70,7 @@ impl CommandParser {
         match command.to_ascii_lowercase().as_str() {
             "file" => Self::parse_file(argument),
             "magnet" => Self::parse_magnet(argument),
+            "q" | "quit" => Ok(CommandAction::Quit),
             unknown => Err(CommandInputError::UnknownCommand(unknown.to_string())),
         }
     }
@@ -104,11 +117,11 @@ impl CommandSuggester {
     pub(crate) fn suggestions(input: &str, limit: usize) -> Vec<String> {
         let input = input.trim_start();
         if input.is_empty() {
-            return vec!["file ".to_string(), "magnet ".to_string()];
+            return vec!["file ".to_string(), "magnet ".to_string(), "q".to_string()];
         }
 
         if !input.contains(char::is_whitespace) {
-            return ["file ", "magnet "]
+            return ["file ", "magnet ", "q"]
                 .into_iter()
                 .filter(|command| command.trim_end().starts_with(input))
                 .map(ToOwned::to_owned)
@@ -146,14 +159,23 @@ impl CommandExecutor {
         match action {
             CommandAction::File(path) => format!("Opening {}...", path.display()),
             CommandAction::Magnet(_) => "Opening magnet URI...".to_string(),
+            CommandAction::Quit => "Quitting...".to_string(),
         }
     }
 
     pub(crate) fn spawn(action: CommandAction, input: String, engine: Arc<Engine>, command_result_sender: Sender<CommandExecutionResult>) {
         thread::spawn(move || {
+            let action_kind = action.kind();
+            debug!(source = action_kind, "command executor started");
             let source = match action {
                 CommandAction::File(path) => TorrentSource::FilePath(path.to_string_lossy().into_owned()),
                 CommandAction::Magnet(uri) => TorrentSource::MagnetURI(uri),
+                CommandAction::Quit => {
+                    let _ = command_result_sender.send(CommandExecutionResult::Loaded {
+                        message: "Quit command handled".to_string(),
+                    });
+                    return;
+                }
             };
 
             let result = Builder::new_current_thread()
@@ -163,10 +185,17 @@ impl CommandExecutor {
                 .and_then(|runtime| runtime.block_on(engine.spawn(source)).map_err(|error| error.to_string()));
 
             let execution_result = match result {
-                Ok(handle) => CommandExecutionResult::Loaded {
-                    message: format!("Loaded {}", handle.name()),
-                },
-                Err(message) => CommandExecutionResult::Failed { input, message },
+                Ok(handle) => {
+                    let torrent_name = handle.name();
+                    info!(source = action_kind, torrent = %torrent_name, "command loaded torrent");
+                    CommandExecutionResult::Loaded {
+                        message: format!("Loaded {torrent_name}"),
+                    }
+                }
+                Err(message) => {
+                    error!(source = action_kind, error = %message, "command failed to load torrent");
+                    CommandExecutionResult::Failed { input, message }
+                }
             };
             let _ = command_result_sender.send(execution_result);
         });
@@ -392,6 +421,12 @@ mod tests {
             CommandParser::parse("wat"),
             Err(CommandInputError::UnknownCommand("wat".to_string()))
         );
+    }
+
+    #[test]
+    fn parses_quit_command() {
+        assert_eq!(CommandParser::parse("q"), Ok(CommandAction::Quit));
+        assert_eq!(CommandParser::parse("quit"), Ok(CommandAction::Quit));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 use super::{
     super::engine::Engine,
-    command::{CommandExecutionResult, CommandExecutor, CommandParser, CommandSuggester},
+    command::{CommandAction, CommandExecutionResult, CommandExecutor, CommandParser, CommandSuggester},
     mouse::MouseEv,
     sections::{
         tabs_section::{
@@ -31,6 +31,7 @@ use std::{
     },
     time::Duration,
 };
+use tracing::{debug, info};
 
 const TAB_TITLES: [&str; 6] = ["Details", "Bandwidth", "Files", "Trackers", "Peers", "Pieces"];
 const TAB_PADDING_WIDTH: u16 = 1;
@@ -92,9 +93,11 @@ pub struct TuiApplication;
 
 impl TuiApplication {
     pub fn run_ui(engine: Arc<Engine>) -> Result<(), Box<dyn std::error::Error>> {
+        info!("entering TUI");
         terminal::enable_raw_mode()?;
         let mut stdout = stdout();
         execute!(stdout, terminal::EnterAlternateScreen, event::EnableMouseCapture)?;
+        debug!("TUI terminal modes enabled");
 
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
@@ -105,6 +108,7 @@ impl TuiApplication {
             terminal::disable_raw_mode()?;
             execute!(terminal.backend_mut(), terminal::LeaveAlternateScreen, event::DisableMouseCapture)?;
             terminal.show_cursor()?;
+            debug!("TUI terminal modes restored");
             Ok(())
         })();
 
@@ -130,12 +134,10 @@ impl TuiApplication {
                 let terminal_area = RectMath::from_size(terminal.size()?);
                 match event::read()? {
                     event::Event::Key(key) => {
-                        if key.code == event::KeyCode::Char('c') && key.modifiers.contains(event::KeyModifiers::CONTROL) {
-                            return Ok(());
-                        }
-
                         if state.is_command_mode() {
-                            CommandController::handle_key(key, state.as_ref(), command_result_sender.clone());
+                            if CommandController::handle_key(key, state.as_ref(), command_result_sender.clone()) {
+                                return Ok(());
+                            }
                             continue;
                         }
 
@@ -144,8 +146,8 @@ impl TuiApplication {
                                 state.clear_command_input();
                                 state.enter_command_mode();
                                 CommandController::refresh_suggestions(state.as_ref());
+                                debug!("entered command mode");
                             }
-                            event::KeyCode::Char('q') => return Ok(()),
                             event::KeyCode::Tab => {
                                 state.increment_tab_index();
                             }
@@ -180,11 +182,13 @@ impl CommandController {
             state.decrement_pending_commands();
             match result {
                 CommandExecutionResult::Loaded { message } => {
+                    info!(message = %message, "command result loaded");
                     state.clear_command_input();
                     state.exit_command_mode();
                     state.set_command_feedback(message, false);
                 }
                 CommandExecutionResult::Failed { input, message } => {
+                    debug!(message = %message, "command result failed");
                     state.set_command_input(input);
                     state.enter_command_mode();
                     state.set_command_feedback(message, true);
@@ -193,13 +197,14 @@ impl CommandController {
         }
     }
 
-    fn handle_key(key: event::KeyEvent, state: &TUIState, command_result_sender: Sender<CommandExecutionResult>) {
+    fn handle_key(key: event::KeyEvent, state: &TUIState, command_result_sender: Sender<CommandExecutionResult>) -> bool {
         match key.code {
             event::KeyCode::Esc => {
                 state.exit_command_mode();
+                debug!("exited command mode");
             }
             event::KeyCode::Enter => {
-                Self::submit(state, command_result_sender);
+                return Self::submit(state, command_result_sender);
             }
             event::KeyCode::Backspace => {
                 state.pop_command_char();
@@ -223,25 +228,35 @@ impl CommandController {
             }
             _ => {}
         }
+        false
     }
 
-    fn submit(state: &TUIState, command_result_sender: Sender<CommandExecutionResult>) {
+    fn submit(state: &TUIState, command_result_sender: Sender<CommandExecutionResult>) -> bool {
         if state.has_pending_commands() {
             state.set_command_feedback("A torrent open command is already running".to_string(), true);
-            return;
+            return false;
         }
 
         let input = state.command_input();
+        debug!(input_length = input.len(), "submitting command input");
         match CommandParser::parse(&input) {
+            Ok(CommandAction::Quit) => {
+                info!("quit requested from command mode");
+                state.clear_command_input();
+                state.exit_command_mode();
+                true
+            }
             Ok(action) => {
                 state.increment_pending_commands();
                 state.exit_command_mode();
                 state.set_command_feedback(CommandExecutor::pending_message(&action), false);
                 CommandExecutor::spawn(action, input, state.engine.clone(), command_result_sender);
+                false
             }
             Err(error) => {
                 state.set_command_feedback(error.to_string(), true);
                 Self::refresh_suggestions(state);
+                false
             }
         }
     }
@@ -298,6 +313,7 @@ impl AppRenderer {
             Line::from("Press : and run file or magnet"),
             Line::styled(":file /path/to/file.torrent", Style::default().fg(Color::White)),
             Line::styled(":magnet magnet:?xt=...", Style::default().fg(Color::White)),
+            Line::styled(":q", Style::default().fg(Color::White)),
         ]);
 
         frame.render_widget(
@@ -450,19 +466,25 @@ impl MouseController {
             }
             event::MouseEventKind::ScrollUp => {
                 if layout.torrents_section.contains(position) {
+                    debug!("mouse scrolled torrents up");
                     state.decrement_torrent_index();
                 } else if layout.tab_bar.contains(position) {
+                    debug!("mouse scrolled tabs left");
                     state.decrement_tab_index();
                 } else if HitTest::content_rows_area_for_current_tab(layout.tab_content_rows, state).contains(position) {
+                    debug!("mouse scrolled content rows up");
                     state.decrement_content_row_index();
                 }
             }
             event::MouseEventKind::ScrollDown => {
                 if layout.torrents_section.contains(position) {
+                    debug!("mouse scrolled torrents down");
                     state.increment_torrent_index();
                 } else if layout.tab_bar.contains(position) {
+                    debug!("mouse scrolled tabs right");
                     state.increment_tab_index();
                 } else if HitTest::content_rows_area_for_current_tab(layout.tab_content_rows, state).contains(position) {
+                    debug!("mouse scrolled content rows down");
                     state.increment_content_row_index();
                 }
             }
@@ -485,6 +507,7 @@ impl MouseController {
             return false;
         };
         state.set_tab_index(tab_index);
+        debug!(tab_index, "mouse selected tab");
         true
     }
 
@@ -502,6 +525,7 @@ impl MouseController {
 
         state.set_max_torrent_index(torrent_count.saturating_sub(1));
         state.set_torrent_index(torrent_index);
+        debug!(torrent_index, "mouse selected torrent");
         true
     }
 
@@ -511,6 +535,7 @@ impl MouseController {
             return false;
         };
         state.set_content_row_index(row_index);
+        debug!(content_row_index = row_index, "mouse selected content row");
         true
     }
 }
@@ -625,6 +650,7 @@ mod tests {
         assert!(rendered.contains("No torrents loaded"));
         assert!(rendered.contains(":file /path/to/file.torrent"));
         assert!(rendered.contains(":magnet magnet:?xt=..."));
+        assert!(rendered.contains(":q"));
     }
 
     #[test]
@@ -638,6 +664,18 @@ mod tests {
         CommandController::handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()), &state, sender);
 
         assert_eq!(state.command_input(), "file ");
+    }
+
+    #[test]
+    fn command_q_requests_quit() {
+        let state = TUIState::new(Engine::new());
+        let (sender, _receiver) = mpsc::channel();
+        state.enter_command_mode();
+        state.set_command_input("q".to_string());
+
+        let should_quit = CommandController::handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()), &state, sender);
+
+        assert!(should_quit);
     }
 
     #[test]

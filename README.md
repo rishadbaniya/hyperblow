@@ -12,6 +12,16 @@ Tired of seeing boring TUI based Bittorent Clients? Here comes **hyperblow**, a 
 
 It's gonna take time, good things do take time
 
+## Debug logging
+
+Hyperblow writes opt-in diagnostic logs to stdout when `HYPERBLOW_LOG` is set:
+
+```sh
+HYPERBLOW_LOG=debug cargo run -p hyperblow-cli -- --help
+```
+
+For a running TUI, stdout logs are useful for debugging but can mix with the alternate-screen UI.
+
 ✅ Denotes work is fully done
 ☑️ Means work is partially done
 ☐ Means the work is far from done
@@ -39,4 +49,3 @@ TODO :
 - ☐ Make use of Crossbeam crate's Concurrency Primitives
 - ☐ Add both Unit and Integration testing for the parsing library 
 - ☐ Re architect the entire CLI application's system design
-

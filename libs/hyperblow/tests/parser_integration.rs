@@ -41,3 +41,12 @@ fn parses_magnet_metadata_with_trackers() {
     assert_eq!(magnet.xl, Some(123));
     assert_eq!(magnet.tr.unwrap(), vec!["udp://tracker.example.com:6969"]);
 }
+
+#[test]
+fn decodes_magnet_display_name() {
+    let magnet =
+        MagnetURIMeta::fromMagnetURI("magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel%20Open%20Movie+Archive")
+            .expect("magnet should parse");
+
+    assert_eq!(magnet.dn.as_deref(), Some("Sintel Open Movie Archive"));
+}
