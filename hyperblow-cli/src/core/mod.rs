@@ -2,6 +2,7 @@ pub mod magnet;
 pub mod peer;
 pub mod piece_assembler;
 pub mod piece_picker;
+pub mod piece_storage;
 pub mod protocol;
 pub mod state;
 pub mod torrentFile;

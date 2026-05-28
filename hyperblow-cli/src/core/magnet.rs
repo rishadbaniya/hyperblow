@@ -4,7 +4,7 @@ use hyperblow::parser::{
     torrent_parser::{FileMeta, Info},
 };
 use sha1::{Digest, Sha1};
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -36,14 +36,22 @@ pub struct MagnetTorrent {
     session: TorrentFile,
     info_hash: [u8; 20],
     resolved: Arc<RwLock<Option<Arc<TorrentFile>>>>,
+    download_directory: PathBuf,
 }
 
 impl MagnetTorrent {
-    pub async fn new(meta: MagnetURIMeta) -> Result<Self, MagnetTorrentError> {
+    pub async fn new(meta: MagnetURIMeta, download_directory: PathBuf) -> Result<Self, MagnetTorrentError> {
         let info_hash = MagnetInfoHash::from_meta(&meta)?;
         let tracker_count = meta.tr.as_ref().map_or(0, Vec::len);
         let file_meta = MagnetFileMeta::from_magnet(&meta);
-        let session = TorrentFile::from_metadata_with_info_hash("magnet".to_string(), file_meta, info_hash.to_vec(), false).await?;
+        let session = TorrentFile::from_metadata_with_info_hash(
+            "magnet".to_string(),
+            file_meta,
+            info_hash.to_vec(),
+            false,
+            download_directory.clone(),
+        )
+        .await?;
         info!(tracker_count, "created magnet tracker session");
 
         Ok(Self {
@@ -51,6 +59,7 @@ impl MagnetTorrent {
             session,
             info_hash,
             resolved: Arc::new(RwLock::new(None)),
+            download_directory,
         })
     }
 
@@ -120,7 +129,14 @@ impl MagnetTorrent {
         let info = serde_bencode::de::from_bytes::<Info>(&metadata)?;
         let file_meta = MagnetFileMeta::from_info(self.meta(), info);
         Ok(Arc::new(
-            TorrentFile::from_metadata_with_info_hash("magnet".to_string(), file_meta, self.info_hash.to_vec(), true).await?,
+            TorrentFile::from_metadata_with_info_hash(
+                "magnet".to_string(),
+                file_meta,
+                self.info_hash.to_vec(),
+                true,
+                self.download_directory.clone(),
+            )
+            .await?,
         ))
     }
 
@@ -262,22 +278,24 @@ mod tests {
 
     #[test]
     fn decodes_uppercase_hex_btih() {
-        let decoded = MagnetInfoHash::decode("19F25D256632318E48B4E814A26D257BC3E213A9").expect("hex BTIH should decode");
+        let decoded = MagnetInfoHash::decode("0123456789ABCDEF0123456789ABCDEF01234567").expect("hex BTIH should decode");
 
-        assert_eq!(&decoded[..4], &[0x19, 0xF2, 0x5D, 0x25]);
+        assert_eq!(&decoded[..4], &[0x01, 0x23, 0x45, 0x67]);
         assert_eq!(decoded.len(), 20);
     }
 
     #[tokio::test]
     async fn creates_tracker_session_from_magnet_trackers() {
         let meta = MagnetURIMeta::fromMagnetURI(
-            "magnet:?xt=urn:btih:19F25D256632318E48B4E814A26D257BC3E213A9&dn=Example&tr=udp%3A%2F%2Ftracker.example.com%3A6969%2Fannounce",
+            "magnet:?xt=urn:btih:0123456789ABCDEF0123456789ABCDEF01234567&dn=Example&tr=udp%3A%2F%2Ftracker.example.com%3A6969%2Fannounce",
         )
         .expect("magnet should parse");
 
-        let torrent = MagnetTorrent::new(meta).await.expect("magnet torrent should initialize");
+        let torrent = MagnetTorrent::new(meta, std::env::temp_dir())
+            .await
+            .expect("magnet torrent should initialize");
 
-        assert_eq!(&torrent.info_hash()[..4], &[0x19, 0xF2, 0x5D, 0x25]);
+        assert_eq!(&torrent.info_hash()[..4], &[0x01, 0x23, 0x45, 0x67]);
         assert_eq!(torrent.bytes_total(), None);
         assert_eq!(torrent.tracker_addresses(), vec!["udp://tracker.example.com:6969/announce"]);
         assert_eq!(torrent.status_label(), "Fetching metadata");

@@ -813,7 +813,10 @@ pub enum TrackerRequest {
 #[cfg(test)]
 mod tests {
     use super::{HttpAnnounceCodec, Tracker};
-    use crate::core::state::{DownState, State};
+    use crate::core::{
+        piece_picker::PiecePicker,
+        state::{DownState, State},
+    };
     use bytes::{BufMut, BytesMut};
     use crossbeam::atomic::AtomicCell;
     use hyperblow::parser::torrent_parser::{FileMeta, Info};
@@ -986,6 +989,7 @@ mod tests {
                 created_by: None,
                 acceptable_source: None,
             },
+            download_directory: std::env::temp_dir(),
             d_state: DownState::Unknown,
             file_tree: None,
             trackers: Arc::new(RwLock::new(Vec::new())),
@@ -993,6 +997,7 @@ mod tests {
             tcp_ports: Arc::new(Mutex::new(Vec::new())),
             info_hash,
             pieces_hash: Vec::new(),
+            piece_picker: Arc::new(Mutex::new(PiecePicker::new(0))),
             peers: Arc::new(Mutex::new(Vec::new())),
             uptime: AtomicCell::new(0),
             bytes_complete: AtomicCell::new(0),

@@ -3,11 +3,15 @@ mod messages;
 mod metadata;
 mod piece;
 
-use super::state::State;
+use super::{
+    piece_assembler::{PieceAssembler, PieceAssemblyError},
+    piece_storage::{PieceStorage, PieceStorageError},
+    state::State,
+};
 use crate::ArcMutex;
 use codec::{PeerCodecError, PeerMessageCodec};
 use futures_util::{SinkExt, StreamExt};
-use messages::{Handshake, Message};
+use messages::{Block, Handshake, Message, Request};
 use std::{io, net::SocketAddr, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::{
@@ -127,6 +131,12 @@ enum PeerError {
 
     #[error("peer handshake info hash did not match torrent")]
     InfoHashMismatch,
+
+    #[error("piece assembly error")]
+    PieceAssembly(#[from] PieceAssemblyError),
+
+    #[error("piece storage error")]
+    PieceStorage(#[from] PieceStorageError),
 }
 
 impl Peer {
@@ -186,10 +196,30 @@ impl Peer {
         self.send_and_validate_handshake(&mut stream).await?;
         stream.send(vec![Message::Interested]).await?;
         self.set_peer_state(PeerState::Running).await;
+        let mut peer_choking = true;
+        let mut active_piece = None;
 
         while let Some(message) = stream.next().await {
-            self.handle_message(message?).await;
+            match message? {
+                Message::Choke => {
+                    peer_choking = true;
+                    self.release_active_piece(active_piece.take()).await;
+                }
+                Message::Unchoke => {
+                    peer_choking = false;
+                    self.maybe_request_piece(&mut stream, &mut active_piece, peer_choking).await?;
+                }
+                Message::Piece(block) => {
+                    self.handle_piece_block(block, &mut active_piece).await?;
+                    self.maybe_request_piece(&mut stream, &mut active_piece, peer_choking).await?;
+                }
+                message => {
+                    self.handle_message(message).await;
+                    self.maybe_request_piece(&mut stream, &mut active_piece, peer_choking).await?;
+                }
+            }
         }
+        self.release_active_piece(active_piece).await;
 
         Ok(())
     }
@@ -253,6 +283,89 @@ impl Peer {
                 };
             }
             _ => {}
+        }
+    }
+
+    async fn maybe_request_piece(
+        &self,
+        stream: &mut Framed<TcpStream, PeerMessageCodec>,
+        active_piece: &mut Option<ActivePiece>,
+        peer_choking: bool,
+    ) -> Result<(), PeerError> {
+        if peer_choking || active_piece.is_some() {
+            return Ok(());
+        }
+
+        let peer_pieces = {
+            let info = self.info.lock().await;
+            info.pieces_have.iter().map(|piece| *piece as usize).collect::<Vec<_>>()
+        };
+        if peer_pieces.is_empty() {
+            return Ok(());
+        }
+
+        let piece_index = {
+            let mut picker = self.state.piece_picker.lock().await;
+            let piece_index = picker.next_rarest_piece(&[peer_pieces]);
+            if let Some(piece_index) = piece_index {
+                picker.mark_requested(piece_index);
+            }
+            piece_index
+        };
+
+        let Some(piece_index) = piece_index else {
+            return Ok(());
+        };
+
+        let Some(piece) = ActivePiece::new(self.state.clone(), piece_index) else {
+            self.state.piece_picker.lock().await.mark_request_failed(piece_index);
+            return Ok(());
+        };
+        let requests = piece.requests();
+        if let Err(error) = stream.send(requests.into_iter().map(Message::Request).collect()).await {
+            self.state.piece_picker.lock().await.mark_request_failed(piece_index);
+            return Err(error.into());
+        }
+        *active_piece = Some(piece);
+        Ok(())
+    }
+
+    async fn handle_piece_block(&self, block: Block, active_piece: &mut Option<ActivePiece>) -> Result<(), PeerError> {
+        let Some(piece) = active_piece.as_mut() else {
+            return Ok(());
+        };
+        if block.piece_index as usize != piece.index() {
+            return Ok(());
+        }
+
+        if let Err(error) = piece.insert_block(block.byte_index as usize, block.raw_block.to_vec()) {
+            self.release_active_piece(active_piece.take()).await;
+            return Err(error.into());
+        }
+        if piece.is_complete() {
+            let piece_index = piece.index();
+            let assembled = match active_piece.take().expect("piece exists").assemble() {
+                Ok(piece) => piece,
+                Err(error) => {
+                    self.state.piece_picker.lock().await.mark_request_failed(piece_index);
+                    return Err(error.into());
+                }
+            };
+            if let Err(error) = PieceStorage::write_piece(&self.state, piece_index, &assembled).await {
+                self.state.piece_picker.lock().await.mark_request_failed(piece_index);
+                return Err(error.into());
+            }
+            self.state
+                .set_bytes_complete(self.state.bytes_complete().saturating_add(assembled.len()));
+            self.state.set_pieces_downloaded(self.state.pieces_downloaded().saturating_add(1));
+            self.state.piece_picker.lock().await.mark_completed(piece_index);
+        }
+        Ok(())
+    }
+
+    async fn release_active_piece(&self, active_piece: Option<ActivePiece>) {
+        if let Some(piece) = active_piece {
+            self.state.piece_picker.lock().await.mark_request_failed(piece.index());
         }
     }
 
@@ -321,13 +434,63 @@ impl Peer {
     }
 }
 
+struct ActivePiece {
+    piece_index: usize,
+    assembler: PieceAssembler,
+    piece_length: usize,
+}
+
+impl ActivePiece {
+    fn new(state: Arc<State>, piece_index: usize) -> Option<Self> {
+        let expected_hash = state.piece_hash(piece_index)?;
+        let piece_length = state.piece_length_at(piece_index)?;
+        Some(Self {
+            piece_index,
+            assembler: PieceAssembler::new(expected_hash, piece_length),
+            piece_length,
+        })
+    }
+
+    fn index(&self) -> usize {
+        self.piece_index
+    }
+
+    fn requests(&self) -> Vec<Request> {
+        const BLOCK_SIZE: usize = 16 * 1024;
+        let mut requests = Vec::new();
+        let mut begin = 0_usize;
+        while begin < self.piece_length {
+            let length = BLOCK_SIZE.min(self.piece_length - begin);
+            requests.push(Request::new(self.piece_index as u32, begin as u32, length as u32));
+            begin += length;
+        }
+        requests
+    }
+
+    fn insert_block(&mut self, begin: usize, block: Vec<u8>) -> Result<(), PieceAssemblyError> {
+        self.assembler.insert_block(begin, block)
+    }
+
+    fn is_complete(&self) -> bool {
+        self.assembler.is_complete()
+    }
+
+    fn assemble(self) -> Result<Vec<u8>, PieceAssemblyError> {
+        self.assembler.assemble()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Peer, PeerError};
-    use crate::core::state::{DownState, State};
+    use crate::core::{
+        piece_picker::PiecePicker,
+        state::{DownState, State},
+    };
     use crossbeam::atomic::AtomicCell;
     use hyperblow::parser::torrent_parser::{FileMeta, Info};
-    use std::sync::Arc;
+    use sha1::{Digest, Sha1};
+    use std::{fs, path::PathBuf, sync::Arc};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -362,6 +525,63 @@ mod tests {
         let peer = Peer::new(address, state);
         peer.run_session().await.expect("peer session should complete after server closes");
         server.await.expect("server task should complete");
+    }
+
+    #[tokio::test]
+    async fn peer_session_requests_and_writes_piece() {
+        let output_dir = PeerDownloadFixture::temp_dir();
+        let piece = b"hello peer".to_vec();
+        let info_hash = vec![7; 20];
+        let state = PeerDownloadFixture::state(output_dir.clone(), info_hash.clone(), piece.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener should bind");
+        let address = listener.local_addr().expect("listener should have local address");
+        let server_piece = piece.clone();
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("peer should connect");
+            let mut handshake = [0_u8; 68];
+            socket.read_exact(&mut handshake).await.expect("peer should send handshake");
+            assert_eq!(&handshake[28..48], info_hash.as_slice());
+            socket.write_all(&handshake).await.expect("server should send handshake response");
+
+            let mut interested = [0_u8; 5];
+            socket
+                .read_exact(&mut interested)
+                .await
+                .expect("peer should send interested message");
+            assert_eq!(interested, [0, 0, 0, 1, 2]);
+
+            socket.write_all(&[0, 0, 0, 1, 1]).await.expect("unchoke should send");
+            socket.write_all(&[0, 0, 0, 2, 5, 0b1000_0000]).await.expect("bitfield should send");
+
+            let mut request = [0_u8; 17];
+            socket.read_exact(&mut request).await.expect("piece request should arrive");
+            assert_eq!(&request[..13], &[0, 0, 0, 13, 6, 0, 0, 0, 0, 0, 0, 0, 0]);
+            assert_eq!(
+                u32::from_be_bytes(request[13..17].try_into().expect("request length")),
+                server_piece.len() as u32
+            );
+
+            let mut response = Vec::new();
+            response.extend_from_slice(&(9_u32 + server_piece.len() as u32).to_be_bytes());
+            response.push(7);
+            response.extend_from_slice(&0_u32.to_be_bytes());
+            response.extend_from_slice(&0_u32.to_be_bytes());
+            response.extend_from_slice(&server_piece);
+            socket.write_all(&response).await.expect("piece should send");
+        });
+
+        let peer = Peer::new(address, state.clone());
+        peer.run_session().await.expect("peer session should download piece");
+        server.await.expect("server task should complete");
+
+        assert_eq!(state.bytes_complete(), piece.len());
+        assert_eq!(state.pieces_downloaded(), 1);
+        assert_eq!(
+            fs::read(output_dir.join("peer-test.bin")).expect("downloaded file should exist"),
+            piece
+        );
+        fs::remove_dir_all(output_dir).expect("output dir should remove");
     }
 
     #[tokio::test]
@@ -403,6 +623,7 @@ mod tests {
                 created_by: None,
                 acceptable_source: None,
             },
+            download_directory: std::env::temp_dir(),
             d_state: DownState::Unknown,
             file_tree: None,
             trackers: Arc::new(RwLock::new(Vec::new())),
@@ -410,10 +631,57 @@ mod tests {
             tcp_ports: Arc::new(Mutex::new(Vec::new())),
             info_hash,
             pieces_hash: Vec::new(),
+            piece_picker: Arc::new(Mutex::new(PiecePicker::new(0))),
             peers: Arc::new(Mutex::new(Vec::new())),
             uptime: AtomicCell::new(0),
             bytes_complete: AtomicCell::new(0),
             pieces_downloaded: AtomicCell::new(0),
         })
+    }
+
+    struct PeerDownloadFixture;
+
+    impl PeerDownloadFixture {
+        fn temp_dir() -> PathBuf {
+            let path = std::env::temp_dir().join(format!("hyperblow-peer-download-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("temp dir should create");
+            path
+        }
+
+        fn state(download_directory: PathBuf, info_hash: Vec<u8>, piece: Vec<u8>) -> Arc<State> {
+            let piece_hash: [u8; 20] = Sha1::digest(&piece).into();
+            Arc::new(State {
+                meta_info: FileMeta {
+                    announce: "udp://tracker.example.test:6969".to_string(),
+                    announce_list: None,
+                    info: Info {
+                        name: Some("peer-test.bin".to_string()),
+                        length: Some(piece.len() as i64),
+                        files: None,
+                        piece_length: Some(piece.len() as i64),
+                        pieces: piece_hash.to_vec(),
+                    },
+                    creation_data: None,
+                    comment: None,
+                    encoding: None,
+                    created_by: None,
+                    acceptable_source: None,
+                },
+                download_directory,
+                d_state: DownState::Unknown,
+                file_tree: None,
+                trackers: Arc::new(RwLock::new(Vec::new())),
+                udp_ports: Arc::new(Mutex::new(Vec::new())),
+                tcp_ports: Arc::new(Mutex::new(Vec::new())),
+                info_hash,
+                pieces_hash: vec![piece_hash],
+                piece_picker: Arc::new(Mutex::new(PiecePicker::new(1))),
+                peers: Arc::new(Mutex::new(Vec::new())),
+                uptime: AtomicCell::new(0),
+                bytes_complete: AtomicCell::new(0),
+                pieces_downloaded: AtomicCell::new(0),
+            })
+        }
     }
 }

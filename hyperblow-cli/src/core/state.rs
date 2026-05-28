@@ -1,9 +1,9 @@
-use crate::core::{peer::Peer, tracker::Tracker, File};
+use crate::core::{peer::Peer, piece_picker::PiecePicker, tracker::Tracker, File};
 use crossbeam::atomic::AtomicCell;
 use hyperblow::parser::torrent_parser::FileMeta;
 use paste::paste;
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 
 /// Used to generate getter and setter for Cell<T> types
@@ -53,6 +53,8 @@ pub enum DownState {
 pub struct State {
     pub meta_info: FileMeta,
 
+    pub download_directory: PathBuf,
+
     pub d_state: DownState,
 
     /// The entire file tree of the torrent files to be downloaded
@@ -73,6 +75,8 @@ pub struct State {
 
     /// Stores the hash of each piece by its exact index extracted out of bencode encoded ".torrent" file
     pub pieces_hash: Vec<[u8; 20]>,
+
+    pub piece_picker: Arc<Mutex<PiecePicker>>,
 
     /// All the peers of the current session
     pub peers: Arc<Mutex<Vec<Peer>>>,
@@ -103,4 +107,25 @@ impl State {
     cell_get_set!(bytes_complete: usize);
 
     cell_get_set!(pieces_downloaded: usize);
+
+    pub fn piece_length(&self) -> Option<usize> {
+        self.meta_info.info.piece_length.map(|length| length.max(0) as usize)
+    }
+
+    pub fn piece_length_at(&self, piece_index: usize) -> Option<usize> {
+        let piece_length = self.piece_length()?;
+        let piece_count = self.pieces_hash.len();
+        if piece_index >= piece_count {
+            return None;
+        }
+        if piece_index + 1 == piece_count {
+            let used_by_previous = piece_length.saturating_mul(piece_count.saturating_sub(1));
+            return Some((self.meta_info.total_length().max(0) as usize).saturating_sub(used_by_previous));
+        }
+        Some(piece_length)
+    }
+
+    pub fn piece_hash(&self, piece_index: usize) -> Option<[u8; 20]> {
+        self.pieces_hash.get(piece_index).copied()
+    }
 }

@@ -12,6 +12,7 @@
 use super::peer::{MagnetMetadataError, MagnetMetadataFetcher, Peer};
 use crate::{
     core::{
+        piece_picker::PiecePicker,
         state::{DownState, State},
         tracker::Tracker,
         File,
@@ -20,7 +21,7 @@ use crate::{
 };
 use crossbeam::atomic::AtomicCell;
 use hyperblow::parser::torrent_parser::{FileMeta, FileMetaError};
-use std::{io, sync::Arc};
+use std::{io, path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tokio::{
     join,
@@ -83,14 +84,19 @@ struct Peers {
 impl TorrentFile {
     /// It will try to parse the given the path of the torrent file and create a new data structure
     /// from the Torrent file
-    pub async fn new(path: &str) -> Result<Self, TError> {
+    pub async fn new(path: &str, download_directory: PathBuf) -> Result<Self, TError> {
         let meta_info = FileMeta::fromTorrentFile(path)?;
-        Self::from_metadata(path.to_string(), meta_info, true).await
+        Self::from_metadata(path.to_string(), meta_info, true, download_directory).await
     }
 
-    pub(crate) async fn from_metadata(path: String, meta_info: FileMeta, build_file_tree: bool) -> Result<Self, TError> {
+    pub(crate) async fn from_metadata(
+        path: String,
+        meta_info: FileMeta,
+        build_file_tree: bool,
+        download_directory: PathBuf,
+    ) -> Result<Self, TError> {
         let info_hash = meta_info.generateInfoHash();
-        Self::from_metadata_with_info_hash(path, meta_info, info_hash, build_file_tree).await
+        Self::from_metadata_with_info_hash(path, meta_info, info_hash, build_file_tree, download_directory).await
     }
 
     pub(crate) async fn from_metadata_with_info_hash(
@@ -98,6 +104,7 @@ impl TorrentFile {
         meta_info: FileMeta,
         info_hash: Vec<u8>,
         build_file_tree: bool,
+        download_directory: PathBuf,
     ) -> Result<Self, TError> {
         let pieces_hash = meta_info.getPiecesHash()?;
         let pieces_count = pieces_hash.len();
@@ -111,6 +118,7 @@ impl TorrentFile {
         let udp_ports = ArcMutex!(Vec::new());
         let tcp_ports = ArcMutex!(Vec::new());
         let peers = ArcMutex!(Vec::new());
+        let piece_picker = ArcMutex!(PiecePicker::new(pieces_count));
         let bytes_complete = ACell!(0);
         let pieces_downloaded = ACell!(0);
         let uptime = ACell!(0);
@@ -122,6 +130,7 @@ impl TorrentFile {
             pieces_downloaded,
             bytes_complete,
             meta_info,
+            download_directory,
             d_state,
             file_tree,
             trackers,
@@ -129,6 +138,7 @@ impl TorrentFile {
             tcp_ports,
             info_hash,
             pieces_hash,
+            piece_picker,
             peers,
             uptime,
         });

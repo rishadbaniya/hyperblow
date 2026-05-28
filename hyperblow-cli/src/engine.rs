@@ -211,7 +211,7 @@ impl TorrentHandle {
         match src {
             TorrentSource::FilePath(ref path) => {
                 debug!(source = "file", path = %path, "loading torrent file");
-                let torrent = TorrentFile::new(path).await?;
+                let torrent = TorrentFile::new(path, download_directory.clone()).await?;
                 Ok(Arc::new(Self {
                     inner: Torrent::FileTorrent(Arc::new(torrent)),
                     download_directory,
@@ -220,7 +220,7 @@ impl TorrentHandle {
             TorrentSource::MagnetURI(ref uri) => {
                 debug!(source = "magnet", "parsing magnet URI");
                 let magnet = MagnetURIMeta::fromMagnetURI(uri).map_err(|_| EngineError::InvalidMagnetUri)?;
-                let magnet = MagnetTorrent::new(magnet).await?;
+                let magnet = MagnetTorrent::new(magnet, download_directory.clone()).await?;
                 Ok(Arc::new(Self {
                     inner: Torrent::MagnetUriTorrent(Arc::new(magnet)),
                     download_directory,

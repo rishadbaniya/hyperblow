@@ -85,6 +85,13 @@ impl Message {
                 buf.put_u32(1);
                 buf.put_u8(3);
             }
+            Message::Request(ref request) => {
+                buf.put_u32(13);
+                buf.put_u8(6);
+                buf.put_u32(request.index);
+                buf.put_u32(request.begin);
+                buf.put_u32(request.length);
+            }
             Message::Extended(ref extended) => {
                 let length = 2_u32.saturating_add(extended.payload.len() as u32);
                 buf.put_u32(length);
@@ -598,6 +605,22 @@ pub struct Request {
 }
 
 impl Request {
+    pub fn new(index: u32, begin: u32, length: u32) -> Self {
+        Self { index, begin, length }
+    }
+
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+
+    pub fn begin(&self) -> u32 {
+        self.begin
+    }
+
+    pub fn length(&self) -> u32 {
+        self.length
+    }
+
     /// Creates a Request instance from the Request Message Frame bytes.
     /// It consumes the frame bytes and produces an instance of Request
     ///
@@ -750,7 +773,7 @@ impl Port {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bitfield, Block, ExtendedMessage, Handshake, Have, Message, Port};
+    use super::{Bitfield, Block, ExtendedMessage, Handshake, Have, Message, Port, Request};
     use bytes::{BufMut, BytesMut};
 
     #[test]
@@ -759,6 +782,10 @@ mod tests {
         assert_eq!(Message::Unchoke.to_bytes().as_ref(), &[0, 0, 0, 1, 1]);
         assert_eq!(Message::Interested.to_bytes().as_ref(), &[0, 0, 0, 1, 2]);
         assert_eq!(Message::NotInterested.to_bytes().as_ref(), &[0, 0, 0, 1, 3]);
+        assert_eq!(
+            Message::Request(Request::new(2, 16, 32)).to_bytes().as_ref(),
+            &[0, 0, 0, 13, 6, 0, 0, 0, 2, 0, 0, 0, 16, 0, 0, 0, 32]
+        );
     }
 
     #[test]
