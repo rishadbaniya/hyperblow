@@ -20,6 +20,14 @@ Hyperblow writes opt-in diagnostic logs to stdout when `HYPERBLOW_LOG` is set:
 HYPERBLOW_LOG=debug cargo run -p hyperblow-cli -- --help
 ```
 
+For focused torrent diagnostics, use:
+
+```sh
+HYPERBLOW_LOG=hyperblow_cli=debug,hyperblow=debug cargo run -p hyperblow-cli
+```
+
+This includes tracker announce results, peer connection failures, piece requests, and completed pieces.
+
 For a running TUI, stdout logs are useful for debugging but can mix with the alternate-screen UI.
 
 ✅ Denotes work is fully done

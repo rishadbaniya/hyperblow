@@ -31,7 +31,7 @@ use tokio::{
         Mutex, RwLock,
     },
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 const TRANS_ID: i32 = 10;
 
@@ -249,42 +249,54 @@ impl TorrentFile {
                 for announce_list in announce_list_s {
                     let mut _trackers = Vec::new();
                     for announce_url in announce_list {
-                        if let Ok(tracker) = Tracker::new(announce_url, self.state.clone(), self.peers_channel.0.clone()) {
-                            let tracker = Arc::new(tracker);
-                            let tracker_cloned = tracker.clone();
-                            let socket = socket.clone();
-                            tokio::spawn(async move {
-                                tracker_cloned.resolveTracker().await;
-                                if tracker_cloned.is_udp() {
-                                    tracker_cloned.run_me(socket).await;
-                                } else if tracker_cloned.is_http() {
-                                    tracker_cloned.run_http().await;
-                                }
-                            });
-                            _trackers.push(tracker);
+                        match Tracker::new(announce_url, self.state.clone(), self.peers_channel.0.clone()) {
+                            Ok(tracker) => {
+                                let tracker = Arc::new(tracker);
+                                let tracker_cloned = tracker.clone();
+                                let socket = socket.clone();
+                                tokio::spawn(async move {
+                                    tracker_cloned.resolveTracker().await;
+                                    if tracker_cloned.is_udp() {
+                                        tracker_cloned.run_me(socket).await;
+                                    } else if tracker_cloned.is_http() {
+                                        tracker_cloned.run_http().await;
+                                    }
+                                });
+                                _trackers.push(tracker);
+                            }
+                            Err(error) => {
+                                warn!(tracker = %announce_url, error = %error, "skipping tracker");
+                            }
                         }
                     }
                     tracker_s.push(_trackers);
                 }
             } else {
                 let announce_url = &self.state.meta_info.announce;
-                if let Ok(tracker) = Tracker::new(announce_url, self.state.clone(), self.peers_channel.0.clone()) {
-                    let tracker = Arc::new(tracker);
-                    let tracker_cloned = tracker.clone();
-                    let socket = socket.clone();
-                    tokio::spawn(async move {
-                        tracker_cloned.resolveTracker().await;
-                        if tracker_cloned.is_udp() {
-                            tracker_cloned.run_me(socket).await;
-                        } else if tracker_cloned.is_http() {
-                            tracker_cloned.run_http().await;
-                        }
-                    });
-                    tracker_s.push(vec![tracker])
+                match Tracker::new(announce_url, self.state.clone(), self.peers_channel.0.clone()) {
+                    Ok(tracker) => {
+                        let tracker = Arc::new(tracker);
+                        let tracker_cloned = tracker.clone();
+                        let socket = socket.clone();
+                        tokio::spawn(async move {
+                            tracker_cloned.resolveTracker().await;
+                            if tracker_cloned.is_udp() {
+                                tracker_cloned.run_me(socket).await;
+                            } else if tracker_cloned.is_http() {
+                                tracker_cloned.run_http().await;
+                            }
+                        });
+                        tracker_s.push(vec![tracker])
+                    }
+                    Err(error) => {
+                        warn!(tracker = %announce_url, error = %error, "skipping tracker");
+                    }
                 }
             }
             tracker_s
         };
+        let tracker_count = trackers.iter().map(Vec::len).sum::<usize>();
+        info!(tracker_count, "tracker sessions started");
         *self.state.trackers.write().await = trackers;
 
         // Step 2 : Recv by listening on the UDP socket and then find out for whom the message came for and give
@@ -327,10 +339,13 @@ impl TorrentFile {
             let mut peers = self.state.peers.lock().await;
             if !peers.iter().any(|stored| stored.socket_adr == peer.socket_adr) {
                 let peer_runner = peer.clone();
+                info!(peer = %peer.socket_adr, "discovered peer");
                 peers.push(peer);
                 tokio::spawn(async move {
                     peer_runner.run().await;
                 });
+            } else {
+                debug!(peer = %peer.socket_adr, "skipping duplicate peer");
             }
         }
         // TODO: Run in a loop, but never return anything

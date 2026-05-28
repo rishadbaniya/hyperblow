@@ -19,6 +19,7 @@ use tokio::{
     sync::Mutex,
     time::{sleep, timeout},
 };
+use tracing::{debug, info, warn};
 
 use tokio_util::codec::Framed;
 
@@ -177,13 +178,21 @@ impl Peer {
     pub async fn run(&self) {
         let mut retry_delay = INITIAL_RETRY_DELAY;
         loop {
+            debug!(peer = %self.socket_adr, "starting peer session");
             match self.run_session().await {
                 Ok(()) => {
                     self.set_peer_state(PeerState::Disconnected).await;
+                    info!(peer = %self.socket_adr, "peer session ended");
                     break;
                 }
-                Err(_) => {
+                Err(error) => {
                     self.set_peer_state(PeerState::ConnectionErrorIdle).await;
+                    warn!(
+                        peer = %self.socket_adr,
+                        error = %error,
+                        retry_delay_secs = retry_delay.as_secs(),
+                        "peer session failed"
+                    );
                     sleep(retry_delay).await;
                     retry_delay = (retry_delay * 2).min(MAX_RETRY_DELAY);
                 }
@@ -226,6 +235,7 @@ impl Peer {
 
     async fn connect_once(&self) -> Result<Framed<TcpStream, PeerMessageCodec>, PeerError> {
         self.set_peer_state(PeerState::TryingToConnect).await;
+        debug!(peer = %self.socket_adr, "connecting to peer");
         let tcp_stream = match timeout(CONNECTION_TIMEOUT, TcpStream::connect(self.socket_adr)).await {
             Ok(Ok(tcp_stream)) => tcp_stream,
             Ok(Err(source)) => {
@@ -242,12 +252,14 @@ impl Peer {
         };
 
         self.set_peer_state(PeerState::Connected).await;
+        debug!(peer = %self.socket_adr, "connected to peer");
         Ok(Framed::new(tcp_stream, PeerMessageCodec))
     }
 
     async fn send_and_validate_handshake(&self, stream: &mut Framed<TcpStream, PeerMessageCodec>) -> Result<(), PeerError> {
         stream.send(vec![Message::Handshake(Handshake::new(self.state.clone()))]).await?;
         self.set_peer_state(PeerState::SentHandshake).await;
+        debug!(peer = %self.socket_adr, "sent peer handshake");
 
         let message = timeout(HANDSHAKE_TIMEOUT, stream.next())
             .await
@@ -257,6 +269,7 @@ impl Peer {
         match message {
             Message::Handshake(handshake) if handshake.info_hash() == self.state.info_hash.as_slice() => {
                 self.set_peer_state(PeerState::HandshakeComplete).await;
+                debug!(peer = %self.socket_adr, "peer handshake complete");
                 Ok(())
             }
             Message::Handshake(_) => Err(PeerError::InfoHashMismatch),
@@ -270,9 +283,11 @@ impl Peer {
                 let mut info = self.info.lock().await;
                 if !info.pieces_have.contains(&have.piece_index) {
                     info.pieces_have.push(have.piece_index);
+                    debug!(peer = %self.socket_adr, piece_index = have.piece_index, "peer announced piece");
                 }
             }
             Message::Bitfield(bitfield) => {
+                let pieces_have = bitfield.have.len();
                 let mut info = self.info.lock().await;
                 info.pieces_have = bitfield.have.into_iter().map(|piece| piece as u32).collect();
                 info.pieces_not_have = bitfield.not_have.into_iter().map(|piece| piece as u32).collect();
@@ -281,6 +296,7 @@ impl Peer {
                 } else {
                     PeerType::Leecher
                 };
+                debug!(peer = %self.socket_adr, pieces_have, "peer sent bitfield");
             }
             _ => {}
         }
@@ -319,9 +335,17 @@ impl Peer {
 
         let Some(piece) = ActivePiece::new(self.state.clone(), piece_index) else {
             self.state.piece_picker.lock().await.mark_request_failed(piece_index);
+            warn!(peer = %self.socket_adr, piece_index, "selected piece has no metadata");
             return Ok(());
         };
         let requests = piece.requests();
+        debug!(
+            peer = %self.socket_adr,
+            piece_index,
+            request_count = requests.len(),
+            piece_length = piece.piece_length,
+            "requesting piece from peer"
+        );
         if let Err(error) = stream.send(requests.into_iter().map(Message::Request).collect()).await {
             self.state.piece_picker.lock().await.mark_request_failed(piece_index);
             return Err(error.into());
@@ -359,12 +383,20 @@ impl Peer {
                 .set_bytes_complete(self.state.bytes_complete().saturating_add(assembled.len()));
             self.state.set_pieces_downloaded(self.state.pieces_downloaded().saturating_add(1));
             self.state.piece_picker.lock().await.mark_completed(piece_index);
+            info!(
+                peer = %self.socket_adr,
+                piece_index,
+                bytes = assembled.len(),
+                bytes_complete = self.state.bytes_complete(),
+                "piece downloaded"
+            );
         }
         Ok(())
     }
 
     async fn release_active_piece(&self, active_piece: Option<ActivePiece>) {
         if let Some(piece) = active_piece {
+            debug!(peer = %self.socket_adr, piece_index = piece.index(), "releasing active piece");
             self.state.piece_picker.lock().await.mark_request_failed(piece.index());
         }
     }

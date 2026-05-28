@@ -34,6 +34,7 @@ use tokio::{
     },
     time::{sleep, timeout},
 };
+use tracing::{debug, info, warn};
 use url::Url;
 
 type UdpTrackerChannel = (UnboundedSender<Vec<u8>>, Arc<Mutex<UnboundedReceiver<Vec<u8>>>>);
@@ -389,12 +390,16 @@ impl Tracker {
         };
 
         self.tracker_state.store(TrackerState::DNSResolving);
+        debug!(tracker = %self.address, "resolving tracker DNS");
         if resolveDNS().await {
+            let resolved_addresses = self.socketAddrs.lock().await.len();
             self.tracker_state.store(TrackerState::DNSResolved);
+            info!(tracker = %self.address, resolved_addresses, "tracker DNS resolved");
         } else {
             self.tracker_state.store(TrackerState::DNSUnresolved {
                 retry_time: Instant::now(),
             });
+            warn!(tracker = %self.address, "tracker DNS resolution failed");
         }
     }
 
@@ -433,10 +438,16 @@ impl Tracker {
                     }
                     sleep(Duration::from_secs(interval)).await;
                 }
-                Err(_) => {
+                Err(error) => {
                     self.tracker_state.store(TrackerState::DNSUnresolved {
                         retry_time: Instant::now(),
                     });
+                    warn!(
+                        tracker = %self.address,
+                        error = %error,
+                        retry_delay_secs = retry_delay.as_secs(),
+                        "HTTP tracker announce failed"
+                    );
                     sleep(retry_delay).await;
                     retry_delay = (retry_delay * 2).min(Duration::from_secs(300));
                 }
@@ -449,6 +460,12 @@ impl Tracker {
         let announce_url = HttpAnnounceCodec::build_url(&self.address, &self.torrent_state, self.announce_port().await);
         let response_bytes = client.get(announce_url).send().await?.error_for_status()?.bytes().await?;
         let announce_response = HttpAnnounceCodec::parse_response(&response_bytes)?;
+        info!(
+            tracker = %self.address,
+            peer_count = announce_response.peersAddresses.len(),
+            interval = announce_response.interval,
+            "HTTP tracker announce returned peers"
+        );
 
         for peer_socket_adr in announce_response.peersAddresses.clone() {
             let peer = Peer::new(peer_socket_adr, self.torrent_state.clone());
@@ -484,6 +501,7 @@ impl Tracker {
                                 let mut connect_response = self.connect_response.lock().await;
                                 *connect_response = res;
                             }
+                            debug!(tracker = %self.address, "UDP tracker connect response received");
 
                             // According to BEP-15, client can use a Connection ID until one minute after it has received it.
                             //
@@ -511,6 +529,12 @@ impl Tracker {
                                                         if let TrackerResponse::AnnounceResponse(ref ar) = res {
                                                             //println!("The interval is {}", ar.interval);
                                                             let sleep_duration = Duration::from_secs(ar.interval as u64);
+                                                            info!(
+                                                                tracker = %self.address,
+                                                                peer_count = ar.peersAddresses.len(),
+                                                                interval = ar.interval,
+                                                                "UDP tracker announce returned peers"
+                                                            );
                                                             {
                                                                 for peer_socket_adr in ar.peersAddresses.clone() {
                                                                     let peer = Peer::new(peer_socket_adr, self.torrent_state.clone());
@@ -541,6 +565,11 @@ impl Tracker {
                                             if no_of_times_announce_request_timeout <= 8 {
                                                 no_of_times_announce_request_timeout += 1;
                                             }
+                                            warn!(
+                                                tracker = %self.address,
+                                                attempt = no_of_times_announce_request_timeout,
+                                                "UDP tracker announce timed out"
+                                            );
                                             // Announce Request timeout error
                                         }
                                     }
@@ -562,6 +591,11 @@ impl Tracker {
                     if no_of_times_connect_request_timeout <= 8 {
                         no_of_times_connect_request_timeout += 1;
                     }
+                    warn!(
+                        tracker = %self.address,
+                        attempt = no_of_times_connect_request_timeout,
+                        "UDP tracker connect timed out"
+                    );
                 }
             }
             //println!("ENDED PRETTY QUICK");
@@ -607,6 +641,7 @@ impl Tracker {
             Ok(_) => {
                 let mut con_req = self.connect_request.lock().await;
                 *con_req = TrackerRequest::ConnectRequest(connect_req);
+                debug!(tracker = %self.address, remote = %socketAddrs, "sent UDP tracker connect request");
                 Ok(())
             }
             Err(e) => Err(e),
@@ -651,6 +686,7 @@ impl Tracker {
                 Ok(_) => {
                     let mut ann_req = self.announce_request.lock().await;
                     *ann_req = TrackerRequest::AnnounceRequest(announce_req);
+                    debug!(tracker = %self.address, remote = %socketAddrs, "sent UDP tracker announce request");
                     Ok(())
                 }
                 Err(e) => Err(e),
