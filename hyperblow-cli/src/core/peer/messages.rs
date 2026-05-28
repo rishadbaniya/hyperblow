@@ -46,6 +46,7 @@ pub enum Message {
     Piece(Block),
     Cancel(Cancel),
     Port(Port),
+    Extended(ExtendedMessage),
 }
 
 impl Message {
@@ -83,6 +84,13 @@ impl Message {
             Message::NotInterested => {
                 buf.put_u32(1);
                 buf.put_u8(3);
+            }
+            Message::Extended(ref extended) => {
+                let length = 2_u32.saturating_add(extended.payload.len() as u32);
+                buf.put_u32(length);
+                buf.put_u8(20);
+                buf.put_u8(extended.extension_id);
+                buf.put_slice(&extended.payload);
             }
             // TODO : Do it for all messages
 
@@ -297,6 +305,37 @@ impl Message {
         }
         false
     }
+
+    pub fn is_extended_message(src: &BytesMut) -> bool {
+        if src.len() < 6 {
+            return false;
+        }
+
+        let mut length_prefix_bytes = &src[0..=3];
+        let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap();
+        src.len() as u32 >= 4 + length_prefix && length_prefix >= 2 && src[4] == 20
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtendedMessage {
+    pub extension_id: u8,
+    pub payload: Vec<u8>,
+}
+
+impl ExtendedMessage {
+    pub fn new(extension_id: u8, payload: Vec<u8>) -> Self {
+        Self { extension_id, payload }
+    }
+
+    pub fn from_bytes(src: &mut BytesMut) -> Self {
+        let mut length_prefix_bytes = &src[0..=3];
+        let length_prefix = ReadBytesExt::read_u32::<BigEndian>(&mut length_prefix_bytes).unwrap() as usize;
+        let extension_id = src[5];
+        let payload = src[6..4 + length_prefix].to_vec();
+        src.split_to(4 + length_prefix);
+        Self { extension_id, payload }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -439,10 +478,15 @@ pub struct Handshake {
 impl Handshake {
     /// Creates a instance of Handshake in order to send it to a peer.
     pub fn new(state: Arc<State>) -> Self {
+        Self::from_info_hash(&state.info_hash)
+    }
+
+    pub fn from_info_hash(info_hash: &[u8]) -> Self {
         let pstrlen: u8 = 19;
         let pstr = PROTOCOL_IDENTIFIER.to_vec();
-        let reserved = RESERVED_BYTES.to_vec();
-        let info_hash = state.info_hash.clone();
+        let mut reserved = RESERVED_BYTES.to_vec();
+        reserved[5] |= 0x10;
+        let info_hash = info_hash.to_vec();
         let peer_id = PEER_ID.to_vec();
         Self {
             pstrlen,
@@ -476,6 +520,10 @@ impl Handshake {
 
     pub fn peer_id(&self) -> &[u8] {
         &self.peer_id
+    }
+
+    pub fn supports_extensions(&self) -> bool {
+        self.reserved.get(5).is_some_and(|byte| byte & 0x10 == 0x10)
     }
 }
 
@@ -702,7 +750,7 @@ impl Port {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bitfield, Block, Handshake, Have, Message, Port};
+    use super::{Bitfield, Block, ExtendedMessage, Handshake, Have, Message, Port};
     use bytes::{BufMut, BytesMut};
 
     #[test]
@@ -730,6 +778,29 @@ mod tests {
         assert_eq!(handshake.pstr, b"BitTorrent protocol");
         assert_eq!(handshake.info_hash, vec![1; 20]);
         assert_eq!(handshake.peer_id, vec![2; 20]);
+    }
+
+    #[test]
+    fn outbound_handshake_advertises_extension_protocol() {
+        let handshake = Handshake::from_info_hash(&[7; 20]);
+
+        assert!(handshake.supports_extensions());
+        assert_eq!(handshake.info_hash(), &[7; 20]);
+    }
+
+    #[test]
+    fn extended_parser_consumes_frame() {
+        let mut bytes = BytesMut::new();
+        bytes.put_u32(4);
+        bytes.put_u8(20);
+        bytes.put_u8(1);
+        bytes.put_slice(b"hi");
+
+        assert!(Message::is_extended_message(&bytes));
+        let extended = ExtendedMessage::from_bytes(&mut bytes);
+
+        assert_eq!(extended, ExtendedMessage::new(1, b"hi".to_vec()));
+        assert!(bytes.is_empty());
     }
 
     #[test]

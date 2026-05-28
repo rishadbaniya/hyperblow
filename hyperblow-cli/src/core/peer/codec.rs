@@ -1,5 +1,5 @@
 use super::{
-    messages::{Bitfield, Block, Cancel, Handshake, Have, Port, Request},
+    messages::{Bitfield, Block, Cancel, ExtendedMessage, Handshake, Have, Port, Request},
     Message,
 };
 use bytes::{BufMut, BytesMut};
@@ -87,6 +87,7 @@ impl Decoder for PeerMessageCodec {
             7 if length_prefix >= 9 => Ok(Some(Message::Piece(Block::from_bytes(src)))),
             8 if length_prefix == 13 => Ok(Some(Message::Cancel(Cancel::from_bytes(src)))),
             9 if length_prefix == 3 => Ok(Some(Message::Port(Port::from_bytes(src)))),
+            20 if length_prefix >= 2 => Ok(Some(Message::Extended(ExtendedMessage::from_bytes(src)))),
             _ => Err(PeerCodecError::InvalidFrame("unknown message id or invalid length prefix")),
         }
     }
@@ -105,7 +106,7 @@ impl Encoder<Vec<Message>> for PeerMessageCodec {
 #[cfg(test)]
 mod tests {
     use super::{PeerCodecError, PeerMessageCodec, MAX_PEER_FRAME_LENGTH};
-    use crate::core::peer::Message;
+    use crate::core::peer::{messages::ExtendedMessage, Message};
     use bytes::{BufMut, BytesMut};
     use tokio_util::codec::{Decoder, Encoder};
 
@@ -160,5 +161,32 @@ mod tests {
             .expect("messages should encode");
 
         assert_eq!(dst.as_ref(), &[0, 0, 0, 1, 0, 0, 0, 0, 1, 2]);
+    }
+
+    #[test]
+    fn decodes_extended_message() {
+        let mut codec = PeerMessageCodec;
+        let mut src = BytesMut::new();
+        src.put_u32(5);
+        src.put_u8(20);
+        src.put_u8(3);
+        src.put_slice(b"abc");
+
+        let message = codec.decode(&mut src).expect("valid frame").expect("message");
+
+        assert_eq!(message, Message::Extended(ExtendedMessage::new(3, b"abc".to_vec())));
+        assert!(src.is_empty());
+    }
+
+    #[test]
+    fn encodes_extended_message() {
+        let mut codec = PeerMessageCodec;
+        let mut dst = BytesMut::new();
+
+        codec
+            .encode(vec![Message::Extended(ExtendedMessage::new(1, b"xyz".to_vec()))], &mut dst)
+            .expect("extended message should encode");
+
+        assert_eq!(dst.as_ref(), &[0, 0, 0, 5, 20, 1, b'x', b'y', b'z']);
     }
 }
