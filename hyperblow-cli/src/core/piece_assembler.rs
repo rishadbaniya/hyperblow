@@ -1,5 +1,5 @@
 use sha1::{Digest, Sha1};
-use std::{collections::BTreeMap, ops::Range};
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -54,7 +54,8 @@ impl PieceAssembler {
 
         let new_range = begin..end;
         if self.blocks.iter().any(|(&existing_begin, existing_block)| {
-            ranges_overlap(new_range.clone(), existing_begin..existing_begin + existing_block.len())
+            BlockRange::new(new_range.start, new_range.end)
+                .overlaps(&BlockRange::new(existing_begin, existing_begin + existing_block.len()))
         }) {
             return Err(PieceAssemblyError::OverlappingBlock);
         }
@@ -93,8 +94,19 @@ impl PieceAssembler {
     }
 }
 
-fn ranges_overlap(left: Range<usize>, right: Range<usize>) -> bool {
-    left.start < right.end && right.start < left.end
+struct BlockRange {
+    start: usize,
+    end: usize,
+}
+
+impl BlockRange {
+    fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+
+    fn overlaps(&self, other: &Self) -> bool {
+        self.start < other.end && other.start < self.end
+    }
 }
 
 #[cfg(test)]

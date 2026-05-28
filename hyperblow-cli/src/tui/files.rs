@@ -135,93 +135,84 @@ impl FilesState {
     }
 }
 
-pub fn draw_files<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &mut MutexGuard<FilesState>) {
-    let download_yes = Cell::from("Yes").style(Style::default().bg(Color::Green).fg(Color::Black));
-    let download_no = Cell::from("No").style(Style::default().bg(Color::Red).fg(Color::Black));
+pub struct FilesView;
 
-    let header_row = Row::new([Cell::from(NAME), Cell::from(TYPE), Cell::from(DOWNLOAD), Cell::from(PROGRESS)]);
+impl FilesView {
+    pub fn draw<B: Backend>(frame: &mut Frame<B>, size: Rect, scroll: &mut MutexGuard<FilesState>) {
+        let download_yes = Cell::from("Yes").style(Style::default().bg(Color::Green).fg(Color::Black));
+        let download_no = Cell::from("No").style(Style::default().bg(Color::Red).fg(Color::Black));
 
-    let blank_row = Row::new([""; 4]);
+        let header_row = Row::new([Cell::from(NAME), Cell::from(TYPE), Cell::from(DOWNLOAD), Cell::from(PROGRESS)]);
 
-    // Run when it's the first draw of the files
-    // TODO : Way to set the initial bottom index of the row(i.e how many rows to show) according
-    // to the given size of the Files Tab
-    // TODO : Way to re evaluate the bottom index when the screen resizes and size of the Files Tab
-    // changes
-    if scroll.get_top_index() == 0 && scroll.get_bottom_index() == 0 {
-        let maxIndexOfRootFiles = scroll.file.blocking_lock().inner_files.as_ref().unwrap().len() as u16;
-        let index = if maxIndexOfRootFiles < size.height - 4 {
-            maxIndexOfRootFiles
-        } else {
-            size.height - 4
-        };
-        scroll.set_top_index(0);
-        scroll.set_bottom_index(index);
-        scroll.rect = size;
-    }
+        let blank_row = Row::new([""; 4]);
 
-    // Scroll UP
-    if scroll.get_scroll_state_previous() > scroll.get_scroll_state_current() {
-        // Scroll UP only when top index is greater than 0
-        if scroll.get_top_index() > 0 {
-            scroll.set_top_index(scroll.get_top_index() - 1);
-            scroll.set_bottom_index(scroll.get_bottom_index() - 1);
+        if scroll.get_top_index() == 0 && scroll.get_bottom_index() == 0 {
+            let maxIndexOfRootFiles = scroll.file.blocking_lock().inner_files.as_ref().unwrap().len() as u16;
+            let index = if maxIndexOfRootFiles < size.height - 4 {
+                maxIndexOfRootFiles
+            } else {
+                size.height - 4
+            };
+            scroll.set_top_index(0);
+            scroll.set_bottom_index(index);
+            scroll.rect = size;
         }
 
-    // Scroll DOWN
-    } else if scroll.get_scroll_state_previous() < scroll.get_scroll_state_current() {
-        // Scroll UP only when bottom index is greater than total availaible rows
-        let root_file = scroll.file.clone();
-        if let Some(files) = &root_file.blocking_lock().inner_files {
-            if scroll.get_bottom_index() < files.len() as u16 {
-                scroll.set_top_index(scroll.get_top_index() + 1);
-                scroll.set_bottom_index(scroll.get_bottom_index() + 1);
+        if scroll.get_scroll_state_previous() > scroll.get_scroll_state_current() {
+            if scroll.get_top_index() > 0 {
+                scroll.set_top_index(scroll.get_top_index() - 1);
+                scroll.set_bottom_index(scroll.get_bottom_index() - 1);
             }
+        } else if scroll.get_scroll_state_previous() < scroll.get_scroll_state_current() {
+            let root_file = scroll.file.clone();
+            if let Some(files) = &root_file.blocking_lock().inner_files {
+                if scroll.get_bottom_index() < files.len() as u16 {
+                    scroll.set_top_index(scroll.get_top_index() + 1);
+                    scroll.set_bottom_index(scroll.get_bottom_index() + 1);
+                }
+            };
+        }
+
+        let createTableRow = |f: Arc<Mutex<File>>| -> Row {
+            let name = { f.blocking_lock().name.clone() };
+            let file_type = {
+                match f.blocking_lock().file_type {
+                    FileType::REGULAR => String::from("File"),
+                    FileType::DIRECTORY => String::from("Folder"),
+                }
+            };
+
+            let should_download = f.blocking_lock().should_download;
+
+            Row::new(vec![
+                Cell::from(name),
+                Cell::from(file_type),
+                if should_download { download_yes.clone() } else { download_no.clone() },
+                Cell::from(format!("{} ", "NOTHING HERE")),
+            ])
         };
+
+        let mut table_rows = vec![header_row.clone(), blank_row.clone()];
+        for i in scroll.get_top_index()..scroll.get_bottom_index() {
+            let file = scroll.file.blocking_lock().inner_files.as_ref().unwrap()[i as usize].clone();
+            table_rows.push(createTableRow(file));
+        }
+
+        let table = Table::new(table_rows)
+            .widths(&[
+                Constraint::Percentage(NAME_WIDTH_PERCENTAGE),
+                Constraint::Percentage(TYPE_WIDTH_PERCENTAGE),
+                Constraint::Percentage(DOWNLOAD_WIDTH_PERCENTAGE),
+                Constraint::Percentage(PROGRESS_WIDTH_PERCENTAGE),
+            ])
+            .block(
+                Block::default()
+                    .border_type(BorderType::Thick)
+                    .borders(Borders::ALL)
+                    .title(text::Span::styled(" File ", Style::default().fg(Color::Yellow)))
+                    .title_alignment(Alignment::Center),
+            );
+
+        frame.render_widget(table, size);
     }
-
-    let createTableRow = |f: Arc<Mutex<File>>| -> Row {
-        let name = { f.blocking_lock().name.clone() };
-        let file_type = {
-            match f.blocking_lock().file_type {
-                FileType::REGULAR => String::from("File"),
-                FileType::DIRECTORY => String::from("Folder"),
-            }
-        };
-
-        let should_download = f.blocking_lock().should_download;
-
-        Row::new(vec![
-            Cell::from(name),
-            Cell::from(file_type),
-            if should_download { download_yes.clone() } else { download_no.clone() },
-            Cell::from(format!("{} ", "NOTHING HERE")),
-        ])
-    };
-
-    // Create the table rows to render
-    let mut table_rows = vec![header_row.clone(), blank_row.clone()];
-    for i in scroll.get_top_index()..scroll.get_bottom_index() {
-        let file = scroll.file.blocking_lock().inner_files.as_ref().unwrap()[i as usize].clone();
-        table_rows.push(createTableRow(file));
-    }
-
-    // Create the table
-    let table = Table::new(table_rows)
-        .widths(&[
-            Constraint::Percentage(NAME_WIDTH_PERCENTAGE),
-            Constraint::Percentage(TYPE_WIDTH_PERCENTAGE),
-            Constraint::Percentage(DOWNLOAD_WIDTH_PERCENTAGE),
-            Constraint::Percentage(PROGRESS_WIDTH_PERCENTAGE),
-        ])
-        .block(
-            Block::default()
-                .border_type(BorderType::Thick)
-                .borders(Borders::ALL)
-                .title(text::Span::styled(" File ", Style::default().fg(Color::Yellow)))
-                .title_alignment(Alignment::Center),
-        );
-
-    // Render
-    frame.render_widget(table, size);
 }

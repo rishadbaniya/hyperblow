@@ -232,9 +232,11 @@ impl File {
     }
 }
 
-// TODO: Make use of AsRef
-/// Encode the given byte vector of info_hash into a String of
-/// Percent Encoded info_hash
-pub fn percEncode(byteVector: Vec<u8>) -> String {
-    percent_encode(&byteVector, NON_ALPHANUMERIC).to_string()
+pub struct PercentEncoder;
+
+impl PercentEncoder {
+    /// Encode the given bytes into a percent-encoded string.
+    pub fn encode(bytes: &[u8]) -> String {
+        percent_encode(bytes, NON_ALPHANUMERIC).to_string()
+    }
 }

@@ -1,13 +1,17 @@
 use hyperblow::parser::{magnet_uri_parser::MagnetURIMeta, torrent_parser::FileMeta};
 
-fn sample_single_file_torrent() -> Vec<u8> {
-    b"d8:announce30:udp://tracker.example.com:69694:infod6:lengthi12345e4:name10:sample.bin12:piece lengthi16384e6:pieces20:abcdefghijklmnopqrstee"
-        .to_vec()
+struct ParserFixture;
+
+impl ParserFixture {
+    fn sample_single_file_torrent() -> Vec<u8> {
+        b"d8:announce30:udp://tracker.example.com:69694:infod6:lengthi12345e4:name10:sample.bin12:piece lengthi16384e6:pieces20:abcdefghijklmnopqrstee"
+            .to_vec()
+    }
 }
 
 #[test]
 fn parses_single_file_torrent_metadata() {
-    let meta = FileMeta::fromRawTorrentFile(sample_single_file_torrent()).expect("sample torrent should parse");
+    let meta = FileMeta::fromRawTorrentFile(ParserFixture::sample_single_file_torrent()).expect("sample torrent should parse");
 
     assert_eq!(meta.announce, "udp://tracker.example.com:6969");
     assert_eq!(meta.info.name.as_deref(), Some("sample.bin"));

@@ -3,7 +3,7 @@
 // widget, only text data can be rendered inside of Table widget
 
 //use super::{mouse::MouseEv, tabs::bandwidth_tab::TabSectionBandwidth};
-use crate::{tui::tui_state::TUIState, utils};
+use crate::{tui::tui_state::TUIState, utils::ByteSizeFormatter};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -192,8 +192,8 @@ impl TorrentsSection {
 
             // Widget to display the Amount of data downloaded Of Total data
             let widget_bytes = {
-                let bytes_complete = utils::bytes_to_human_readable(handle.bytes_complete());
-                let bytes_total = utils::bytes_to_human_readable(handle.bytes_total());
+                let bytes_complete = ByteSizeFormatter::human_readable(handle.bytes_complete());
+                let bytes_total = ByteSizeFormatter::human_readable(handle.bytes_total());
 
                 Block::default()
                     .title(format!("{bytes_complete}/{bytes_total}"))
@@ -202,14 +202,14 @@ impl TorrentsSection {
 
             // Widget to display the Download speed
             let widget_in = {
-                let download_speed = utils::bytes_to_human_readable(handle.download_speed());
+                let download_speed = ByteSizeFormatter::human_readable(handle.download_speed());
 
                 Block::default().title(format!("{download_speed}/s"))
             };
 
             // Widget to display the Upload speed
             let widget_out = {
-                let upload_speed = utils::bytes_to_human_readable(handle.upload_speed());
+                let upload_speed = ByteSizeFormatter::human_readable(handle.upload_speed());
                 Block::default().title(format!("{upload_speed}/s")).title_alignment(Alignment::Left)
             };
 

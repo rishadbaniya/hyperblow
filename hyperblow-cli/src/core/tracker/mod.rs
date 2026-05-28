@@ -92,120 +92,124 @@ struct HttpPeer {
     port: u16,
 }
 
-fn build_http_announce_url(address: &Url, state: &State, port: u16) -> String {
-    let downloaded = state.bytes_complete() as i64;
-    let left = state.meta_info.total_length().saturating_sub(downloaded);
-    build_http_announce_url_with_values(address, &state.info_hash, downloaded, left, port)
-}
+struct HttpAnnounceCodec;
 
-fn build_http_announce_url_with_values(address: &Url, info_hash: &[u8], downloaded: i64, left: i64, port: u16) -> String {
-    let mut base = address.clone();
-    let original_query = base.query().map(str::to_owned);
-    base.set_query(None);
-    base.set_fragment(None);
-
-    let mut query = original_query.unwrap_or_default();
-    append_bytes_query_pair(&mut query, "info_hash", info_hash);
-    append_bytes_query_pair(&mut query, "peer_id", &PEER_ID);
-    append_query_pair(&mut query, "port", port);
-    append_query_pair(&mut query, "uploaded", 0);
-    append_query_pair(&mut query, "downloaded", downloaded.max(0));
-    append_query_pair(&mut query, "left", left.max(0));
-    append_query_pair(&mut query, "compact", 1);
-    append_query_pair(&mut query, "numwant", 80);
-    append_query_pair(&mut query, "event", "started");
-
-    let mut announce_url = base.to_string();
-    announce_url.push('?');
-    announce_url.push_str(&query);
-    announce_url
-}
-
-fn append_query_pair(query: &mut String, key: &str, value: impl Display) {
-    if !query.is_empty() {
-        query.push('&');
-    }
-    let _ = write!(query, "{key}={value}");
-}
-
-fn append_bytes_query_pair(query: &mut String, key: &str, value: &[u8]) {
-    if !query.is_empty() {
-        query.push('&');
-    }
-    let encoded = percent_encode(value, NON_ALPHANUMERIC);
-    let _ = write!(query, "{key}={encoded}");
-}
-
-fn parse_http_announce_response(bytes: &[u8]) -> TrackerResult<AnnounceResponse> {
-    let response: HttpAnnounceResponse = serde_bencode::de::from_bytes(bytes)?;
-    if let Some(reason) = response.failure_reason {
-        return Err(TrackerError::TrackerFailure(reason));
+impl HttpAnnounceCodec {
+    fn build_url(address: &Url, state: &State, port: u16) -> String {
+        let downloaded = state.bytes_complete() as i64;
+        let left = state.meta_info.total_length().saturating_sub(downloaded);
+        Self::build_url_with_values(address, &state.info_hash, downloaded, left, port)
     }
 
-    let mut peers_addresses = Vec::new();
-    if let Some(peers) = response.peers {
-        match peers {
-            HttpPeers::Compact(bytes) => peers_addresses.extend(parse_compact_ipv4_peers(&bytes)?),
-            HttpPeers::Dictionary(peers) => {
-                for peer in peers {
-                    let ip = peer.ip.parse::<IpAddr>().map_err(|source| TrackerError::InvalidPeerIp {
-                        ip: peer.ip.clone(),
-                        source,
-                    })?;
-                    peers_addresses.push(SocketAddr::new(ip, peer.port));
+    fn build_url_with_values(address: &Url, info_hash: &[u8], downloaded: i64, left: i64, port: u16) -> String {
+        let mut base = address.clone();
+        let original_query = base.query().map(str::to_owned);
+        base.set_query(None);
+        base.set_fragment(None);
+
+        let mut query = original_query.unwrap_or_default();
+        Self::append_bytes_query_pair(&mut query, "info_hash", info_hash);
+        Self::append_bytes_query_pair(&mut query, "peer_id", &PEER_ID);
+        Self::append_query_pair(&mut query, "port", port);
+        Self::append_query_pair(&mut query, "uploaded", 0);
+        Self::append_query_pair(&mut query, "downloaded", downloaded.max(0));
+        Self::append_query_pair(&mut query, "left", left.max(0));
+        Self::append_query_pair(&mut query, "compact", 1);
+        Self::append_query_pair(&mut query, "numwant", 80);
+        Self::append_query_pair(&mut query, "event", "started");
+
+        let mut announce_url = base.to_string();
+        announce_url.push('?');
+        announce_url.push_str(&query);
+        announce_url
+    }
+
+    fn append_query_pair(query: &mut String, key: &str, value: impl Display) {
+        if !query.is_empty() {
+            query.push('&');
+        }
+        let _ = write!(query, "{key}={value}");
+    }
+
+    fn append_bytes_query_pair(query: &mut String, key: &str, value: &[u8]) {
+        if !query.is_empty() {
+            query.push('&');
+        }
+        let encoded = percent_encode(value, NON_ALPHANUMERIC);
+        let _ = write!(query, "{key}={encoded}");
+    }
+
+    fn parse_response(bytes: &[u8]) -> TrackerResult<AnnounceResponse> {
+        let response: HttpAnnounceResponse = serde_bencode::de::from_bytes(bytes)?;
+        if let Some(reason) = response.failure_reason {
+            return Err(TrackerError::TrackerFailure(reason));
+        }
+
+        let mut peers_addresses = Vec::new();
+        if let Some(peers) = response.peers {
+            match peers {
+                HttpPeers::Compact(bytes) => peers_addresses.extend(Self::parse_compact_ipv4_peers(&bytes)?),
+                HttpPeers::Dictionary(peers) => {
+                    for peer in peers {
+                        let ip = peer.ip.parse::<IpAddr>().map_err(|source| TrackerError::InvalidPeerIp {
+                            ip: peer.ip.clone(),
+                            source,
+                        })?;
+                        peers_addresses.push(SocketAddr::new(ip, peer.port));
+                    }
                 }
             }
         }
-    }
-    peers_addresses.extend(parse_compact_ipv6_peers(&response.peers6)?);
+        peers_addresses.extend(Self::parse_compact_ipv6_peers(&response.peers6)?);
 
-    Ok(AnnounceResponse {
-        action: 1,
-        transaction_id: 0,
-        interval: response.interval.unwrap_or(1800).max(1) as i32,
-        leechers: response.incomplete.unwrap_or_default().max(0) as i32,
-        seeders: response.complete.unwrap_or_default().max(0) as i32,
-        peersAddresses: peers_addresses,
-    })
-}
-
-fn parse_compact_ipv4_peers(bytes: &[u8]) -> TrackerResult<Vec<SocketAddr>> {
-    if !bytes.len().is_multiple_of(6) {
-        return Err(TrackerError::InvalidCompactPeerList {
-            family: "IPv4",
-            chunk_size: 6,
-            len: bytes.len(),
-        });
-    }
-
-    Ok(bytes
-        .chunks_exact(6)
-        .map(|peer| {
-            SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::new(peer[0], peer[1], peer[2], peer[3])),
-                u16::from_be_bytes([peer[4], peer[5]]),
-            )
+        Ok(AnnounceResponse {
+            action: 1,
+            transaction_id: 0,
+            interval: response.interval.unwrap_or(1800).max(1) as i32,
+            leechers: response.incomplete.unwrap_or_default().max(0) as i32,
+            seeders: response.complete.unwrap_or_default().max(0) as i32,
+            peersAddresses: peers_addresses,
         })
-        .collect())
-}
-
-fn parse_compact_ipv6_peers(bytes: &[u8]) -> TrackerResult<Vec<SocketAddr>> {
-    if !bytes.len().is_multiple_of(18) {
-        return Err(TrackerError::InvalidCompactPeerList {
-            family: "IPv6",
-            chunk_size: 18,
-            len: bytes.len(),
-        });
     }
 
-    Ok(bytes
-        .chunks_exact(18)
-        .map(|peer| {
-            let mut ip_bytes = [0_u8; 16];
-            ip_bytes.copy_from_slice(&peer[..16]);
-            SocketAddr::new(IpAddr::V6(Ipv6Addr::from(ip_bytes)), u16::from_be_bytes([peer[16], peer[17]]))
-        })
-        .collect())
+    fn parse_compact_ipv4_peers(bytes: &[u8]) -> TrackerResult<Vec<SocketAddr>> {
+        if !bytes.len().is_multiple_of(6) {
+            return Err(TrackerError::InvalidCompactPeerList {
+                family: "IPv4",
+                chunk_size: 6,
+                len: bytes.len(),
+            });
+        }
+
+        Ok(bytes
+            .chunks_exact(6)
+            .map(|peer| {
+                SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::new(peer[0], peer[1], peer[2], peer[3])),
+                    u16::from_be_bytes([peer[4], peer[5]]),
+                )
+            })
+            .collect())
+    }
+
+    fn parse_compact_ipv6_peers(bytes: &[u8]) -> TrackerResult<Vec<SocketAddr>> {
+        if !bytes.len().is_multiple_of(18) {
+            return Err(TrackerError::InvalidCompactPeerList {
+                family: "IPv6",
+                chunk_size: 18,
+                len: bytes.len(),
+            });
+        }
+
+        Ok(bytes
+            .chunks_exact(18)
+            .map(|peer| {
+                let mut ip_bytes = [0_u8; 16];
+                ip_bytes.copy_from_slice(&peer[..16]);
+                SocketAddr::new(IpAddr::V6(Ipv6Addr::from(ip_bytes)), u16::from_be_bytes([peer[16], peer[17]]))
+            })
+            .collect())
+    }
 }
 
 ///Type of protocol used to connect to the tracker
@@ -442,9 +446,9 @@ impl Tracker {
 
     async fn send_http_announce_request(&self, client: &reqwest::Client) -> TrackerResult<AnnounceResponse> {
         self.tracker_state.store(TrackerState::WaitingForAnnounceResponse);
-        let announce_url = build_http_announce_url(&self.address, &self.torrent_state, self.announce_port().await);
+        let announce_url = HttpAnnounceCodec::build_url(&self.address, &self.torrent_state, self.announce_port().await);
         let response_bytes = client.get(announce_url).send().await?.error_for_status()?.bytes().await?;
-        let announce_response = parse_http_announce_response(&response_bytes)?;
+        let announce_response = HttpAnnounceCodec::parse_response(&response_bytes)?;
 
         for peer_socket_adr in announce_response.peersAddresses.clone() {
             let peer = Peer::new(peer_socket_adr, self.torrent_state.clone());
@@ -808,9 +812,7 @@ pub enum TrackerRequest {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_http_announce_url_with_values, parse_compact_ipv4_peers, parse_compact_ipv6_peers, parse_http_announce_response, Tracker,
-    };
+    use super::{HttpAnnounceCodec, Tracker};
     use crate::core::state::{DownState, State};
     use bytes::{BufMut, BytesMut};
     use crossbeam::atomic::AtomicCell;
@@ -833,7 +835,7 @@ mod tests {
             0x00, 0x01, 0x02, 0x03, 0x04, b'a', b'b', b'c', b'd', b'e', b'f', 0x7f, 0x80, 0x81, 0xfe, 0xff, b'1', b'2', b'3', b'4',
         ];
 
-        let announce_url = build_http_announce_url_with_values(&url, &info_hash, 25, 75, 6881);
+        let announce_url = HttpAnnounceCodec::build_url_with_values(&url, &info_hash, 25, 75, 6881);
 
         assert!(announce_url.starts_with("https://tracker.example.test/announce?existing=1&"));
         assert!(announce_url.contains("info_hash=%00%01%02%03%04abcdef%7F%80%81%FE%FF1234"));
@@ -845,14 +847,14 @@ mod tests {
 
     #[test]
     fn parses_http_compact_ipv4_peers() {
-        let peers = parse_compact_ipv4_peers(&[127, 0, 0, 1, 0x1a, 0xe1]).expect("valid compact peers");
+        let peers = HttpAnnounceCodec::parse_compact_ipv4_peers(&[127, 0, 0, 1, 0x1a, 0xe1]).expect("valid compact peers");
 
         assert_eq!(peers, vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6881)]);
     }
 
     #[test]
     fn rejects_malformed_http_compact_ipv4_peers() {
-        assert!(parse_compact_ipv4_peers(&[127, 0, 0, 1, 0x1a]).is_err());
+        assert!(HttpAnnounceCodec::parse_compact_ipv4_peers(&[127, 0, 0, 1, 0x1a]).is_err());
     }
 
     #[test]
@@ -861,7 +863,7 @@ mod tests {
         bytes.extend_from_slice(&Ipv6Addr::LOCALHOST.octets());
         bytes.extend_from_slice(&6881_u16.to_be_bytes());
 
-        let peers = parse_compact_ipv6_peers(&bytes).expect("valid compact IPv6 peers");
+        let peers = HttpAnnounceCodec::parse_compact_ipv6_peers(&bytes).expect("valid compact IPv6 peers");
 
         assert_eq!(peers, vec![SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 6881)]);
     }
@@ -879,7 +881,7 @@ mod tests {
         response.put_slice(&peers);
         response.put_u8(b'e');
 
-        let response = parse_http_announce_response(&response).expect("valid HTTP announce response");
+        let response = HttpAnnounceCodec::parse_response(&response).expect("valid HTTP announce response");
 
         assert_eq!(response.interval, 1800);
         assert_eq!(response.seeders, 2);
@@ -894,7 +896,7 @@ mod tests {
     fn parses_http_announce_response_with_dictionary_peers() {
         let response = b"d8:intervali30e5:peersld2:ip9:127.0.0.14:porti6881eeee";
 
-        let response = parse_http_announce_response(response).expect("valid dictionary peer response");
+        let response = HttpAnnounceCodec::parse_response(response).expect("valid dictionary peer response");
 
         assert_eq!(
             response.peersAddresses,
@@ -906,7 +908,7 @@ mod tests {
     fn rejects_http_tracker_failure_response() {
         let response = b"d14:failure reason12:tracker downe";
 
-        assert!(parse_http_announce_response(response).is_err());
+        assert!(HttpAnnounceCodec::parse_response(response).is_err());
     }
 
     #[tokio::test]

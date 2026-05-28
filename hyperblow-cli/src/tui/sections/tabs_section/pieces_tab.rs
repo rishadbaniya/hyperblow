@@ -1,4 +1,4 @@
-use crate::{tui::tui_state::TUIState, utils};
+use crate::{tui::tui_state::TUIState, utils::ByteSizeFormatter};
 use ratatui::{
     layout::{Constraint, Rect},
     widgets::{Block, BorderType, Borders, Paragraph, Row, Table},
@@ -32,7 +32,7 @@ impl PiecesTab {
                 "Remaining".to_string(),
                 handle.pieces_total().saturating_sub(handle.pieces_downloaded()).to_string(),
             ]),
-            Row::new(["Piece size".to_string(), utils::bytes_to_human_readable(handle.piece_size())]),
+            Row::new(["Piece size".to_string(), ByteSizeFormatter::human_readable(handle.piece_size())]),
         ];
 
         let table = Table::new(rows, [Constraint::Length(16), Constraint::Min(10)]).block(block);

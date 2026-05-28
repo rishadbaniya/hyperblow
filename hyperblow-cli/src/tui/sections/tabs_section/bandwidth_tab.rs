@@ -1,4 +1,4 @@
-use crate::{tui::tui_state::TUIState, utils};
+use crate::{tui::tui_state::TUIState, utils::ByteSizeFormatter};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     widgets::{Block, BorderType, Borders, Paragraph, Row, Table},
@@ -36,11 +36,11 @@ impl BandwidthTab {
         let rows = [
             Row::new([
                 "Download".to_string(),
-                format!("{}/s", utils::bytes_to_human_readable(handle.download_speed())),
+                format!("{}/s", ByteSizeFormatter::human_readable(handle.download_speed())),
             ]),
             Row::new([
                 "Upload".to_string(),
-                format!("{}/s", utils::bytes_to_human_readable(handle.upload_speed())),
+                format!("{}/s", ByteSizeFormatter::human_readable(handle.upload_speed())),
             ]),
         ];
         let table = Table::new(rows, [Constraint::Length(18), Constraint::Min(10)]);

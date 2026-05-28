@@ -1,4 +1,4 @@
-use crate::{tui::tui_state::TUIState, utils};
+use crate::{tui::tui_state::TUIState, utils::ByteSizeFormatter};
 use ratatui::{
     layout::{Constraint, Rect},
     widgets::{Block, BorderType, Borders, Paragraph, Row, Table},
@@ -25,8 +25,8 @@ impl DetailsTab {
             return;
         };
 
-        let bytes_complete = utils::bytes_to_human_readable(handle.bytes_complete());
-        let bytes_total = utils::bytes_to_human_readable(handle.bytes_total());
+        let bytes_complete = ByteSizeFormatter::human_readable(handle.bytes_complete());
+        let bytes_total = ByteSizeFormatter::human_readable(handle.bytes_total());
         let rows = [
             Row::new(["Name".to_string(), handle.name()]),
             Row::new(["Size".to_string(), bytes_total]),
@@ -35,7 +35,7 @@ impl DetailsTab {
                 "Pieces".to_string(),
                 format!("{}/{}", handle.pieces_downloaded(), handle.pieces_total()),
             ]),
-            Row::new(["Piece size".to_string(), utils::bytes_to_human_readable(handle.piece_size())]),
+            Row::new(["Piece size".to_string(), ByteSizeFormatter::human_readable(handle.piece_size())]),
             Row::new(["Peers".to_string(), handle.connected_peers().to_string()]),
             Row::new(["Trackers".to_string(), handle.tracker_snapshots().len().to_string()]),
         ];

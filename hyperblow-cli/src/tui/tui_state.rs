@@ -47,6 +47,20 @@ pub struct TUIState {
     content_row_index: Cell<usize>,
 
     max_content_row_index: Cell<usize>,
+
+    command_mode: Cell<bool>,
+
+    command_input: RefCell<String>,
+
+    command_suggestions: RefCell<Vec<String>>,
+
+    command_suggestion_index: Cell<usize>,
+
+    command_feedback: RefCell<Option<String>>,
+
+    command_feedback_is_error: Cell<bool>,
+
+    pending_command_count: Cell<usize>,
 }
 
 impl TUIState {
@@ -70,6 +84,13 @@ impl TUIState {
         let max_torrent_index = Cell::new(0);
         let content_row_index = Cell::new(0);
         let max_content_row_index = Cell::new(0);
+        let command_mode = Cell::new(false);
+        let command_input = RefCell::new(String::new());
+        let command_suggestions = RefCell::new(Vec::new());
+        let command_suggestion_index = Cell::new(0);
+        let command_feedback = RefCell::new(None);
+        let command_feedback_is_error = Cell::new(false);
+        let pending_command_count = Cell::new(0);
 
         TUIState {
             max_tab_index,
@@ -81,6 +102,13 @@ impl TUIState {
             max_torrent_index,
             content_row_index,
             max_content_row_index,
+            command_mode,
+            command_input,
+            command_suggestions,
+            command_suggestion_index,
+            command_feedback,
+            command_feedback_is_error,
+            pending_command_count,
         }
     }
 
@@ -187,6 +215,122 @@ impl TUIState {
         if current_content_row_index > 0 {
             self.set_content_row_index(current_content_row_index - 1);
         }
+    }
+
+    pub fn is_command_mode(&self) -> bool {
+        self.command_mode.get()
+    }
+
+    pub fn enter_command_mode(&self) {
+        self.command_mode.set(true);
+        self.clear_command_feedback();
+    }
+
+    pub fn exit_command_mode(&self) {
+        self.command_mode.set(false);
+        self.command_suggestion_index.set(0);
+    }
+
+    pub fn command_input(&self) -> String {
+        self.command_input.borrow().clone()
+    }
+
+    pub fn set_command_input(&self, input: String) {
+        *self.command_input.borrow_mut() = input;
+        self.command_suggestion_index.set(0);
+    }
+
+    pub fn push_command_char(&self, character: char) {
+        self.command_input.borrow_mut().push(character);
+        self.command_suggestion_index.set(0);
+        self.clear_command_feedback();
+    }
+
+    pub fn pop_command_char(&self) {
+        self.command_input.borrow_mut().pop();
+        self.command_suggestion_index.set(0);
+        self.clear_command_feedback();
+    }
+
+    pub fn clear_command_input(&self) {
+        self.command_input.borrow_mut().clear();
+        self.command_suggestion_index.set(0);
+    }
+
+    pub fn set_command_suggestions(&self, suggestions: Vec<String>) {
+        let max_index = suggestions.len().saturating_sub(1);
+        *self.command_suggestions.borrow_mut() = suggestions;
+        if self.command_suggestion_index.get() > max_index {
+            self.command_suggestion_index.set(max_index);
+        }
+    }
+
+    pub fn command_suggestions(&self) -> Vec<String> {
+        self.command_suggestions.borrow().clone()
+    }
+
+    pub fn command_suggestion_index(&self) -> usize {
+        self.command_suggestion_index.get()
+    }
+
+    pub fn increment_command_suggestion_index(&self) {
+        let suggestions_len = self.command_suggestions.borrow().len();
+        if suggestions_len == 0 {
+            self.command_suggestion_index.set(0);
+            return;
+        }
+
+        let next_index = (self.command_suggestion_index.get() + 1) % suggestions_len;
+        self.command_suggestion_index.set(next_index);
+    }
+
+    pub fn decrement_command_suggestion_index(&self) {
+        let suggestions_len = self.command_suggestions.borrow().len();
+        if suggestions_len == 0 {
+            self.command_suggestion_index.set(0);
+            return;
+        }
+
+        let next_index = if self.command_suggestion_index.get() == 0 {
+            suggestions_len - 1
+        } else {
+            self.command_suggestion_index.get() - 1
+        };
+        self.command_suggestion_index.set(next_index);
+    }
+
+    pub fn selected_command_suggestion(&self) -> Option<String> {
+        self.command_suggestions.borrow().get(self.command_suggestion_index.get()).cloned()
+    }
+
+    pub fn set_command_feedback(&self, message: String, is_error: bool) {
+        *self.command_feedback.borrow_mut() = Some(message);
+        self.command_feedback_is_error.set(is_error);
+    }
+
+    pub fn command_feedback(&self) -> Option<String> {
+        self.command_feedback.borrow().clone()
+    }
+
+    pub fn command_feedback_is_error(&self) -> bool {
+        self.command_feedback_is_error.get()
+    }
+
+    pub fn clear_command_feedback(&self) {
+        *self.command_feedback.borrow_mut() = None;
+        self.command_feedback_is_error.set(false);
+    }
+
+    pub fn increment_pending_commands(&self) {
+        self.pending_command_count.set(self.pending_command_count.get().saturating_add(1));
+    }
+
+    pub fn decrement_pending_commands(&self) {
+        self.pending_command_count.set(self.pending_command_count.get().saturating_sub(1));
+    }
+
+    pub fn has_pending_commands(&self) -> bool {
+        self.pending_command_count.get() > 0
     }
 
     //    pub fn getTorrentsData() {}
