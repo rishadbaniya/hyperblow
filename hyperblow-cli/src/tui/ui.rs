@@ -290,6 +290,10 @@ impl AppRenderer {
             Line::styled("Hyperblow", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             Line::from(""),
             Line::styled(pending_line, Style::default().fg(Color::Cyan)),
+            Line::styled(
+                format!("Downloads: {}", state.engine.download_directory().display()),
+                Style::default().fg(Color::DarkGray),
+            ),
             Line::from(""),
             Line::from("Press : and run file or magnet"),
             Line::styled(":file /path/to/file.torrent", Style::default().fg(Color::White)),

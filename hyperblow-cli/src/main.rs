@@ -2,6 +2,7 @@
 
 mod arguments;
 mod core;
+mod download_directory;
 mod engine;
 mod tui;
 mod utils;
@@ -20,7 +21,7 @@ fn main() -> Result<()> {
     let args = Arguments::parse();
 
     // Creates engine
-    let engine = Engine::new();
+    let engine = Engine::try_new()?;
     if let Some(source) = args.source()? {
         StartupTorrentLoader::spawn_in_engine(engine.clone(), source)?;
     }

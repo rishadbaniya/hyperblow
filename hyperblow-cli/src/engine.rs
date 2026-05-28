@@ -15,9 +15,16 @@
 /// 1. It has its own internal thread(s), runtime, to dowload the torrent.
 /// 2. The only abstraction engine is going to share is EngineHandle,
 ///    which can control core behaviours of engine such as shut it down
-use crate::core::{tracker::TrackerState, TError, TorrentFile};
+use crate::{
+    core::{tracker::TrackerState, TError, TorrentFile},
+    download_directory::{DownloadDirectory, DownloadDirectoryError},
+};
 use hyperblow::parser::magnet_uri_parser::MagnetURIMeta;
-use std::{sync::Arc, thread::JoinHandle};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    thread::JoinHandle,
+};
 use thiserror::Error;
 use tokio::{
     runtime::{Builder, Runtime},
@@ -51,6 +58,9 @@ pub enum EngineError {
 
     #[error("invalid magnet URI")]
     InvalidMagnetUri,
+
+    #[error("invalid download directory")]
+    DownloadDirectory(#[from] DownloadDirectoryError),
 }
 
 pub struct TrackerSnapshot {
@@ -65,6 +75,8 @@ pub struct Engine {
     /// Stores all the torrents that are to be downloaded
     pub torrents: Arc<Mutex<Vec<Arc<TorrentHandle>>>>,
 
+    download_directory: DownloadDirectory,
+
     /// The thread that spawns the tokio runtime, where all the torrents download is gonna take place
     engine_thread_handle: JoinHandle<()>,
 
@@ -78,7 +90,18 @@ pub struct Engine {
 impl Engine {
     /// Creates an instance of the engine
     pub fn new() -> Arc<Self> {
+        Self::try_new().expect("default download directory should be usable")
+    }
+
+    pub fn try_new() -> Result<Arc<Self>, EngineError> {
+        let download_directory = DownloadDirectory::default()?;
+        download_directory.ensure_exists()?;
+        Ok(Self::with_download_directory(download_directory))
+    }
+
+    fn with_download_directory(download_directory: DownloadDirectory) -> Arc<Self> {
         let torrents = Arc::default();
+        let engine_download_directory = download_directory.clone();
 
         // Receivies the torrent source from ui_thread and sends it into the engine thread
         let (tsrc_sd, mut tsrc_rx) = unbounded_channel::<TorrentSource>();
@@ -93,7 +116,7 @@ impl Engine {
                 while let Some(src) = tsrc_rx.recv().await {
                     // TODO : Check if there was any error in creating the torrent handle in this
                     // engine_thread and then only run the torrent on the engine thread and send its pointer to the ui_thread
-                    let handle = TorrentHandle::new(src).await;
+                    let handle = TorrentHandle::new(src, engine_download_directory.path().to_path_buf()).await;
                     if let Ok(ref handle) = handle {
                         let tokio_handle = handle.clone();
                         tokio::task::spawn(async move { tokio_handle.run().await });
@@ -109,6 +132,7 @@ impl Engine {
 
         Arc::new(Self {
             torrents,
+            download_directory,
             engine_thread_handle,
             trnt_thread_sender: tsrc_sd,
             trnt_handle_receiver: Arc::new(Mutex::new(thdl_rx)),
@@ -137,27 +161,34 @@ impl Engine {
     pub fn torrent_snapshot(&self) -> Option<Vec<Arc<TorrentHandle>>> {
         self.torrents.try_lock().ok().map(|handles| handles.clone())
     }
+
+    pub fn download_directory(&self) -> &Path {
+        self.download_directory.path()
+    }
 }
 
 #[derive(Debug)]
 pub struct TorrentHandle {
     inner: Torrent,
+    download_directory: PathBuf,
 }
 
 impl TorrentHandle {
     /// Consumes the torrent source, may it be a Path or a MagnetURI,
-    pub async fn new(src: TorrentSource) -> Result<Arc<TorrentHandle>, EngineError> {
+    pub async fn new(src: TorrentSource, download_directory: PathBuf) -> Result<Arc<TorrentHandle>, EngineError> {
         match src {
             TorrentSource::FilePath(ref path) => {
                 let torrent = TorrentFile::new(path).await?;
                 Ok(Arc::new(Self {
                     inner: Torrent::FileTorrent(Arc::new(torrent)),
+                    download_directory,
                 }))
             }
             TorrentSource::MagnetURI(ref uri) => {
                 let magnet = MagnetURIMeta::fromMagnetURI(uri).map_err(|_| EngineError::InvalidMagnetUri)?;
                 Ok(Arc::new(Self {
                     inner: Torrent::MagnetUriTorrent(Arc::new(magnet)),
+                    download_directory,
                 }))
             }
         }
@@ -267,6 +298,10 @@ impl TorrentHandle {
         }
     }
 
+    pub fn download_directory(&self) -> &Path {
+        &self.download_directory
+    }
+
     pub fn getFileTree(&self) -> Option<Arc<Mutex<crate::core::File>>> {
         match self.inner {
             Torrent::FileTorrent(ref file_trnt) => file_trnt.state.file_tree.clone(),
@@ -349,6 +384,8 @@ mod tests {
             .expect("magnet should spawn");
 
         assert_eq!(handle.name(), "Sintel");
+        assert_eq!(handle.download_directory(), engine.download_directory());
+        assert!(engine.download_directory().is_dir());
         assert_eq!(handle.tracker_snapshots().len(), 1);
         assert_eq!(engine.torrents.lock().await.len(), 1);
     }
