@@ -169,15 +169,9 @@ impl TorrentsSection {
 
             // Widget to display progress in percentage
             let widget_progress = {
-                let bytes_total = handle.bytes_total();
-                let progress_perc = if bytes_total == 0 {
-                    0
-                } else {
-                    ((handle.bytes_complete().saturating_mul(100)) / bytes_total).min(100) as u16
-                };
                 Gauge::default()
                     .gauge_style(Style::default().fg(Color::White).bg(Color::Black).add_modifier(Modifier::BOLD))
-                    .percent(progress_perc)
+                    .percent(handle.progress_percent())
             };
 
             // Widget to display status to show either the torrent session is Paused, Downloading
@@ -193,7 +187,10 @@ impl TorrentsSection {
             // Widget to display the Amount of data downloaded Of Total data
             let widget_bytes = {
                 let bytes_complete = ByteSizeFormatter::human_readable(handle.bytes_complete());
-                let bytes_total = ByteSizeFormatter::human_readable(handle.bytes_total());
+                let bytes_total = handle
+                    .bytes_total_known()
+                    .map(ByteSizeFormatter::human_readable)
+                    .unwrap_or_else(|| "Unknown".to_string());
 
                 Block::default()
                     .title(format!("{bytes_complete}/{bytes_total}"))

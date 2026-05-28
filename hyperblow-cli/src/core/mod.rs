@@ -1,3 +1,4 @@
+pub mod magnet;
 pub mod peer;
 pub mod piece_assembler;
 pub mod piece_picker;

@@ -16,7 +16,12 @@
 /// 2. The only abstraction engine is going to share is EngineHandle,
 ///    which can control core behaviours of engine such as shut it down
 use crate::{
-    core::{tracker::TrackerState, TError, TorrentFile},
+    core::{
+        magnet::{MagnetTorrent, MagnetTorrentError},
+        state::State,
+        tracker::TrackerState,
+        TError, TorrentFile,
+    },
     download_directory::{DownloadDirectory, DownloadDirectoryError},
 };
 use hyperblow::parser::magnet_uri_parser::MagnetURIMeta;
@@ -37,7 +42,7 @@ use tracing::{debug, error, info, warn};
 
 #[derive(Debug)]
 enum Torrent {
-    MagnetUriTorrent(Arc<MagnetURIMeta>),
+    MagnetUriTorrent(Arc<MagnetTorrent>),
     FileTorrent(Arc<TorrentFile>),
 }
 
@@ -68,6 +73,9 @@ pub enum EngineError {
 
     #[error("invalid magnet URI")]
     InvalidMagnetUri,
+
+    #[error(transparent)]
+    Magnet(#[from] MagnetTorrentError),
 
     #[error("invalid download directory")]
     DownloadDirectory(#[from] DownloadDirectoryError),
@@ -212,6 +220,7 @@ impl TorrentHandle {
             TorrentSource::MagnetURI(ref uri) => {
                 debug!(source = "magnet", "parsing magnet URI");
                 let magnet = MagnetURIMeta::fromMagnetURI(uri).map_err(|_| EngineError::InvalidMagnetUri)?;
+                let magnet = MagnetTorrent::new(magnet).await?;
                 Ok(Arc::new(Self {
                     inner: Torrent::MagnetUriTorrent(Arc::new(magnet)),
                     download_directory,
@@ -222,7 +231,9 @@ impl TorrentHandle {
 
     pub async fn run(&self) {
         match self.inner {
-            Torrent::MagnetUriTorrent(_) => {}
+            Torrent::MagnetUriTorrent(ref magnet) => {
+                magnet.run().await;
+            }
             Torrent::FileTorrent(ref file_trnt) => {
                 file_trnt.run().await;
             }
@@ -239,7 +250,7 @@ impl TorrentHandle {
                 .name
                 .clone()
                 .unwrap_or_else(|| "Unnamed torrent".to_string()),
-            Torrent::MagnetUriTorrent(ref magnet) => MagnetTitle::from_meta(magnet).display(),
+            Torrent::MagnetUriTorrent(ref magnet) => MagnetTitle::from_meta(magnet.meta()).display(),
         }
     }
 
@@ -253,7 +264,7 @@ impl TorrentHandle {
                     String::from("Name Not Found!")
                 }
             }
-            Torrent::MagnetUriTorrent(ref magnet) => MagnetTitle::from_meta(magnet).display(),
+            Torrent::MagnetUriTorrent(ref magnet) => MagnetTitle::from_meta(magnet.meta()).display(),
         }
     }
 
@@ -267,10 +278,25 @@ impl TorrentHandle {
 
     /// Gives total size of entire torrent in "bytes"
     pub fn bytes_total(&self) -> usize {
+        self.bytes_total_known().unwrap_or(0)
+    }
+
+    pub fn bytes_total_known(&self) -> Option<usize> {
         match self.inner {
-            Torrent::FileTorrent(ref file_trnt) => file_trnt.state.meta_info.total_length().max(0) as usize,
-            Torrent::MagnetUriTorrent(ref magnet) => magnet.xl.unwrap_or(0) as usize,
+            Torrent::FileTorrent(ref file_trnt) => Some(file_trnt.state.meta_info.total_length().max(0) as usize),
+            Torrent::MagnetUriTorrent(ref magnet) => magnet.bytes_total(),
         }
+    }
+
+    pub fn progress_percent(&self) -> u16 {
+        let Some(bytes_total) = self.bytes_total_known() else {
+            return 0;
+        };
+        if bytes_total == 0 {
+            return 0;
+        }
+
+        ((self.bytes_complete().saturating_mul(100)) / bytes_total).min(100) as u16
     }
 
     /// Gives total no of pieces
@@ -316,7 +342,7 @@ impl TorrentHandle {
     pub fn status_label(&self) -> String {
         match self.inner {
             Torrent::FileTorrent(_) => "Preparing".to_string(),
-            Torrent::MagnetUriTorrent(_) => "Metadata only".to_string(),
+            Torrent::MagnetUriTorrent(ref magnet) => magnet.status_label(),
         }
     }
 
@@ -333,41 +359,15 @@ impl TorrentHandle {
 
     pub fn tracker_snapshots(&self) -> Vec<TrackerSnapshot> {
         match self.inner {
-            Torrent::FileTorrent(ref file_trnt) => {
-                let Ok(trackers) = file_trnt.state.trackers.try_read() else {
-                    return Vec::new();
-                };
-                trackers
-                    .iter()
-                    .flat_map(|tier| tier.iter())
-                    .map(|tracker| {
-                        let status = tracker.tracker_state.load();
-                        TrackerSnapshot {
-                            url: tracker.address.to_string(),
-                            status: status.to_string(),
-                            is_error: matches!(status, TrackerState::DNSUnresolved { .. } | TrackerState::Idle),
-                        }
-                    })
-                    .collect()
-            }
-            Torrent::MagnetUriTorrent(ref magnet) => magnet
-                .tr
-                .clone()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|url| TrackerSnapshot {
-                    url,
-                    status: "Magnet metadata".to_string(),
-                    is_error: false,
-                })
-                .collect(),
+            Torrent::FileTorrent(ref file_trnt) => TrackerSnapshotList::from_state(&file_trnt.state, Vec::new()),
+            Torrent::MagnetUriTorrent(ref magnet) => TrackerSnapshotList::from_state(&magnet.state(), magnet.tracker_addresses()),
         }
     }
 
     pub fn connected_peers(&self) -> usize {
         match self.inner {
             Torrent::FileTorrent(ref file_trnt) => file_trnt.state.peers.try_lock().map(|peers| peers.len()).unwrap_or_default(),
-            Torrent::MagnetUriTorrent(_) => 0,
+            Torrent::MagnetUriTorrent(ref magnet) => magnet.state().peers.try_lock().map(|peers| peers.len()).unwrap_or_default(),
         }
     }
 
@@ -377,7 +377,10 @@ impl TorrentHandle {
                 |_| Vec::new(),
                 |peers| peers.iter().map(|peer| peer.socket_adr.to_string()).collect(),
             ),
-            Torrent::MagnetUriTorrent(_) => Vec::new(),
+            Torrent::MagnetUriTorrent(ref magnet) => magnet.state().peers.try_lock().map_or_else(
+                |_| Vec::new(),
+                |peers| peers.iter().map(|peer| peer.socket_adr.to_string()).collect(),
+            ),
         }
     }
 
@@ -388,6 +391,46 @@ impl TorrentHandle {
                 .map_or_else(|_| Vec::new(), |file_tree| file_tree.try_tabs_traverse_names(0)),
             None => Vec::new(),
         }
+    }
+}
+
+struct TrackerSnapshotList;
+
+impl TrackerSnapshotList {
+    fn from_state(state: &Arc<State>, fallback_addresses: Vec<String>) -> Vec<TrackerSnapshot> {
+        let Ok(trackers) = state.trackers.try_read() else {
+            return Self::queued(fallback_addresses);
+        };
+
+        let snapshots = trackers
+            .iter()
+            .flat_map(|tier| tier.iter())
+            .map(|tracker| {
+                let status = tracker.tracker_state.load();
+                TrackerSnapshot {
+                    url: tracker.address.to_string(),
+                    status: status.to_string(),
+                    is_error: matches!(status, TrackerState::DNSUnresolved { .. } | TrackerState::Idle),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if snapshots.is_empty() {
+            Self::queued(fallback_addresses)
+        } else {
+            snapshots
+        }
+    }
+
+    fn queued(addresses: Vec<String>) -> Vec<TrackerSnapshot> {
+        addresses
+            .into_iter()
+            .map(|url| TrackerSnapshot {
+                url,
+                status: "Queued".to_string(),
+                is_error: false,
+            })
+            .collect()
     }
 }
 
@@ -442,6 +485,8 @@ mod tests {
             .expect("magnet should spawn");
 
         assert_eq!(handle.name(), "Sintel");
+        assert_eq!(handle.status_label(), "Fetching metadata");
+        assert_eq!(handle.bytes_total_known(), None);
         assert_eq!(handle.download_directory(), engine.download_directory());
         assert!(engine.download_directory().is_dir());
         assert_eq!(handle.tracker_snapshots().len(), 1);

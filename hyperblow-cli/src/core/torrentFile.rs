@@ -81,11 +81,28 @@ impl TorrentFile {
     /// from the Torrent file
     pub async fn new(path: &str) -> Result<Self, TError> {
         let meta_info = FileMeta::fromTorrentFile(path)?;
+        Self::from_metadata(path.to_string(), meta_info, true).await
+    }
+
+    pub(crate) async fn from_metadata(path: String, meta_info: FileMeta, build_file_tree: bool) -> Result<Self, TError> {
         let info_hash = meta_info.generateInfoHash();
+        Self::from_metadata_with_info_hash(path, meta_info, info_hash, build_file_tree).await
+    }
+
+    pub(crate) async fn from_metadata_with_info_hash(
+        path: String,
+        meta_info: FileMeta,
+        info_hash: Vec<u8>,
+        build_file_tree: bool,
+    ) -> Result<Self, TError> {
         let pieces_hash = meta_info.getPiecesHash()?;
         let pieces_count = pieces_hash.len();
         let d_state = DownState::Unknown;
-        let file_tree = Some(Self::generateFileTree(&meta_info).await);
+        let file_tree = if build_file_tree {
+            Some(Self::generateFileTree(&meta_info).await)
+        } else {
+            None
+        };
         let trackers = ArcRwLock!(Vec::new());
         let udp_ports = ArcMutex!(Vec::new());
         let tcp_ports = ArcMutex!(Vec::new());
@@ -113,7 +130,7 @@ impl TorrentFile {
         });
 
         Ok(Self {
-            path: path.to_string(),
+            path,
             pieces_count,
             state,
             peers_channel,

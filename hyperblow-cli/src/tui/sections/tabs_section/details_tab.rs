@@ -26,7 +26,10 @@ impl DetailsTab {
         };
 
         let bytes_complete = ByteSizeFormatter::human_readable(handle.bytes_complete());
-        let bytes_total = ByteSizeFormatter::human_readable(handle.bytes_total());
+        let bytes_total = handle
+            .bytes_total_known()
+            .map(ByteSizeFormatter::human_readable)
+            .unwrap_or_else(|| "Unknown".to_string());
         let rows = [
             Row::new(["Name".to_string(), handle.name()]),
             Row::new(["Size".to_string(), bytes_total]),

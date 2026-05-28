@@ -76,7 +76,7 @@ impl MagnetURIMeta {
                     xt,
                     dn: d.display_name().map(MagnetValueDecoder::decode),
                     xl: d.length(),
-                    tr: Some(d.trackers().to_vec()),
+                    tr: Some(d.trackers().iter().map(|tracker| MagnetValueDecoder::decode(tracker)).collect()),
                     ws: d.web_seed().map(ToOwned::to_owned),
                     xs: d.source().map(ToOwned::to_owned),
                     kt: d.search_keywords().map(ToOwned::to_owned),
