@@ -23,6 +23,7 @@ reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] 
 serde = { version = "1.0.228", features = ["derive"] }
 serde_bytes = "0.11.19"
 serde_bencode = "0.2.4"
+futures-util = { version = "0.3.32", default-features = false, features = ["sink"] }
 
 [features]
 async_closure = []

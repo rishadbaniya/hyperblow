@@ -467,6 +467,14 @@ impl Handshake {
             peer_id,
         }
     }
+
+    pub fn info_hash(&self) -> &[u8] {
+        &self.info_hash
+    }
+
+    pub fn peer_id(&self) -> &[u8] {
+        &self.peer_id
+    }
 }
 
 /// Unchoke message

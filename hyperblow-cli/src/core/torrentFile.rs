@@ -295,7 +295,11 @@ impl TorrentFile {
         while let Some(peer) = peers_rcv.recv().await {
             let mut peers = self.state.peers.lock().await;
             if !peers.iter().any(|stored| stored.socket_adr == peer.socket_adr) {
+                let peer_runner = peer.clone();
                 peers.push(peer);
+                tokio::spawn(async move {
+                    peer_runner.run().await;
+                });
             }
         }
         // TODO: Run in a loop, but never return anything
