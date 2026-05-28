@@ -33,6 +33,7 @@ struct AppLayout {
     torrent_rows: Rect,
     tabs_section: Rect,
     tab_bar: Rect,
+    tab_content_rows: Rect,
 }
 
 /// Draws the ui by setting up the raw mode and calling the other draw method
@@ -127,6 +128,7 @@ fn app_layout(area: Rect) -> AppLayout {
         torrent_rows: torrent_chunks[1],
         tabs_section: chunks[1],
         tab_bar: tabs_chunks[0],
+        tab_content_rows: tabs_chunks[1],
     }
 }
 
@@ -159,11 +161,16 @@ fn handle_mouse_event(mouse_event: event::MouseEvent, terminal_area: Rect, state
             if select_tab_at(layout.tab_bar, position, state) {
                 return;
             }
+            if select_content_row_at(layout.tab_content_rows, position, state) {
+                return;
+            }
             select_torrent_at(layout.torrent_rows, position, state);
         }
         event::MouseEventKind::Drag(event::MouseButton::Left) => {
             state.mouse.set_event(MouseEv::Clicked);
-            select_torrent_at(layout.torrent_rows, position, state);
+            if !select_content_row_at(layout.tab_content_rows, position, state) {
+                select_torrent_at(layout.torrent_rows, position, state);
+            }
         }
         event::MouseEventKind::Up(_) => {
             state.mouse.set_event(MouseEv::NotClicked);
@@ -173,6 +180,8 @@ fn handle_mouse_event(mouse_event: event::MouseEvent, terminal_area: Rect, state
                 state.decrement_torrent_index();
             } else if layout.tab_bar.contains(position) {
                 state.decrement_tab_index();
+            } else if content_rows_area_for_current_tab(layout.tab_content_rows, state).contains(position) {
+                state.decrement_content_row_index();
             }
         }
         event::MouseEventKind::ScrollDown => {
@@ -180,6 +189,8 @@ fn handle_mouse_event(mouse_event: event::MouseEvent, terminal_area: Rect, state
                 state.increment_torrent_index();
             } else if layout.tab_bar.contains(position) {
                 state.increment_tab_index();
+            } else if content_rows_area_for_current_tab(layout.tab_content_rows, state).contains(position) {
+                state.increment_content_row_index();
             }
         }
         event::MouseEventKind::ScrollLeft => {
@@ -219,6 +230,38 @@ fn select_torrent_at(torrent_rows: Rect, position: Position, state: &TUIState) -
     state.set_max_torrent_index(torrent_count.saturating_sub(1));
     state.set_torrent_index(torrent_index);
     true
+}
+
+fn select_content_row_at(tab_content_rows: Rect, position: Position, state: &TUIState) -> bool {
+    let rows_area = content_rows_area_for_current_tab(tab_content_rows, state);
+    let Some(row_index) = content_row_index_at(rows_area, position) else {
+        return false;
+    };
+    state.set_content_row_index(row_index);
+    true
+}
+
+fn content_rows_area_for_current_tab(tab_content_rows: Rect, state: &TUIState) -> Rect {
+    match *state.tab.borrow() {
+        Tab::Details | Tab::Pieces => inset_rect(tab_content_rows, 1, 1),
+        Tab::Bandwidth | Tab::Files | Tab::Trackers | Tab::Peers => {
+            let inner = inset_rect(tab_content_rows, 2, 2);
+            Rect {
+                x: inner.x,
+                y: inner.y.saturating_add(2),
+                width: inner.width,
+                height: inner.height.saturating_sub(2),
+            }
+        }
+    }
+}
+
+fn content_row_index_at(content_rows: Rect, position: Position) -> Option<usize> {
+    if content_rows.contains(position) {
+        Some(position.y.saturating_sub(content_rows.y) as usize)
+    } else {
+        None
+    }
 }
 
 fn tab_index_at(tab_bar: Rect, position: Position) -> Option<usize> {
@@ -305,8 +348,8 @@ fn drawTabsSection(frame: &mut Frame, area: Rect, state: Rc<TUIState>) {
 #[cfg(test)]
 mod tests {
     use super::{
-        app_layout, handle_mouse_event, inset_rect, render_app_frame, tab_index_at, torrent_index_at, TAB_DIVIDER_WIDTH, TAB_PADDING_WIDTH,
-        TAB_TITLES,
+        app_layout, content_row_index_at, content_rows_area_for_current_tab, handle_mouse_event, inset_rect, render_app_frame,
+        tab_index_at, torrent_index_at, TAB_DIVIDER_WIDTH, TAB_PADDING_WIDTH, TAB_TITLES,
     };
     use crate::{
         engine::{Engine, TorrentSource},
@@ -357,6 +400,15 @@ mod tests {
         assert_eq!(torrent_index_at(torrent_rows, Position { x: 3, y: 4 }), Some(0));
         assert_eq!(torrent_index_at(torrent_rows, Position { x: 3, y: 7 }), Some(3));
         assert_eq!(torrent_index_at(torrent_rows, Position { x: 3, y: 12 }), None);
+    }
+
+    #[test]
+    fn maps_content_rows_to_visible_indexes() {
+        let content_rows = Rect::new(2, 20, 80, 6);
+
+        assert_eq!(content_row_index_at(content_rows, Position { x: 3, y: 20 }), Some(0));
+        assert_eq!(content_row_index_at(content_rows, Position { x: 3, y: 23 }), Some(3));
+        assert_eq!(content_row_index_at(content_rows, Position { x: 3, y: 26 }), None);
     }
 
     #[test]
@@ -442,6 +494,49 @@ mod tests {
             &state,
         );
         assert_eq!(state.tab_index(), 0);
+    }
+
+    #[test]
+    fn mouse_click_selects_active_tab_content_row() {
+        let terminal_area = Rect::new(0, 0, 100, 32);
+        let layout = app_layout(terminal_area);
+        let state = TUIState::new(Engine::new());
+        state.set_max_content_row_index(4);
+
+        let rows_area = content_rows_area_for_current_tab(layout.tab_content_rows, &state);
+        handle_mouse_event(
+            left_click(Position {
+                x: rows_area.x + 1,
+                y: rows_area.y + 2,
+            }),
+            terminal_area,
+            &state,
+        );
+
+        assert_eq!(state.content_row_index(), 2);
+    }
+
+    #[test]
+    fn mouse_wheel_over_tab_content_changes_content_row() {
+        let terminal_area = Rect::new(0, 0, 100, 32);
+        let layout = app_layout(terminal_area);
+        let state = TUIState::new(Engine::new());
+        state.set_max_content_row_index(3);
+        state.set_content_row_index(1);
+
+        let rows_area = content_rows_area_for_current_tab(layout.tab_content_rows, &state);
+        handle_mouse_event(
+            mouse_event(
+                MouseEventKind::ScrollDown,
+                Position {
+                    x: rows_area.x + 1,
+                    y: rows_area.y,
+                },
+            ),
+            terminal_area,
+            &state,
+        );
+        assert_eq!(state.content_row_index(), 2);
     }
 
     fn tab_position(tab_bar: Rect, tab_index: usize) -> Position {

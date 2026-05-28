@@ -43,6 +43,10 @@ pub struct TUIState {
     torrent_index: Cell<usize>,
 
     max_torrent_index: Cell<usize>,
+
+    content_row_index: Cell<usize>,
+
+    max_content_row_index: Cell<usize>,
 }
 
 impl TUIState {
@@ -64,6 +68,8 @@ impl TUIState {
         let torrent_index = Cell::new(0);
 
         let max_torrent_index = Cell::new(0);
+        let content_row_index = Cell::new(0);
+        let max_content_row_index = Cell::new(0);
 
         TUIState {
             max_tab_index,
@@ -73,6 +79,8 @@ impl TUIState {
             tab,
             torrent_index,
             max_torrent_index,
+            content_row_index,
+            max_content_row_index,
         }
     }
 
@@ -84,6 +92,8 @@ impl TUIState {
     // Sets the current tab index
     pub fn set_tab_index(&self, index: usize) {
         self.selected_tab_index.set(index);
+        self.content_row_index.set(0);
+        self.max_content_row_index.set(0);
         self.loadTab();
     }
 
@@ -112,6 +122,21 @@ impl TUIState {
         self.max_torrent_index.set(index);
         if self.torrent_index.get() > index {
             self.torrent_index.set(index);
+        }
+    }
+
+    pub fn content_row_index(&self) -> usize {
+        self.content_row_index.get()
+    }
+
+    pub fn set_content_row_index(&self, index: usize) {
+        self.content_row_index.set(index.min(self.max_content_row_index.get()));
+    }
+
+    pub fn set_max_content_row_index(&self, index: usize) {
+        self.max_content_row_index.set(index);
+        if self.content_row_index.get() > index {
+            self.content_row_index.set(index);
         }
     }
 
@@ -147,6 +172,20 @@ impl TUIState {
         let current_torrent_index = self.torrent_index();
         if current_torrent_index > 0 {
             self.set_torrent_index(current_torrent_index - 1);
+        }
+    }
+
+    pub fn increment_content_row_index(&self) {
+        let current_content_row_index = self.content_row_index();
+        if current_content_row_index < self.max_content_row_index.get() {
+            self.set_content_row_index(current_content_row_index + 1);
+        }
+    }
+
+    pub fn decrement_content_row_index(&self) {
+        let current_content_row_index = self.content_row_index();
+        if current_content_row_index > 0 {
+            self.set_content_row_index(current_content_row_index - 1);
         }
     }
 
